@@ -1820,7 +1820,7 @@
 
 .ot-checklist-row {
   display: grid;
-  grid-template-columns: 26px 20px minmax(0, 1fr) 30px;
+  grid-template-columns: 26px 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-height: 32px;
@@ -1878,6 +1878,22 @@
 .ot-checklist-row:focus-within .ot-icon-button {
   opacity: 1;
   pointer-events: auto;
+}
+
+.ot-checklist-item-actions {
+  display: inline-flex;
+  align-items: center;
+  min-width: 60px;
+}
+
+.ot-checklist-row .ot-checklist-note {
+  opacity: 0.55;
+  pointer-events: auto;
+}
+
+.ot-checklist-row .ot-checklist-note.is-linked {
+  color: var(--interactive-accent);
+  opacity: 1;
 }
 
 .ot-checklist-title {

@@ -854,9 +854,19 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     return this.data.boards.find((board) => {
       return board.folderPath
         && file.path.startsWith(`${board.folderPath}/`)
+        && !this.isChecklistItemPath(file.path, board)
         && file.path !== this.boardIndexPath(board)
         && file.path !== this.legacyBoardIndexPath(board);
     }) || null;
+  }
+
+  checklistItemsFolder(board) {
+    return board && board.folderPath ? `${board.folderPath}/checklist-items` : "";
+  }
+
+  isChecklistItemPath(path, board) {
+    const folder = this.checklistItemsFolder(board);
+    return !!(folder && path && String(path).startsWith(`${folder}/`));
   }
 
   isBoardFolder(file) {
@@ -1156,6 +1166,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     const files = [];
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (!file.path.startsWith(`${board.folderPath}/`)) continue;
+      if (this.isChecklistItemPath(file.path, board)) continue;
       if (file.path === this.boardIndexPath(board) || file.path === this.legacyBoardIndexPath(board)) continue;
       if (await this.isGeneratedBoardIndexFile(file)) continue;
       files.push(file);
@@ -1306,6 +1317,15 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       Object.values(this.data.cards).forEach((card) => {
         if (card.boardId === board.id && card.filePath && card.filePath.startsWith(`${board.folderPath}/`)) {
           card.filePath = `${nextFolder}/${card.filePath.slice(board.folderPath.length + 1)}`;
+        }
+        if (card.boardId === board.id) {
+          (card.checklists || []).forEach((checklist) => {
+            (checklist.items || []).forEach((item) => {
+              if (item.filePath && item.filePath.startsWith(`${board.folderPath}/`)) {
+                item.filePath = `${nextFolder}/${item.filePath.slice(board.folderPath.length + 1)}`;
+              }
+            });
+          });
         }
       });
       board.folderPath = nextFolder;
@@ -1644,6 +1664,72 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (!file) return;
 
     await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  resolveChecklistItemFile(card, item) {
+    const filePath = textLine(item && item.filePath);
+    if (!filePath) return null;
+    let file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file && this.app.metadataCache && this.app.metadataCache.getFirstLinkpathDest) {
+      try {
+        file = this.app.metadataCache.getFirstLinkpathDest(filePath.replace(/\.md$/i, ""), (card && card.filePath) || "");
+      } catch (error) {
+        file = null;
+      }
+    }
+    return file && file.extension === "md" ? file : null;
+  }
+
+  async ensureChecklistItemFile(card, item) {
+    const existing = this.resolveChecklistItemFile(card, item);
+    if (existing) return existing;
+
+    const board = this.findBoardForCard(card);
+    if (!board) throw new Error("no board available for checklist item note");
+    await this.ensureBoardFolder(board);
+    const folder = this.checklistItemsFolder(board);
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      await this.app.vault.createFolder(folder).catch(() => {});
+    }
+
+    const base = cardFileBaseName((item && item.text) || "Checklist item");
+    let path = `${folder}/${base}.md`;
+    let index = 2;
+    while (this.app.vault.getAbstractFileByPath(path)) {
+      path = `${folder}/${base} ${index}.md`;
+      index += 1;
+    }
+
+    const markdown = [
+      "---",
+      "task-deck-checklist-item: true",
+      `task-deck-card-id: ${card.id}`,
+      "---",
+      "",
+      `# ${textLine(item && item.text) || "Checklist item"}`,
+      "",
+      `Card: ${this.cardWikiLink(card)}`,
+      "",
+    ].join("\n");
+    return this.app.vault.create(path, markdown);
+  }
+
+  async openChecklistItemFile(filePath) {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file || file.extension !== "md") return;
+    await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  async deleteChecklistItemFile(card, item) {
+    const file = this.resolveChecklistItemFile(card, item);
+    if (!file) return;
+    await this.app.vault.trash(file, true);
+  }
+
+  async deleteChecklistItemFiles(card, items) {
+    for (const item of Array.isArray(items) ? items : []) {
+      if (item && item.filePath) await this.deleteChecklistItemFile(card, item);
+    }
   }
 
   async ensureBoardFolder(board) {

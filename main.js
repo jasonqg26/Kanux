@@ -465,16 +465,31 @@ function parseChecklist(text) {
 
       const match = core.match(/^(?:-\s*)?\[([ xX])\]\s*(.*)$/);
       if (!match) {
-        return { done: false, text: core.replace(/^- /, "").trim(), assignee };
+        const value = core.replace(/^- /, "").trim();
+        return Object.assign({ done: false, assignee }, parseChecklistItemValue(value));
       }
 
-      return {
+      return Object.assign({
         done: match[1].toLowerCase() === "x",
-        text: match[2].trim(),
         assignee,
-      };
+      }, parseChecklistItemValue(match[2].trim()));
     })
     .filter((item) => item.text);
+}
+
+// A checklist item can be a normal string or a wikilink to a Markdown note.
+// Only a link that occupies the whole item is treated as file-backed; inline
+// links inside ordinary item text remain ordinary text.
+function parseChecklistItemValue(value) {
+  const text = String(value || "").trim();
+  const link = text.match(/^\[\[([^|\]]+)(?:\|([^\]]+))?\]\]$/);
+  if (!link) return { text, filePath: "" };
+
+  const target = textLine(link[1]).split("#")[0].trim();
+  if (!target) return { text, filePath: "" };
+  const filePath = /\.md$/i.test(target) ? target : `${target}.md`;
+  const fallback = target.split("/").pop().replace(/\.md$/i, "") || "Checklist item";
+  return { text: textLine(link[2]) || fallback, filePath };
 }
 
 /**
@@ -499,6 +514,7 @@ function normalizeChecklists(checklists, legacyItems) {
         .map((item) => ({
           done: !!(item && item.done),
           text: textLine(item && item.text),
+          filePath: textLine(item && item.filePath),
           assignee: item && item.assignee && item.assignee.email
             ? {
               email: textLine(item.assignee.email),
@@ -548,14 +564,23 @@ function parseChecklists(text) {
 
 function checklistToText(items) {
   return (items || [])
-    .map((item) => `[${item.done ? "x" : " "}] ${item.text}`)
+    .map((item) => `[${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`)
     .join("\n");
+}
+
+function checklistItemMarkdown(item) {
+  const title = textLine(item && item.text);
+  const filePath = textLine(item && item.filePath);
+  if (!filePath) return title;
+  const target = filePath.replace(/\.md$/i, "").replace(/[|\[\]]/g, " ").trim();
+  const alias = title.replace(/[|\[\]]/g, " ").trim() || target.split("/").pop() || "Checklist item";
+  return `[[${target}|${alias}]]`;
 }
 
 function checklistToMarkdown(items) {
   return (items || [])
     .map((item) => {
-      const base = `- [${item.done ? "x" : " "}] ${textLine(item.text)}`;
+      const base = `- [${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`;
       const a = item.assignee;
       if (a && a.email) {
         // Per-item member assignment, hidden in an HTML comment so it round-trips
@@ -3306,12 +3331,23 @@ class CardModal extends Modal {
       header.append(heading);
 
       if (this.localChecklists.length > 1) {
-        const removeGroup = iconButton("trash", "Delete checklist", () => {
-          if ((group.items || []).length && !window.confirm(`Delete "${group.title || "Checklist"}" and its items?`)) return;
-          this.localChecklists = this.localChecklists.filter((item) => item.id !== group.id);
-          if (this.addingChecklistId === group.id) this.addingChecklistId = null;
-          this.render();
-          this.saveNow().catch(console.error);
+        const removeGroup = iconButton("trash", "Delete checklist", async () => {
+          const items = group.items || [];
+          const linkedNotes = items.filter((item) => item && item.filePath).length;
+          const warning = linkedNotes
+            ? `Delete "${group.title || "Checklist"}" and its items? This will also move ${linkedNotes} linked Markdown ${linkedNotes === 1 ? "note" : "notes"} to the trash.`
+            : `Delete "${group.title || "Checklist"}" and its items?`;
+          if (items.length && !window.confirm(warning)) return;
+          try {
+            await this.plugin.deleteChecklistItemFiles(this.card, items);
+            this.localChecklists = this.localChecklists.filter((item) => item.id !== group.id);
+            if (this.addingChecklistId === group.id) this.addingChecklistId = null;
+            this.render();
+            await this.saveNow();
+          } catch (error) {
+            console.error(error);
+            new Notice("Could not delete the linked checklist notes.");
+          }
         });
         removeGroup.classList.add("ot-checklist-delete");
         header.append(removeGroup);
@@ -3343,10 +3379,37 @@ class CardModal extends Modal {
           const input = createElement("input", "ot-checklist-title");
           input.type = "text";
           input.value = item.text || "";
-          const remove = iconButton("x", "Remove item", () => {
-            group.items.splice(index, 1);
-            renderItems();
-            this.saveNow().catch(console.error);
+          const actions = createElement("div", "ot-checklist-item-actions");
+          const noteButton = iconButton(item.filePath ? "file-text" : "file-plus", item.filePath ? "Open Markdown note" : "Create Markdown note", async () => {
+            noteButton.disabled = true;
+            try {
+              const file = await this.plugin.ensureChecklistItemFile(this.card, item);
+              item.filePath = file.path;
+              await this.saveNow();
+              await this.plugin.openChecklistItemFile(file.path);
+              this.close();
+            } catch (error) {
+              console.error(error);
+              new Notice("Could not open the checklist item note.");
+              noteButton.disabled = false;
+            }
+          });
+          noteButton.classList.add("ot-checklist-note");
+          noteButton.classList.toggle("is-linked", !!item.filePath);
+          const remove = iconButton("x", "Remove item", async () => {
+            if (item.filePath) {
+              const confirmed = window.confirm(`Remove "${item.text || "Checklist item"}"? Its linked Markdown note will also be moved to the trash.`);
+              if (!confirmed) return;
+            }
+            try {
+              await this.plugin.deleteChecklistItemFile(this.card, item);
+              group.items.splice(index, 1);
+              renderItems();
+              await this.saveNow();
+            } catch (error) {
+              console.error(error);
+              new Notice("Could not delete the linked checklist note.");
+            }
           });
           remove.addEventListener("click", (event) => event.stopPropagation());
 
@@ -3394,7 +3457,8 @@ class CardModal extends Modal {
             this.showChecklistMemberMenu(event, item, paintAssignee);
           });
 
-          row.append(assigneeBtn, checkbox, input, remove);
+          actions.append(noteButton, remove);
+          row.append(assigneeBtn, checkbox, input, actions);
           list.append(row);
         });
         updateProgress();
@@ -3430,7 +3494,7 @@ class CardModal extends Modal {
             addInput.focus();
             return;
           }
-          group.items.push({ done: false, text, assignee: null });
+          group.items.push({ done: false, text, filePath: "", assignee: null });
           this.addingChecklistId = null;
           renderItems();
           renderAddArea();
@@ -3480,6 +3544,7 @@ class CardModal extends Modal {
           .map((item) => ({
             done: !!item.done,
             text: textLine(item.text),
+            filePath: textLine(item.filePath),
             assignee: item.assignee && item.assignee.email
               ? { email: item.assignee.email, name: item.assignee.name || "", color: item.assignee.color || "" }
               : null,
@@ -5989,9 +6054,19 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     return this.data.boards.find((board) => {
       return board.folderPath
         && file.path.startsWith(`${board.folderPath}/`)
+        && !this.isChecklistItemPath(file.path, board)
         && file.path !== this.boardIndexPath(board)
         && file.path !== this.legacyBoardIndexPath(board);
     }) || null;
+  }
+
+  checklistItemsFolder(board) {
+    return board && board.folderPath ? `${board.folderPath}/checklist-items` : "";
+  }
+
+  isChecklistItemPath(path, board) {
+    const folder = this.checklistItemsFolder(board);
+    return !!(folder && path && String(path).startsWith(`${folder}/`));
   }
 
   isBoardFolder(file) {
@@ -6291,6 +6366,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     const files = [];
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (!file.path.startsWith(`${board.folderPath}/`)) continue;
+      if (this.isChecklistItemPath(file.path, board)) continue;
       if (file.path === this.boardIndexPath(board) || file.path === this.legacyBoardIndexPath(board)) continue;
       if (await this.isGeneratedBoardIndexFile(file)) continue;
       files.push(file);
@@ -6441,6 +6517,15 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       Object.values(this.data.cards).forEach((card) => {
         if (card.boardId === board.id && card.filePath && card.filePath.startsWith(`${board.folderPath}/`)) {
           card.filePath = `${nextFolder}/${card.filePath.slice(board.folderPath.length + 1)}`;
+        }
+        if (card.boardId === board.id) {
+          (card.checklists || []).forEach((checklist) => {
+            (checklist.items || []).forEach((item) => {
+              if (item.filePath && item.filePath.startsWith(`${board.folderPath}/`)) {
+                item.filePath = `${nextFolder}/${item.filePath.slice(board.folderPath.length + 1)}`;
+              }
+            });
+          });
         }
       });
       board.folderPath = nextFolder;
@@ -6779,6 +6864,72 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (!file) return;
 
     await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  resolveChecklistItemFile(card, item) {
+    const filePath = textLine(item && item.filePath);
+    if (!filePath) return null;
+    let file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file && this.app.metadataCache && this.app.metadataCache.getFirstLinkpathDest) {
+      try {
+        file = this.app.metadataCache.getFirstLinkpathDest(filePath.replace(/\.md$/i, ""), (card && card.filePath) || "");
+      } catch (error) {
+        file = null;
+      }
+    }
+    return file && file.extension === "md" ? file : null;
+  }
+
+  async ensureChecklistItemFile(card, item) {
+    const existing = this.resolveChecklistItemFile(card, item);
+    if (existing) return existing;
+
+    const board = this.findBoardForCard(card);
+    if (!board) throw new Error("no board available for checklist item note");
+    await this.ensureBoardFolder(board);
+    const folder = this.checklistItemsFolder(board);
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      await this.app.vault.createFolder(folder).catch(() => {});
+    }
+
+    const base = cardFileBaseName((item && item.text) || "Checklist item");
+    let path = `${folder}/${base}.md`;
+    let index = 2;
+    while (this.app.vault.getAbstractFileByPath(path)) {
+      path = `${folder}/${base} ${index}.md`;
+      index += 1;
+    }
+
+    const markdown = [
+      "---",
+      "task-deck-checklist-item: true",
+      `task-deck-card-id: ${card.id}`,
+      "---",
+      "",
+      `# ${textLine(item && item.text) || "Checklist item"}`,
+      "",
+      `Card: ${this.cardWikiLink(card)}`,
+      "",
+    ].join("\n");
+    return this.app.vault.create(path, markdown);
+  }
+
+  async openChecklistItemFile(filePath) {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file || file.extension !== "md") return;
+    await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  async deleteChecklistItemFile(card, item) {
+    const file = this.resolveChecklistItemFile(card, item);
+    if (!file) return;
+    await this.app.vault.trash(file, true);
+  }
+
+  async deleteChecklistItemFiles(card, items) {
+    for (const item of Array.isArray(items) ? items : []) {
+      if (item && item.filePath) await this.deleteChecklistItemFile(card, item);
+    }
   }
 
   async ensureBoardFolder(board) {

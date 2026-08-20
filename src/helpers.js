@@ -462,16 +462,31 @@ function parseChecklist(text) {
 
       const match = core.match(/^(?:-\s*)?\[([ xX])\]\s*(.*)$/);
       if (!match) {
-        return { done: false, text: core.replace(/^- /, "").trim(), assignee };
+        const value = core.replace(/^- /, "").trim();
+        return Object.assign({ done: false, assignee }, parseChecklistItemValue(value));
       }
 
-      return {
+      return Object.assign({
         done: match[1].toLowerCase() === "x",
-        text: match[2].trim(),
         assignee,
-      };
+      }, parseChecklistItemValue(match[2].trim()));
     })
     .filter((item) => item.text);
+}
+
+// A checklist item can be a normal string or a wikilink to a Markdown note.
+// Only a link that occupies the whole item is treated as file-backed; inline
+// links inside ordinary item text remain ordinary text.
+function parseChecklistItemValue(value) {
+  const text = String(value || "").trim();
+  const link = text.match(/^\[\[([^|\]]+)(?:\|([^\]]+))?\]\]$/);
+  if (!link) return { text, filePath: "" };
+
+  const target = textLine(link[1]).split("#")[0].trim();
+  if (!target) return { text, filePath: "" };
+  const filePath = /\.md$/i.test(target) ? target : `${target}.md`;
+  const fallback = target.split("/").pop().replace(/\.md$/i, "") || "Checklist item";
+  return { text: textLine(link[2]) || fallback, filePath };
 }
 
 /**
@@ -496,6 +511,7 @@ function normalizeChecklists(checklists, legacyItems) {
         .map((item) => ({
           done: !!(item && item.done),
           text: textLine(item && item.text),
+          filePath: textLine(item && item.filePath),
           assignee: item && item.assignee && item.assignee.email
             ? {
               email: textLine(item.assignee.email),
@@ -545,14 +561,23 @@ function parseChecklists(text) {
 
 function checklistToText(items) {
   return (items || [])
-    .map((item) => `[${item.done ? "x" : " "}] ${item.text}`)
+    .map((item) => `[${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`)
     .join("\n");
+}
+
+function checklistItemMarkdown(item) {
+  const title = textLine(item && item.text);
+  const filePath = textLine(item && item.filePath);
+  if (!filePath) return title;
+  const target = filePath.replace(/\.md$/i, "").replace(/[|\[\]]/g, " ").trim();
+  const alias = title.replace(/[|\[\]]/g, " ").trim() || target.split("/").pop() || "Checklist item";
+  return `[[${target}|${alias}]]`;
 }
 
 function checklistToMarkdown(items) {
   return (items || [])
     .map((item) => {
-      const base = `- [${item.done ? "x" : " "}] ${textLine(item.text)}`;
+      const base = `- [${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`;
       const a = item.assignee;
       if (a && a.email) {
         // Per-item member assignment, hidden in an HTML comment so it round-trips

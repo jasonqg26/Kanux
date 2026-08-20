@@ -31,7 +31,12 @@ function testNamedChecklistRoundTrip() {
       title: "Development",
       items: [
         { done: true, text: "Implement parser", assignee: null },
-        { done: false, text: "Review", assignee: { email: "dev@example.com", name: "Dev", color: "#123456" } },
+        {
+          done: false,
+          text: "Review",
+          filePath: "Project/checklist-items/Review.md",
+          assignee: { email: "dev@example.com", name: "Dev", color: "#123456" },
+        },
       ],
     },
     { title: "Release", items: [{ done: false, text: "Publish", assignee: null }] },
@@ -45,6 +50,8 @@ function testNamedChecklistRoundTrip() {
     ["Publish"],
   ]);
   assert.strictEqual(parsed[0].items[1].assignee.email, "dev@example.com");
+  assert.strictEqual(parsed[0].items[1].filePath, "Project/checklist-items/Review.md");
+  assert.ok(markdown.includes("[[Project/checklist-items/Review|Review]]"));
 
   const empty = parseChecklists(checklistsToMarkdown([{ title: "Empty group", items: [] }]));
   assert.strictEqual(empty.length, 1);

@@ -2507,12 +2507,23 @@ class CardModal extends Modal {
       header.append(heading);
 
       if (this.localChecklists.length > 1) {
-        const removeGroup = iconButton("trash", "Delete checklist", () => {
-          if ((group.items || []).length && !window.confirm(`Delete "${group.title || "Checklist"}" and its items?`)) return;
-          this.localChecklists = this.localChecklists.filter((item) => item.id !== group.id);
-          if (this.addingChecklistId === group.id) this.addingChecklistId = null;
-          this.render();
-          this.saveNow().catch(console.error);
+        const removeGroup = iconButton("trash", "Delete checklist", async () => {
+          const items = group.items || [];
+          const linkedNotes = items.filter((item) => item && item.filePath).length;
+          const warning = linkedNotes
+            ? `Delete "${group.title || "Checklist"}" and its items? This will also move ${linkedNotes} linked Markdown ${linkedNotes === 1 ? "note" : "notes"} to the trash.`
+            : `Delete "${group.title || "Checklist"}" and its items?`;
+          if (items.length && !window.confirm(warning)) return;
+          try {
+            await this.plugin.deleteChecklistItemFiles(this.card, items);
+            this.localChecklists = this.localChecklists.filter((item) => item.id !== group.id);
+            if (this.addingChecklistId === group.id) this.addingChecklistId = null;
+            this.render();
+            await this.saveNow();
+          } catch (error) {
+            console.error(error);
+            new Notice("Could not delete the linked checklist notes.");
+          }
         });
         removeGroup.classList.add("ot-checklist-delete");
         header.append(removeGroup);
@@ -2544,10 +2555,37 @@ class CardModal extends Modal {
           const input = createElement("input", "ot-checklist-title");
           input.type = "text";
           input.value = item.text || "";
-          const remove = iconButton("x", "Remove item", () => {
-            group.items.splice(index, 1);
-            renderItems();
-            this.saveNow().catch(console.error);
+          const actions = createElement("div", "ot-checklist-item-actions");
+          const noteButton = iconButton(item.filePath ? "file-text" : "file-plus", item.filePath ? "Open Markdown note" : "Create Markdown note", async () => {
+            noteButton.disabled = true;
+            try {
+              const file = await this.plugin.ensureChecklistItemFile(this.card, item);
+              item.filePath = file.path;
+              await this.saveNow();
+              await this.plugin.openChecklistItemFile(file.path);
+              this.close();
+            } catch (error) {
+              console.error(error);
+              new Notice("Could not open the checklist item note.");
+              noteButton.disabled = false;
+            }
+          });
+          noteButton.classList.add("ot-checklist-note");
+          noteButton.classList.toggle("is-linked", !!item.filePath);
+          const remove = iconButton("x", "Remove item", async () => {
+            if (item.filePath) {
+              const confirmed = window.confirm(`Remove "${item.text || "Checklist item"}"? Its linked Markdown note will also be moved to the trash.`);
+              if (!confirmed) return;
+            }
+            try {
+              await this.plugin.deleteChecklistItemFile(this.card, item);
+              group.items.splice(index, 1);
+              renderItems();
+              await this.saveNow();
+            } catch (error) {
+              console.error(error);
+              new Notice("Could not delete the linked checklist note.");
+            }
           });
           remove.addEventListener("click", (event) => event.stopPropagation());
 
@@ -2595,7 +2633,8 @@ class CardModal extends Modal {
             this.showChecklistMemberMenu(event, item, paintAssignee);
           });
 
-          row.append(assigneeBtn, checkbox, input, remove);
+          actions.append(noteButton, remove);
+          row.append(assigneeBtn, checkbox, input, actions);
           list.append(row);
         });
         updateProgress();
@@ -2631,7 +2670,7 @@ class CardModal extends Modal {
             addInput.focus();
             return;
           }
-          group.items.push({ done: false, text, assignee: null });
+          group.items.push({ done: false, text, filePath: "", assignee: null });
           this.addingChecklistId = null;
           renderItems();
           renderAddArea();
@@ -2681,6 +2720,7 @@ class CardModal extends Modal {
           .map((item) => ({
             done: !!item.done,
             text: textLine(item.text),
+            filePath: textLine(item.filePath),
             assignee: item.assignee && item.assignee.email
               ? { email: item.assignee.email, name: item.assignee.name || "", color: item.assignee.color || "" }
               : null,
