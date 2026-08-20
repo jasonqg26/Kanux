@@ -1710,6 +1710,20 @@
   font-weight: 400;
 }
 
+.ot-checklists-field {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ot-checklist-group {
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
 .ot-checklist {
   display: flex;
   flex-direction: column;
@@ -1727,9 +1741,48 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex: 1;
   color: var(--text-normal);
   font-size: 16px;
   font-weight: 800;
+}
+
+.ot-field .ot-checklist-name {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 2px 6px;
+  border: 0 !important;
+  border-radius: 5px;
+  background: transparent !important;
+  color: var(--text-normal);
+  font-size: 16px;
+  font-weight: 800;
+  box-shadow: none !important;
+}
+
+.ot-field .ot-checklist-name:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.ot-field .ot-checklist-name:focus {
+  background: var(--background-modifier-form-field) !important;
+  box-shadow: inset 0 0 0 1px var(--interactive-accent) !important;
+}
+
+.ot-checklist-delete {
+  flex: 0 0 auto;
+  background: transparent !important;
+  color: var(--text-faint);
+  box-shadow: none !important;
+  opacity: 0.55;
+}
+
+.ot-checklist-group:hover .ot-checklist-delete,
+.ot-checklist-delete:focus-visible {
+  opacity: 1;
 }
 
 .ot-checklist-heading-icon {
@@ -1740,9 +1793,9 @@
 
 .ot-checklist-progress {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .ot-checklist-percent {
@@ -1751,7 +1804,7 @@
 }
 
 .ot-progress-track {
-  height: 8px;
+  height: 6px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--background-modifier-border);
@@ -1845,12 +1898,34 @@
   padding-left: 30px;
 }
 
+.ot-checklist-add .ot-text-button {
+  background: transparent;
+  box-shadow: none;
+}
+
+.ot-checklist-group .ot-empty-text {
+  padding: 4px 0 4px 62px;
+}
+
 .ot-checklist-add-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 30px;
   align-items: center;
   gap: 8px;
   width: 100%;
+}
+
+.ot-add-checklist {
+  align-self: stretch;
+  min-height: 38px;
+  border: 1px dashed var(--background-modifier-border);
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.ot-add-checklist:hover {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
 }
 
 .is-hidden {

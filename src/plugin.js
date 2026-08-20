@@ -10,12 +10,13 @@ const {
   TASK_DECK_ICON,
   TASK_DECK_ICON_SVG,
   VIEW_TYPE,
-  checklistToMarkdown,
+  checklistsToMarkdown,
   cleanDate,
   cleanColor,
   cleanLabelName,
   clone,
   labelKey,
+  normalizeChecklists,
   labelsToFrontmatter,
   assigneesToFrontmatter,
   imageRefsFromMarkdown,
@@ -216,11 +217,15 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     this.data.boards = this.data.boards.map((board) => this.normalizeBoard(board));
     this.loadNeedsSave = this.ensureListColors();
     Object.values(this.data.cards).forEach((card) => {
+      const needsChecklistMigration = !Array.isArray(card.checklists) || Object.prototype.hasOwnProperty.call(card, "checklist");
       card.boardId = card.boardId || this.boardIdForList(card.listId) || this.data.activeBoardId || "";
       card.labels = this.normalizeCardLabels(card.labels || []);
       card.completed = !!card.completed;
       card.startDate = cleanDate(card.startDate);
       card.dueDate = cleanDate(card.dueDate);
+      card.checklists = normalizeChecklists(card.checklists, card.checklist);
+      delete card.checklist;
+      if (needsChecklistMigration) this.loadNeedsSave = true;
     });
     this.data.boards.forEach((board) => {
       board.folderPath = board.folderPath || this.inferBoardFolder(board) || cardFileBaseName(board.name);
@@ -1184,7 +1189,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         labels: parsed.labels.length ? this.normalizeCardLabels(parsed.labels) : this.normalizeCardLabels(card.labels || []),
         assignees: this.normalizeAssignees(parsed.assignees !== null ? parsed.assignees : card.assignees || []),
         details: parsed.details,
-        checklist: parsed.checklist,
+        checklists: normalizeChecklists(parsed.checklists, []),
         completed: parsed.completed !== null ? parsed.completed : !!card.completed,
         startDate: parsed.startDate !== null ? parsed.startDate : cleanDate(card.startDate),
         dueDate: parsed.dueDate !== null ? parsed.dueDate : cleanDate(card.dueDate),
@@ -1420,7 +1425,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       labels: [],
       assignees: [],
       details: "",
-      checklist: [],
+      checklists: normalizeChecklists(undefined, []),
       completed: false,
       startDate: "",
       dueDate: "",
@@ -1464,6 +1469,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (Object.prototype.hasOwnProperty.call(patch, "completed")) patch.completed = !!patch.completed;
     if (Object.prototype.hasOwnProperty.call(patch, "startDate")) patch.startDate = cleanDate(patch.startDate);
     if (Object.prototype.hasOwnProperty.call(patch, "dueDate")) patch.dueDate = cleanDate(patch.dueDate);
+    if (Object.prototype.hasOwnProperty.call(patch, "checklists")) {
+      patch.checklists = normalizeChecklists(patch.checklists, []);
+    }
     if (patch.title && textLine(patch.title) !== textLine(card.title)) {
       await this.renameCardFile(card, patch.title);
     }
@@ -1623,7 +1631,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (parsed.dueDate !== null) card.dueDate = parsed.dueDate;
     if (parsed.position !== null) card.position = parsed.position;
     card.details = parsed.details;
-    card.checklist = parsed.checklist;
+    card.checklists = normalizeChecklists(parsed.checklists, []);
     this.diskSignatures.set(card.id, markdown);
   }
 
@@ -2188,7 +2196,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       card.details || "",
       "",
       "## Checklist",
-      checklistToMarkdown(card.checklist),
+      checklistsToMarkdown(card.checklists),
       "",
     ].join("\n");
 

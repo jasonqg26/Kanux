@@ -7,6 +7,7 @@ const {
   TASK_DECK_ICON,
   VIEW_TYPE,
   addButtonIcon,
+  checklistItems,
   checklistStats,
   createElement,
   dateRangeLabel,
@@ -444,8 +445,9 @@ class BoardView extends ItemView {
     if (card.completed) complete.append(createElement("span", "ot-card-complete-mark", "✓"));
     nameInner.append(complete, createElement("span", "ot-td-title", card.title));
     const hints = createElement("span", "ot-td-hints");
-    if ((card.checklist || []).length) {
-      const stats = checklistStats(card.checklist);
+    const checklist = checklistItems(card.checklists);
+    if (checklist.length) {
+      const stats = checklistStats(checklist);
       hints.append(createElement("span", "ot-td-hint", `☑ ${stats.done}/${stats.total}`));
     }
     if (card.details) hints.append(createElement("span", "ot-td-hint", "☰"));
@@ -1401,8 +1403,9 @@ class BoardView extends ItemView {
       meta.append(badge);
     }
 
-    if ((card.checklist || []).length) {
-      const stats = checklistStats(card.checklist);
+    const checklist = checklistItems(card.checklists);
+    if (checklist.length) {
+      const stats = checklistStats(checklist);
       const badge = createElement("span", "ot-card-meta-item ot-card-checklist-badge");
       const icon = createElement("span", "ot-card-checklist-icon");
       try {

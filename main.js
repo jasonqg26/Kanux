@@ -477,6 +477,75 @@ function parseChecklist(text) {
     .filter((item) => item.text);
 }
 
+/**
+ * Normalizes the named checklist collection used by current cards.
+ *
+ * `legacyItems` keeps data.json files from versions that stored one flat
+ * `checklist` array compatible. An explicitly supplied empty `checklists`
+ * array remains empty; only a missing collection receives the legacy/default
+ * Checklist group.
+ */
+function normalizeChecklists(checklists, legacyItems) {
+  const source = Array.isArray(checklists)
+    ? checklists
+    : [{ title: "Checklist", items: Array.isArray(legacyItems) ? legacyItems : [] }];
+
+  return source
+    .filter((group) => group && typeof group === "object")
+    .map((group, index) => ({
+      id: group.id || uid("checklist"),
+      title: textLine(group.title) || `Checklist ${index + 1}`,
+      items: (Array.isArray(group.items) ? group.items : [])
+        .map((item) => ({
+          done: !!(item && item.done),
+          text: textLine(item && item.text),
+          assignee: item && item.assignee && item.assignee.email
+            ? {
+              email: textLine(item.assignee.email),
+              name: textLine(item.assignee.name),
+              color: textLine(item.assignee.color),
+            }
+            : null,
+        }))
+        .filter((item) => item.text),
+    }));
+}
+
+/**
+ * Parses the body of `## Checklist`.
+ *
+ * Current notes use H3 headings for named groups. Notes from older versions
+ * contain task items directly under H2 and become one group named Checklist.
+ */
+function parseChecklists(text) {
+  const groups = [];
+  let current = null;
+
+  const finish = () => {
+    if (!current) return;
+    groups.push({
+      id: uid("checklist"),
+      title: textLine(current.title) || `Checklist ${groups.length + 1}`,
+      items: parseChecklist(current.lines.join("\n")),
+    });
+    current = null;
+  };
+
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const heading = line.match(/^###\s+(.+?)\s*$/);
+    if (heading) {
+      finish();
+      current = { title: heading[1], lines: [] };
+      continue;
+    }
+    if (!current) current = { title: "Checklist", lines: [] };
+    current.lines.push(line);
+  }
+  finish();
+
+  return groups.length ? groups : normalizeChecklists(undefined, []);
+}
+
 function checklistToText(items) {
   return (items || [])
     .map((item) => `[${item.done ? "x" : " "}] ${item.text}`)
@@ -499,9 +568,26 @@ function checklistToMarkdown(items) {
     .join("\n");
 }
 
+function checklistsToMarkdown(checklists) {
+  return normalizeChecklists(checklists, [])
+    .map((group) => {
+      const items = checklistToMarkdown(group.items);
+      return `### ${textLine(group.title) || "Checklist"}${items ? `\n${items}` : ""}`;
+    })
+    .join("\n\n");
+}
+
+function checklistItems(checklists) {
+  return (Array.isArray(checklists) ? checklists : [])
+    .flatMap((group) => (group && Array.isArray(group.items) ? group.items : []));
+}
+
 function checklistStats(items) {
-  const total = (items || []).length;
-  const done = (items || []).filter((item) => item.done).length;
+  const source = Array.isArray(items) && items.some((item) => item && Array.isArray(item.items))
+    ? checklistItems(items)
+    : (items || []);
+  const total = source.length;
+  const done = source.filter((item) => item.done).length;
   return {
     done,
     total,
@@ -644,7 +730,7 @@ function parseCardMarkdown(markdown) {
     startDate: start !== null ? cleanDate(start) : null,
     dueDate: due !== null ? cleanDate(due) : null,
     details: getSectionAny(markdown, ["Details", "Detaylar"]),
-    checklist: parseChecklist(getSectionAny(markdown, ["Checklist", "Yapılacaklar", "Kontrol listesi"])),
+    checklists: parseChecklists(getSectionAny(markdown, ["Checklist", "Yapılacaklar", "Kontrol listesi"])),
   };
 }
 
@@ -692,8 +778,12 @@ module.exports = {
   getSection,
   getSectionAny,
   parseChecklist,
+  parseChecklists,
+  normalizeChecklists,
   checklistToText,
   checklistToMarkdown,
+  checklistsToMarkdown,
+  checklistItems,
   checklistStats,
   parseLabels,
   labelsToFrontmatter,
@@ -733,10 +823,12 @@ const {
   imageMarkupWithSize,
   isoFromDate,
   labelKey,
+  normalizeChecklists,
   stripImageEmbeds,
   textButton,
   textLine,
   initials,
+  uid,
 } = __require("src/helpers.js");
 
 // ---- Markdown <-> HTML for the WYSIWYG description blocks ----
@@ -1550,9 +1642,9 @@ class CardModal extends Modal {
     this.localDetails = "";
     this.detailsDraft = "";
     this.editingDetails = false;
-    this.localChecklist = [];
+    this.localChecklists = [];
     this.detailsTextarea = null;
-    this.addingChecklistItem = false;
+    this.addingChecklistId = null;
     this.saveTimer = null;
     this.savePromise = Promise.resolve();
     this.readOnly = false;
@@ -1591,7 +1683,7 @@ class CardModal extends Modal {
     this.localDetails = card.details || "";
     this.detailsDraft = "";
     this.editingDetails = false;
-    this.localChecklist = clone(card.checklist || []);
+    this.localChecklists = normalizeChecklists(clone(card.checklists || []), []);
     this.localAssignees = clone(card.assignees || []);
     await this.setupCardLock();
     this.render();
@@ -2960,8 +3052,14 @@ class CardModal extends Modal {
         .join("");
       const membersText = (this.localAssignees || []).map((a) => a.name || a.email).filter(Boolean).join(", ");
       const datesText = dateRangeLabel(card.startDate, card.dueDate) || "";
-      const checklistHtml = (this.localChecklist || [])
-        .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
+      const checklistHtml = (this.localChecklists || [])
+        .map((group) => {
+          const stats = checklistStats(group.items);
+          const items = (group.items || [])
+            .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
+            .join("");
+          return `<div class="checklist-group"><h3>${esc(group.title || "Checklist")}</h3><div class="checklist-progress">${stats.percent}% · ${stats.done}/${stats.total}</div>${items}</div>`;
+        })
         .join("");
       const metaBits = [
         board ? esc(board.name) : "",
@@ -2977,6 +3075,9 @@ class CardModal extends Modal {
         .pill { display: inline-block; color: #fff; border-radius: 4px; padding: 2px 10px; font-size: 12px; font-weight: 700; margin: 0 6px 6px 0; }
         .section { margin-top: 22px; }
         .section h2 { font-size: 15px; margin: 0 0 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+        .checklist-group + .checklist-group { margin-top: 18px; }
+        .checklist-group h3 { font-size: 14px; margin: 0 0 2px; }
+        .checklist-progress { color: #667085; font-size: 11px; margin-bottom: 6px; }
         img { max-width: 100%; border-radius: 8px; margin: 10px 0; }
         .imgrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin: 10px 0; }
         .imgrow img { margin: 0; }
@@ -3172,157 +3273,194 @@ class CardModal extends Modal {
   }
 
   /**
-   * Renders checklist items plus the progress bar used by the card badges.
+   * Renders every named checklist as an independent progress bar.
    */
   renderChecklistField() {
-    const field = createElement("div", "ot-field");
-    const header = createElement("div", "ot-checklist-header");
-    const heading = createElement("div", "ot-checklist-heading");
-    const headingIcon = createElement("span", "ot-checklist-heading-icon");
-    try {
-      setIcon(headingIcon, "check-square");
-    } catch (error) {
-      headingIcon.textContent = "☑";
-    }
-    heading.append(headingIcon, createElement("span", "", "Checklist"));
-    header.append(heading);
+    const field = createElement("div", "ot-checklists-field");
 
-    const progress = createElement("div", "ot-checklist-progress");
-    const progressText = createElement("span", "ot-checklist-percent", "0%");
-    const progressTrack = createElement("div", "ot-progress-track");
-    const progressFill = createElement("div", "ot-progress-fill");
-    progressTrack.append(progressFill);
-    progress.append(progressText, progressTrack);
-
-    const list = createElement("div", "ot-checklist");
-    const updateProgress = () => {
-      const stats = checklistStats(this.localChecklist);
-      progressText.textContent = `${stats.percent}%`;
-      progressFill.style.width = `${stats.percent}%`;
-    };
-
-    const renderChecklist = () => {
-      list.replaceChildren();
-      if (!this.localChecklist.length) {
-        list.append(createElement("span", "ot-empty-text", "No checklist items"));
+    const renderGroup = (group) => {
+      const section = createElement("div", "ot-field ot-checklist-group");
+      const header = createElement("div", "ot-checklist-header");
+      const heading = createElement("div", "ot-checklist-heading");
+      const headingIcon = createElement("span", "ot-checklist-heading-icon");
+      try {
+        setIcon(headingIcon, "check-square");
+      } catch (error) {
+        headingIcon.textContent = "☑";
       }
-
-      this.localChecklist.forEach((item, index) => {
-        const row = createElement("div", "ot-checklist-row");
-        const checkbox = createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = !!item.done;
-        const input = createElement("input", "ot-checklist-title");
-        input.type = "text";
-        input.value = item.text || "";
-        const remove = iconButton("x", "Remove item", () => {
-          this.localChecklist.splice(index, 1);
-          renderChecklist();
-          this.saveNow().catch(console.error);
-        });
-        remove.addEventListener("click", (event) => event.stopPropagation());
-
-        checkbox.addEventListener("change", () => {
-          item.done = checkbox.checked;
-          updateProgress();
-          this.saveNow().catch(console.error);
-        });
-        input.addEventListener("input", () => {
-          item.text = input.value;
-          this.queueSave();
-        });
-
-        // Per-item member circle (leftmost): click to assign this item to a member.
-        const assigneeBtn = createElement("button", "ot-checklist-assignee");
-        assigneeBtn.type = "button";
-        const paintAssignee = () => {
-          assigneeBtn.replaceChildren();
-          const a = item.assignee;
-          if (a && a.email) {
-            assigneeBtn.classList.add("is-assigned");
-            assigneeBtn.title = a.name || a.email;
-            const avatar = createElement("span", "ot-card-avatar");
-            avatar.style.setProperty("--ot-avatar-color", a.color || "#8b5cf6");
-            const picture = this.plugin.getMemberPicture(a.email);
-            if (picture) {
-              const img = createElement("img", "");
-              img.src = picture;
-              img.alt = "";
-              avatar.append(img);
-            } else {
-              avatar.textContent = initials(a.name || a.email);
-              avatar.classList.add("is-initials");
-            }
-            assigneeBtn.append(avatar);
-          } else {
-            assigneeBtn.classList.remove("is-assigned");
-            assigneeBtn.title = "Assign member";
-            assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
-          }
-        };
-        paintAssignee();
-        assigneeBtn.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          this.showChecklistMemberMenu(event, item, paintAssignee);
-        });
-
-        row.append(assigneeBtn, checkbox, input, remove);
-        list.append(row);
+      const name = createElement("input", "ot-checklist-name");
+      name.type = "text";
+      name.value = group.title || "Checklist";
+      name.placeholder = "Checklist name";
+      name.setAttribute("aria-label", "Checklist name");
+      name.addEventListener("input", () => {
+        group.title = name.value;
+        this.queueSave();
       });
-      updateProgress();
-    };
-
-    const addArea = createElement("div", "ot-checklist-add");
-    const renderAddArea = () => {
-      addArea.replaceChildren();
-
-      if (!this.addingChecklistItem) {
-        addArea.append(textButton("plus", "Add item", () => {
-          this.addingChecklistItem = true;
-          renderAddArea();
-        }));
-        return;
-      }
-
-      const addForm = createElement("form", "ot-checklist-add-form");
-      const addInput = createElement("input", "ot-input");
-      addInput.type = "text";
-      addInput.placeholder = "Checklist item";
-      const addButton = createElement("button", "mod-cta", "Add");
-      addButtonIcon(addButton, "plus");
-      const cancel = iconButton("x", "Cancel", () => {
-        this.addingChecklistItem = false;
-        renderAddArea();
-      });
-      addButton.type = "submit";
-      addForm.append(addInput, addButton, cancel);
-      addForm.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const text = textLine(addInput.value);
-        if (!text) {
-          addInput.focus();
-          return;
-        }
-        this.localChecklist.push({ done: false, text });
-        this.addingChecklistItem = false;
-        renderChecklist();
-        renderAddArea();
+      name.addEventListener("blur", () => {
+        group.title = textLine(name.value) || "Checklist";
+        name.value = group.title;
         this.saveNow().catch(console.error);
       });
-      addInput.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
-          this.addingChecklistItem = false;
-          renderAddArea();
+      heading.append(headingIcon, name);
+      header.append(heading);
+
+      if (this.localChecklists.length > 1) {
+        const removeGroup = iconButton("trash", "Delete checklist", () => {
+          if ((group.items || []).length && !window.confirm(`Delete "${group.title || "Checklist"}" and its items?`)) return;
+          this.localChecklists = this.localChecklists.filter((item) => item.id !== group.id);
+          if (this.addingChecklistId === group.id) this.addingChecklistId = null;
+          this.render();
+          this.saveNow().catch(console.error);
+        });
+        removeGroup.classList.add("ot-checklist-delete");
+        header.append(removeGroup);
+      }
+
+      const progress = createElement("div", "ot-checklist-progress");
+      const progressText = createElement("span", "ot-checklist-percent", "0%");
+      const progressTrack = createElement("div", "ot-progress-track");
+      const progressFill = createElement("div", "ot-progress-fill");
+      progressTrack.append(progressFill);
+      progress.append(progressText, progressTrack);
+
+      const list = createElement("div", "ot-checklist");
+      const updateProgress = () => {
+        const stats = checklistStats(group.items);
+        progressText.textContent = `${stats.percent}%`;
+        progressFill.style.width = `${stats.percent}%`;
+      };
+
+      const renderItems = () => {
+        list.replaceChildren();
+        if (!group.items.length) list.append(createElement("span", "ot-empty-text", "No checklist items"));
+
+        group.items.forEach((item, index) => {
+          const row = createElement("div", "ot-checklist-row");
+          const checkbox = createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = !!item.done;
+          const input = createElement("input", "ot-checklist-title");
+          input.type = "text";
+          input.value = item.text || "";
+          const remove = iconButton("x", "Remove item", () => {
+            group.items.splice(index, 1);
+            renderItems();
+            this.saveNow().catch(console.error);
+          });
+          remove.addEventListener("click", (event) => event.stopPropagation());
+
+          checkbox.addEventListener("change", () => {
+            item.done = checkbox.checked;
+            updateProgress();
+            this.saveNow().catch(console.error);
+          });
+          input.addEventListener("input", () => {
+            item.text = input.value;
+            this.queueSave();
+          });
+
+          const assigneeBtn = createElement("button", "ot-checklist-assignee");
+          assigneeBtn.type = "button";
+          const paintAssignee = () => {
+            assigneeBtn.replaceChildren();
+            const a = item.assignee;
+            if (a && a.email) {
+              assigneeBtn.classList.add("is-assigned");
+              assigneeBtn.title = a.name || a.email;
+              const avatar = createElement("span", "ot-card-avatar");
+              avatar.style.setProperty("--ot-avatar-color", a.color || "#8b5cf6");
+              const picture = this.plugin.getMemberPicture(a.email);
+              if (picture) {
+                const img = createElement("img", "");
+                img.src = picture;
+                img.alt = "";
+                avatar.append(img);
+              } else {
+                avatar.textContent = initials(a.name || a.email);
+                avatar.classList.add("is-initials");
+              }
+              assigneeBtn.append(avatar);
+            } else {
+              assigneeBtn.classList.remove("is-assigned");
+              assigneeBtn.title = "Assign member";
+              assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
+            }
+          };
+          paintAssignee();
+          assigneeBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.showChecklistMemberMenu(event, item, paintAssignee);
+          });
+
+          row.append(assigneeBtn, checkbox, input, remove);
+          list.append(row);
+        });
+        updateProgress();
+      };
+
+      const addArea = createElement("div", "ot-checklist-add");
+      const renderAddArea = () => {
+        addArea.replaceChildren();
+        if (this.addingChecklistId !== group.id) {
+          addArea.append(textButton("plus", "Add item", () => {
+            this.addingChecklistId = group.id;
+            renderAddArea();
+          }));
+          return;
         }
-      });
-      addArea.append(addForm);
-      requestAnimationFrame(() => addInput.focus());
+
+        const addForm = createElement("form", "ot-checklist-add-form");
+        const addInput = createElement("input", "ot-input");
+        addInput.type = "text";
+        addInput.placeholder = "Checklist item";
+        const addButton = createElement("button", "mod-cta", "Add");
+        addButtonIcon(addButton, "plus");
+        const cancel = iconButton("x", "Cancel", () => {
+          this.addingChecklistId = null;
+          renderAddArea();
+        });
+        addButton.type = "submit";
+        addForm.append(addInput, addButton, cancel);
+        addForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          const text = textLine(addInput.value);
+          if (!text) {
+            addInput.focus();
+            return;
+          }
+          group.items.push({ done: false, text, assignee: null });
+          this.addingChecklistId = null;
+          renderItems();
+          renderAddArea();
+          this.saveNow().catch(console.error);
+        });
+        addInput.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            this.addingChecklistId = null;
+            renderAddArea();
+          }
+        });
+        addArea.append(addForm);
+        requestAnimationFrame(() => addInput.focus());
+      };
+
+      renderItems();
+      renderAddArea();
+      section.append(header, progress, list, addArea);
+      return section;
     };
 
-    renderChecklist();
-    renderAddArea();
-    field.append(header, progress, list, addArea);
+    this.localChecklists.forEach((group) => field.append(renderGroup(group)));
+    const addChecklist = textButton("plus", "Add checklist", () => {
+      new TextPromptModal(this.app, "Add checklist", "Checklist name", "", (title) => {
+        this.localChecklists.push({ id: uid("checklist"), title, items: [] });
+        this.render();
+        return this.saveNow();
+      }).open();
+    }, "ot-add-checklist");
+    field.append(addChecklist);
     return field;
   }
 
@@ -3335,15 +3473,19 @@ class CardModal extends Modal {
       labels: clone(this.localLabels),
       assignees: clone(this.localAssignees || []),
       details: this.localDetails.trim(),
-      checklist: this.localChecklist
-        .map((item) => ({
-          done: !!item.done,
-          text: textLine(item.text),
-          assignee: item.assignee && item.assignee.email
-            ? { email: item.assignee.email, name: item.assignee.name || "", color: item.assignee.color || "" }
-            : null,
-        }))
-        .filter((item) => item.text),
+      checklists: this.localChecklists.map((group, index) => ({
+        id: group.id || uid("checklist"),
+        title: textLine(group.title) || `Checklist ${index + 1}`,
+        items: (group.items || [])
+          .map((item) => ({
+            done: !!item.done,
+            text: textLine(item.text),
+            assignee: item.assignee && item.assignee.email
+              ? { email: item.assignee.email, name: item.assignee.name || "", color: item.assignee.color || "" }
+              : null,
+          }))
+          .filter((item) => item.text),
+      })),
     };
   }
 
@@ -3399,6 +3541,7 @@ const {
   TASK_DECK_ICON,
   VIEW_TYPE,
   addButtonIcon,
+  checklistItems,
   checklistStats,
   createElement,
   dateRangeLabel,
@@ -3836,8 +3979,9 @@ class BoardView extends ItemView {
     if (card.completed) complete.append(createElement("span", "ot-card-complete-mark", "✓"));
     nameInner.append(complete, createElement("span", "ot-td-title", card.title));
     const hints = createElement("span", "ot-td-hints");
-    if ((card.checklist || []).length) {
-      const stats = checklistStats(card.checklist);
+    const checklist = checklistItems(card.checklists);
+    if (checklist.length) {
+      const stats = checklistStats(checklist);
       hints.append(createElement("span", "ot-td-hint", `☑ ${stats.done}/${stats.total}`));
     }
     if (card.details) hints.append(createElement("span", "ot-td-hint", "☰"));
@@ -4793,8 +4937,9 @@ class BoardView extends ItemView {
       meta.append(badge);
     }
 
-    if ((card.checklist || []).length) {
-      const stats = checklistStats(card.checklist);
+    const checklist = checklistItems(card.checklists);
+    if (checklist.length) {
+      const stats = checklistStats(checklist);
       const badge = createElement("span", "ot-card-meta-item ot-card-checklist-badge");
       const icon = createElement("span", "ot-card-checklist-icon");
       try {
@@ -5000,12 +5145,13 @@ const {
   TASK_DECK_ICON,
   TASK_DECK_ICON_SVG,
   VIEW_TYPE,
-  checklistToMarkdown,
+  checklistsToMarkdown,
   cleanDate,
   cleanColor,
   cleanLabelName,
   clone,
   labelKey,
+  normalizeChecklists,
   labelsToFrontmatter,
   assigneesToFrontmatter,
   imageRefsFromMarkdown,
@@ -5206,11 +5352,15 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     this.data.boards = this.data.boards.map((board) => this.normalizeBoard(board));
     this.loadNeedsSave = this.ensureListColors();
     Object.values(this.data.cards).forEach((card) => {
+      const needsChecklistMigration = !Array.isArray(card.checklists) || Object.prototype.hasOwnProperty.call(card, "checklist");
       card.boardId = card.boardId || this.boardIdForList(card.listId) || this.data.activeBoardId || "";
       card.labels = this.normalizeCardLabels(card.labels || []);
       card.completed = !!card.completed;
       card.startDate = cleanDate(card.startDate);
       card.dueDate = cleanDate(card.dueDate);
+      card.checklists = normalizeChecklists(card.checklists, card.checklist);
+      delete card.checklist;
+      if (needsChecklistMigration) this.loadNeedsSave = true;
     });
     this.data.boards.forEach((board) => {
       board.folderPath = board.folderPath || this.inferBoardFolder(board) || cardFileBaseName(board.name);
@@ -6174,7 +6324,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         labels: parsed.labels.length ? this.normalizeCardLabels(parsed.labels) : this.normalizeCardLabels(card.labels || []),
         assignees: this.normalizeAssignees(parsed.assignees !== null ? parsed.assignees : card.assignees || []),
         details: parsed.details,
-        checklist: parsed.checklist,
+        checklists: normalizeChecklists(parsed.checklists, []),
         completed: parsed.completed !== null ? parsed.completed : !!card.completed,
         startDate: parsed.startDate !== null ? parsed.startDate : cleanDate(card.startDate),
         dueDate: parsed.dueDate !== null ? parsed.dueDate : cleanDate(card.dueDate),
@@ -6410,7 +6560,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       labels: [],
       assignees: [],
       details: "",
-      checklist: [],
+      checklists: normalizeChecklists(undefined, []),
       completed: false,
       startDate: "",
       dueDate: "",
@@ -6454,6 +6604,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (Object.prototype.hasOwnProperty.call(patch, "completed")) patch.completed = !!patch.completed;
     if (Object.prototype.hasOwnProperty.call(patch, "startDate")) patch.startDate = cleanDate(patch.startDate);
     if (Object.prototype.hasOwnProperty.call(patch, "dueDate")) patch.dueDate = cleanDate(patch.dueDate);
+    if (Object.prototype.hasOwnProperty.call(patch, "checklists")) {
+      patch.checklists = normalizeChecklists(patch.checklists, []);
+    }
     if (patch.title && textLine(patch.title) !== textLine(card.title)) {
       await this.renameCardFile(card, patch.title);
     }
@@ -6613,7 +6766,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (parsed.dueDate !== null) card.dueDate = parsed.dueDate;
     if (parsed.position !== null) card.position = parsed.position;
     card.details = parsed.details;
-    card.checklist = parsed.checklist;
+    card.checklists = normalizeChecklists(parsed.checklists, []);
     this.diskSignatures.set(card.id, markdown);
   }
 
@@ -7178,7 +7331,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       card.details || "",
       "",
       "## Checklist",
-      checklistToMarkdown(card.checklist),
+      checklistsToMarkdown(card.checklists),
       "",
     ].join("\n");
 

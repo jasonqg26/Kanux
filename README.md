@@ -27,7 +27,7 @@ Use it locally with as many boards as you need, or pair it with [**Sync Deck**](
 - **Board and table views** for the same set of Markdown-backed tasks.
 - **Drag-and-drop workflow** for cards and list ordering.
 - **Fast editing** with inline card creation, renaming, quick status changes, and undo while the Task Deck view is active.
-- **Rich cards** with colored labels, start and due dates, Markdown descriptions, images, and checklists.
+- **Rich cards** with colored labels, start and due dates, Markdown descriptions, images, and multiple named checklists with independent progress bars.
 - **Multiple boards** with independent folders, lists, colors, and cards.
 - **Normal Obsidian notes** that remain searchable, linkable, visible in graph view, and editable from the file explorer.
 - **Automatic note discovery** for compatible Markdown cards created or edited outside Task Deck.
@@ -38,7 +38,7 @@ Use it locally with as many boards as you need, or pair it with [**Sync Deck**](
 1. Open **Task Deck** from the ribbon or run `Task Deck: Open board` from the command palette.
 2. Create a board. New boards start with **To do**, **Doing**, and **Done** lists.
 3. Add cards inline, then drag them between lists as work moves forward.
-4. Open a card to add labels, dates, a Markdown description, images, and checklist items.
+4. Open a card to add labels, dates, a Markdown description, images, and named checklists.
 5. Switch to **Table** when you want a compact overview across every list.
 
 Use **Open note** in the card editor whenever you want to work directly in the underlying Markdown file.
