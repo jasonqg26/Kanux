@@ -211,6 +211,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     this.data.boards = Array.isArray(this.data.boards) ? this.data.boards : [];
     this.data.cards = this.data.cards || {};
     this.data.labels = this.data.labels || [];
+    this.data.syncDeckEnabled = this.data.syncDeckEnabled !== false;
     this.data.completionSound = this.data.completionSound !== false;
     this.data.compactLabels = !!this.data.compactLabels;
     this.data.labels = this.normalizeGlobalLabels(this.data.labels);
@@ -547,7 +548,22 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     });
   }
 
+  isSyncDeckEnabled() {
+    return this.data.syncDeckEnabled !== false;
+  }
+
+  async setSyncDeckEnabled(enabled) {
+    this.data.syncDeckEnabled = !!enabled;
+    if (!enabled) {
+      this.cardLocks = new Map();
+      this.editingCardId = null;
+    }
+    await this.saveData(this.data);
+    this.refreshViews();
+  }
+
   getSyncDeckPlugin() {
+    if (!this.isSyncDeckEnabled()) return null;
     const plugins = this.app.plugins && this.app.plugins.plugins;
     return (plugins && plugins["sync-deck"]) || null;
   }
@@ -811,6 +827,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
   // The holder if this card is being edited by someone else, otherwise null.
   getCardLockHolder(cardId) {
+    if (!this.isSyncDeckEnabled()) return null;
     return (this.cardLocks && this.cardLocks.get(cardId)) || null;
   }
 

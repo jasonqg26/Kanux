@@ -42,6 +42,7 @@ const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b
 const DEFAULT_DATA = {
   version: 1,
   activeBoardId: "",
+  syncDeckEnabled: true,
   completionSound: true,
   compactLabels: false,
   layoutMigrated: false,

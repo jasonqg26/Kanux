@@ -800,7 +800,7 @@ class AboutModal extends Modal {
 
     const actions = createElement("div", "ot-modal-actions");
     const openSettings = createElement("button", "", "Open settings");
-    const sync = createElement("button", "", "Sync notes");
+    const sync = createElement("button", "", "Re-import notes");
     const close = createElement("button", "mod-cta", "Close");
     addButtonIcon(openSettings, "settings");
     addButtonIcon(sync, "refresh-cw");
@@ -816,7 +816,7 @@ class AboutModal extends Modal {
     sync.addEventListener("click", async () => {
       await this.plugin.syncCardsFromFolder();
       this.plugin.refreshViews();
-      new Notice("Task Deck synced.");
+      new Notice("Task Deck notes re-imported.");
     });
     close.addEventListener("click", () => this.close());
     actions.append(openSettings, sync, close);
@@ -1075,6 +1075,8 @@ class CardModal extends Modal {
     const card = this.card;
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-card-modal");
+    const collaborationEnabled = this.plugin.isSyncDeckEnabled();
+    this.contentEl.classList.toggle("is-sync-disabled", !collaborationEnabled);
 
     const title = createElement("input", "ot-title-input");
     title.type = "text";
@@ -1086,7 +1088,7 @@ class CardModal extends Modal {
     });
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
-    const assigneesField = this.notesOnly ? null : this.renderAssigneesField();
+    const assigneesField = this.notesOnly || !collaborationEnabled ? null : this.renderAssigneesField();
     const detailsField = this.renderDetailsField();
     const checklistField = this.renderChecklistField();
 
@@ -1126,7 +1128,9 @@ class CardModal extends Modal {
 
     actions.append(deleteButton, openNote, exportPdf, close);
 
-    const editableFields = this.notesOnly ? [detailsField, checklistField] : [labelsField, assigneesField, detailsField, checklistField];
+    const editableFields = (this.notesOnly
+      ? [detailsField, checklistField]
+      : [labelsField, assigneesField, detailsField, checklistField]).filter(Boolean);
     const children = [title, ...editableFields, actions];
     if (this.readOnly) {
       this.contentEl.addClass("ot-card-readonly");
@@ -2252,13 +2256,16 @@ class CardModal extends Modal {
       const labelsHtml = (this.localLabels || [])
         .map((label) => `<span class="pill" style="background:${esc(label.color || "#2f6fd6")}">${esc(label.name)}</span>`)
         .join("");
-      const membersText = (this.localAssignees || []).map((a) => a.name || a.email).filter(Boolean).join(", ");
+      const collaborationEnabled = this.plugin.isSyncDeckEnabled();
+      const membersText = collaborationEnabled
+        ? (this.localAssignees || []).map((a) => a.name || a.email).filter(Boolean).join(", ")
+        : "";
       const datesText = dateRangeLabel(card.startDate, card.dueDate) || "";
       const checklistHtml = (this.localChecklists || [])
         .map((group) => {
           const stats = checklistStats(group.items);
           const items = (group.items || [])
-            .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
+            .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${collaborationEnabled && item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
             .join("");
           const color = cleanColor(group.color) || LIST_COLORS[1];
           return `<div class="checklist-group" style="border-left:3px solid ${esc(color)};padding-left:10px"><h3 style="color:${esc(color)}">${esc(group.title || "Checklist")}</h3><div class="checklist-progress">${stats.percent}% · ${stats.done}/${stats.total}</div>${items}</div>`;
@@ -2620,42 +2627,50 @@ class CardModal extends Modal {
             this.queueSave();
           });
 
-          const assigneeBtn = createElement("button", "ot-checklist-assignee");
-          assigneeBtn.type = "button";
-          const paintAssignee = () => {
-            assigneeBtn.replaceChildren();
-            const a = item.assignee;
-            if (a && a.email) {
-              assigneeBtn.classList.add("is-assigned");
-              assigneeBtn.title = a.name || a.email;
-              const avatar = createElement("span", "ot-card-avatar");
-              avatar.style.setProperty("--ot-avatar-color", a.color || "#8b5cf6");
-              const picture = this.plugin.getMemberPicture(a.email);
-              if (picture) {
-                const img = createElement("img", "");
-                img.src = picture;
-                img.alt = "";
-                avatar.append(img);
+          let assigneeBtn = null;
+          if (this.plugin.isSyncDeckEnabled()) {
+            assigneeBtn = createElement("button", "ot-checklist-assignee");
+            assigneeBtn.type = "button";
+            const paintAssignee = () => {
+              assigneeBtn.replaceChildren();
+              const a = item.assignee;
+              if (a && a.email) {
+                assigneeBtn.classList.add("is-assigned");
+                assigneeBtn.title = a.name || a.email;
+                const avatar = createElement("span", "ot-card-avatar");
+                avatar.style.setProperty("--ot-avatar-color", a.color || "#8b5cf6");
+                const picture = this.plugin.getMemberPicture(a.email);
+                if (picture) {
+                  const img = createElement("img", "");
+                  img.src = picture;
+                  img.alt = "";
+                  avatar.append(img);
+                } else {
+                  avatar.textContent = initials(a.name || a.email);
+                  avatar.classList.add("is-initials");
+                }
+                assigneeBtn.append(avatar);
               } else {
-                avatar.textContent = initials(a.name || a.email);
-                avatar.classList.add("is-initials");
+                assigneeBtn.classList.remove("is-assigned");
+                assigneeBtn.title = "Assign member";
+                assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
               }
-              assigneeBtn.append(avatar);
-            } else {
-              assigneeBtn.classList.remove("is-assigned");
-              assigneeBtn.title = "Assign member";
-              assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
-            }
-          };
-          paintAssignee();
-          assigneeBtn.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            this.showChecklistMemberMenu(event, item, paintAssignee);
-          });
+            };
+            paintAssignee();
+            assigneeBtn.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              this.showChecklistMemberMenu(event, item, paintAssignee);
+            });
+          }
 
           actions.append(noteButton, remove);
-          row.append(assigneeBtn, checkbox, input, actions);
+          if (assigneeBtn) {
+            row.append(assigneeBtn, checkbox, input, actions);
+          } else {
+            row.style.setProperty("grid-template-columns", "20px minmax(0, 1fr) auto", "important");
+            row.append(checkbox, input, actions);
+          }
           list.append(row);
         });
         updateProgress();

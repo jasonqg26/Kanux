@@ -1898,6 +1898,14 @@
   pointer-events: auto;
 }
 
+.ot-card-modal.is-sync-disabled .ot-checklist-row {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+}
+
+.ot-card-modal.is-sync-disabled .ot-checklist-assignee {
+  display: none;
+}
+
 .ot-checklist-item-actions {
   display: inline-flex;
   align-items: center;

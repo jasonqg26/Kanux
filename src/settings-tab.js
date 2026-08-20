@@ -19,7 +19,9 @@ class TaskDeckSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "Task Deck" });
     containerEl.createEl("p", {
-      text: "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, and per-card members.",
+      text: this.plugin.isSyncDeckEnabled()
+        ? "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, and optional collaboration."
+        : "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, and checklists.",
     });
 
     // ---- Board ----
@@ -61,6 +63,33 @@ class TaskDeckSettingTab extends PluginSettingTab {
           await this.plugin.savePluginData();
         }));
 
+    // Local note discovery is independent from the optional cloud integration.
+    new Setting(containerEl)
+      .setName("Re-import card notes")
+      .setDesc("Pull in Markdown cards added or edited outside the board.")
+      .addButton((button) => button
+        .setButtonText("Re-import")
+        .onClick(async () => {
+          await this.plugin.syncCardsFromFolder();
+          this.plugin.refreshViews();
+          new Notice("Card notes re-imported.");
+        }));
+
+    new Setting(containerEl)
+      .setName("Cloud sync and collaboration")
+      .setDesc("Show optional cloud sync, presence, edit locks, and member assignment features.")
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.isSyncDeckEnabled())
+        .onChange(async (value) => {
+          await this.plugin.setSyncDeckEnabled(value);
+          this.display();
+        }));
+
+    if (!this.plugin.isSyncDeckEnabled()) {
+      this.renderAbout(containerEl);
+      return;
+    }
+
     // ---- Sync & collaboration ----
     new Setting(containerEl).setName("Sync & collaboration").setHeading();
 
@@ -75,17 +104,10 @@ class TaskDeckSettingTab extends PluginSettingTab {
         .setCta()
         .onClick(() => this.plugin.openSyncDeck()));
 
-    new Setting(containerEl)
-      .setName("Re-import card notes")
-      .setDesc("Pull in Markdown cards added or edited outside the board (inside a board folder).")
-      .addButton((button) => button
-        .setButtonText("Sync now")
-        .onClick(async () => {
-          await this.plugin.syncCardsFromFolder();
-          this.plugin.refreshViews();
-          new Notice("Task Deck synced.");
-        }));
+    this.renderAbout(containerEl);
+  }
 
+  renderAbout(containerEl) {
     // ---- About ----
     new Setting(containerEl).setName("About").setHeading();
 
