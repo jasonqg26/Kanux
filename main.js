@@ -510,6 +510,7 @@ function normalizeChecklists(checklists, legacyItems) {
     .map((group, index) => ({
       id: group.id || uid("checklist"),
       title: textLine(group.title) || `Checklist ${index + 1}`,
+      color: cleanColor(group.color) || LIST_COLORS[1],
       items: (Array.isArray(group.items) ? group.items : [])
         .map((item) => ({
           done: !!(item && item.done),
@@ -542,6 +543,7 @@ function parseChecklists(text) {
     groups.push({
       id: uid("checklist"),
       title: textLine(current.title) || `Checklist ${groups.length + 1}`,
+      color: cleanColor(current.color) || LIST_COLORS[1],
       items: parseChecklist(current.lines.join("\n")),
     });
     current = null;
@@ -551,7 +553,9 @@ function parseChecklists(text) {
     const heading = line.match(/^###\s+(.+?)\s*$/);
     if (heading) {
       finish();
-      current = { title: heading[1], lines: [] };
+      const colorMeta = heading[1].match(/\s*<!--task-deck-checklist-color:(#[0-9a-fA-F]{6})-->\s*$/);
+      const title = colorMeta ? heading[1].slice(0, colorMeta.index).trim() : heading[1];
+      current = { title, color: colorMeta ? colorMeta[1] : "", lines: [] };
       continue;
     }
     if (!current) current = { title: "Checklist", lines: [] };
@@ -597,7 +601,8 @@ function checklistsToMarkdown(checklists) {
   return normalizeChecklists(checklists, [])
     .map((group) => {
       const items = checklistToMarkdown(group.items);
-      return `### ${textLine(group.title) || "Checklist"}${items ? `\n${items}` : ""}`;
+      const color = cleanColor(group.color) || LIST_COLORS[1];
+      return `### ${textLine(group.title) || "Checklist"} <!--task-deck-checklist-color:${color}-->${items ? `\n${items}` : ""}`;
     })
     .join("\n\n");
 }
@@ -1359,11 +1364,12 @@ class LabelPickerModal extends Modal {
 }
 
 class ListColorModal extends Modal {
-  constructor(app, title, currentColor, onSelect) {
+  constructor(app, title, currentColor, onSelect, kind = "List") {
     super(app);
     this.title = title;
     this.currentColor = cleanColor(currentColor) || LIST_COLORS[0];
     this.onSelect = onSelect;
+    this.kind = kind;
   }
 
   onOpen() {
@@ -1371,10 +1377,10 @@ class ListColorModal extends Modal {
     this.contentEl.addClass("ot-label-modal", "ot-list-color-modal");
 
     const header = createElement("div", "ot-label-modal-header");
-    header.append(createElement("h2", "", "List color"));
+    header.append(createElement("h2", "", `${this.kind} color`));
 
     const previewBand = createElement("div", "ot-label-create-preview-band");
-    const preview = createElement("div", "ot-label-preview-pill", this.title || "List");
+    const preview = createElement("div", "ot-label-preview-pill", this.title || this.kind);
     preview.style.backgroundColor = this.currentColor;
     previewBand.append(preview);
 
@@ -3083,7 +3089,8 @@ class CardModal extends Modal {
           const items = (group.items || [])
             .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
             .join("");
-          return `<div class="checklist-group"><h3>${esc(group.title || "Checklist")}</h3><div class="checklist-progress">${stats.percent}% · ${stats.done}/${stats.total}</div>${items}</div>`;
+          const color = cleanColor(group.color) || LIST_COLORS[1];
+          return `<div class="checklist-group" style="border-left:3px solid ${esc(color)};padding-left:10px"><h3 style="color:${esc(color)}">${esc(group.title || "Checklist")}</h3><div class="checklist-progress">${stats.percent}% · ${stats.done}/${stats.total}</div>${items}</div>`;
         })
         .join("");
       const metaBits = [
@@ -3305,9 +3312,13 @@ class CardModal extends Modal {
 
     const renderGroup = (group) => {
       const section = createElement("div", "ot-field ot-checklist-group");
+      const groupColor = cleanColor(group.color) || LIST_COLORS[1];
+      section.style.setProperty("--ot-checklist-color", groupColor);
+      section.style.setProperty("border", `1px solid ${groupColor}`, "important");
       const header = createElement("div", "ot-checklist-header");
       const heading = createElement("div", "ot-checklist-heading");
       const headingIcon = createElement("span", "ot-checklist-heading-icon");
+      headingIcon.style.setProperty("color", groupColor, "important");
       try {
         setIcon(headingIcon, "check-square");
       } catch (error) {
@@ -3329,6 +3340,20 @@ class CardModal extends Modal {
       });
       heading.append(headingIcon, name);
       header.append(heading);
+
+      const colorButton = createElement("button", "ot-checklist-color");
+      colorButton.type = "button";
+      colorButton.title = "Choose checklist color";
+      colorButton.setAttribute("aria-label", "Choose checklist color");
+      colorButton.style.backgroundColor = groupColor;
+      colorButton.addEventListener("click", () => {
+        new ListColorModal(this.app, group.title || "Checklist", groupColor, async (color) => {
+          group.color = cleanColor(color) || LIST_COLORS[1];
+          this.render();
+          await this.saveNow();
+        }, "Checklist").open();
+      });
+      header.append(colorButton);
 
       if (this.localChecklists.length > 1) {
         const removeGroup = iconButton("trash", "Delete checklist", async () => {
@@ -3357,6 +3382,7 @@ class CardModal extends Modal {
       const progressText = createElement("span", "ot-checklist-percent", "0%");
       const progressTrack = createElement("div", "ot-progress-track");
       const progressFill = createElement("div", "ot-progress-fill");
+      progressFill.style.setProperty("background", groupColor, "important");
       progressTrack.append(progressFill);
       progress.append(progressText, progressTrack);
 
@@ -3519,7 +3545,8 @@ class CardModal extends Modal {
     this.localChecklists.forEach((group) => field.append(renderGroup(group)));
     const addChecklist = textButton("plus", "Add checklist", () => {
       new TextPromptModal(this.app, "Add checklist", "Checklist name", "", (title) => {
-        this.localChecklists.push({ id: uid("checklist"), title, items: [] });
+        const color = LIST_COLORS[this.localChecklists.length % LIST_COLORS.length] || LIST_COLORS[1];
+        this.localChecklists.push({ id: uid("checklist"), title, color, items: [] });
         this.render();
         return this.saveNow();
       }).open();
@@ -3540,6 +3567,7 @@ class CardModal extends Modal {
       checklists: this.localChecklists.map((group, index) => ({
         id: group.id || uid("checklist"),
         title: textLine(group.title) || `Checklist ${index + 1}`,
+        color: cleanColor(group.color) || LIST_COLORS[1],
         items: (group.items || [])
           .map((item) => ({
             done: !!item.done,

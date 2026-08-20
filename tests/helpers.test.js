@@ -29,6 +29,7 @@ function testNamedChecklistRoundTrip() {
   const source = [
     {
       title: "Development",
+      color: "#ef4444",
       items: [
         { done: true, text: "Implement parser", assignee: null },
         {
@@ -45,6 +46,8 @@ function testNamedChecklistRoundTrip() {
   const parsed = parseChecklists(markdown);
 
   assert.deepStrictEqual(parsed.map((group) => group.title), ["Development", "Release"]);
+  assert.strictEqual(parsed[0].color, "#ef4444");
+  assert.ok(markdown.includes("<!--task-deck-checklist-color:#ef4444-->"));
   assert.deepStrictEqual(parsed.map((group) => group.items.map((item) => item.text)), [
     ["Implement parser", "Review"],
     ["Publish"],
@@ -53,9 +56,10 @@ function testNamedChecklistRoundTrip() {
   assert.strictEqual(parsed[0].items[1].filePath, "Project/checklist-items/Review.md");
   assert.ok(markdown.includes("[[Project/checklist-items/Review|Review]]"));
 
-  const empty = parseChecklists(checklistsToMarkdown([{ title: "Empty group", items: [] }]));
+  const empty = parseChecklists(checklistsToMarkdown([{ title: "Empty group", color: "#22c55e", items: [] }]));
   assert.strictEqual(empty.length, 1);
   assert.strictEqual(empty[0].title, "Empty group");
+  assert.strictEqual(empty[0].color, "#22c55e");
   assert.deepStrictEqual(empty[0].items, []);
 }
 

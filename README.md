@@ -27,7 +27,7 @@ Use it locally with as many boards as you need, or pair it with [**Sync Deck**](
 - **Board and table views** for the same set of Markdown-backed tasks.
 - **Drag-and-drop workflow** for cards and list ordering.
 - **Fast editing** with inline card creation, renaming, quick status changes, and undo while the Task Deck view is active.
-- **Rich cards** with colored labels, start and due dates, Markdown descriptions, images, and multiple named checklists with independent progress bars. Checklist items can open their own linked Markdown notes.
+- **Rich cards** with colored labels, start and due dates, Markdown descriptions, images, and multiple named, colored checklists with independent progress bars. Checklist items can open their own linked Markdown notes.
 - **Multiple boards** with independent folders, lists, colors, and cards.
 - **Normal Obsidian notes** that remain searchable, linkable, visible in graph view, and editable from the file explorer.
 - **Automatic note discovery** for compatible Markdown cards created or edited outside Task Deck.

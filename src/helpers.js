@@ -507,6 +507,7 @@ function normalizeChecklists(checklists, legacyItems) {
     .map((group, index) => ({
       id: group.id || uid("checklist"),
       title: textLine(group.title) || `Checklist ${index + 1}`,
+      color: cleanColor(group.color) || LIST_COLORS[1],
       items: (Array.isArray(group.items) ? group.items : [])
         .map((item) => ({
           done: !!(item && item.done),
@@ -539,6 +540,7 @@ function parseChecklists(text) {
     groups.push({
       id: uid("checklist"),
       title: textLine(current.title) || `Checklist ${groups.length + 1}`,
+      color: cleanColor(current.color) || LIST_COLORS[1],
       items: parseChecklist(current.lines.join("\n")),
     });
     current = null;
@@ -548,7 +550,9 @@ function parseChecklists(text) {
     const heading = line.match(/^###\s+(.+?)\s*$/);
     if (heading) {
       finish();
-      current = { title: heading[1], lines: [] };
+      const colorMeta = heading[1].match(/\s*<!--task-deck-checklist-color:(#[0-9a-fA-F]{6})-->\s*$/);
+      const title = colorMeta ? heading[1].slice(0, colorMeta.index).trim() : heading[1];
+      current = { title, color: colorMeta ? colorMeta[1] : "", lines: [] };
       continue;
     }
     if (!current) current = { title: "Checklist", lines: [] };
@@ -594,7 +598,8 @@ function checklistsToMarkdown(checklists) {
   return normalizeChecklists(checklists, [])
     .map((group) => {
       const items = checklistToMarkdown(group.items);
-      return `### ${textLine(group.title) || "Checklist"}${items ? `\n${items}` : ""}`;
+      const color = cleanColor(group.color) || LIST_COLORS[1];
+      return `### ${textLine(group.title) || "Checklist"} <!--task-deck-checklist-color:${color}-->${items ? `\n${items}` : ""}`;
     })
     .join("\n\n");
 }

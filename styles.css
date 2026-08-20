@@ -1719,7 +1719,7 @@
 .ot-checklist-group {
   gap: 10px;
   padding: 14px;
-  border: 1px solid var(--background-modifier-border);
+  border: 1px solid var(--ot-checklist-color, var(--interactive-accent));
   border-radius: 10px;
   background: var(--background-secondary);
 }
@@ -1780,6 +1780,23 @@
   opacity: 0.55;
 }
 
+.ot-checklist-color {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid color-mix(in srgb, var(--text-normal) 28%, transparent);
+  border-radius: 999px;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+
+.ot-checklist-color:hover,
+.ot-checklist-color:focus-visible {
+  border-color: var(--text-normal);
+  transform: scale(1.08);
+}
+
 .ot-checklist-group:hover .ot-checklist-delete,
 .ot-checklist-delete:focus-visible {
   opacity: 1;
@@ -1789,6 +1806,7 @@
   display: inline-flex;
   width: 22px;
   height: 22px;
+  color: var(--ot-checklist-color, var(--interactive-accent));
 }
 
 .ot-checklist-progress {
@@ -1814,7 +1832,7 @@
   width: 0%;
   height: 100%;
   border-radius: inherit;
-  background: var(--interactive-accent);
+  background: var(--ot-checklist-color, var(--interactive-accent));
   transition: width 120ms ease;
 }
 
