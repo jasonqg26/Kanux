@@ -828,7 +828,7 @@ module.exports = {
 
   },
   "src/modals.js": function(module, exports, __require) {
-const { MarkdownRenderer, Menu, Modal, Notice, arrayBufferToBase64, setIcon } = require("obsidian");
+const { FuzzySuggestModal, MarkdownRenderer, Menu, Modal, Notice, arrayBufferToBase64, setIcon } = require("obsidian");
 
 // Modal UIs for cards, labels, dates, prompts, and the short about panel.
 const {
@@ -868,11 +868,20 @@ const {
 // md -> html -> md round-trips bytes for everything these converters produce.
 // Unrecognized markdown stays literal text and survives untouched.
 function escapeDetailsHtml(text) {
-  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function inlineMdToHtml(text) {
   let out = escapeDetailsHtml(text);
+  out = out.replace(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g, (match, target, alias) => {
+    const hasAlias = alias != null;
+    const label = hasAlias ? alias : target.split("/").pop();
+    return `<a class="internal-link" data-wikilink="true" data-has-alias="${hasAlias ? "true" : "false"}" data-href="${target}" href="${target}">${label}</a>`;
+  });
   out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
@@ -957,6 +966,10 @@ function detailsHtmlToMd(root) {
       if (tag === "B" || tag === "STRONG") out += inner.trim() ? `**${inner}**` : inner;
       else if (tag === "I" || tag === "EM") out += inner.trim() ? `*${inner}*` : inner;
       else if (tag === "CODE") out += inner.trim() ? `\`${inner}\`` : inner;
+      else if (tag === "A" && child.dataset.wikilink === "true") {
+        const target = child.dataset.href || child.getAttribute("href") || "";
+        out += child.dataset.hasAlias === "true" ? `[[${target}|${inner || target}]]` : `[[${target}]]`;
+      }
       else if (tag === "A") out += `[${inner || child.getAttribute("href") || "link"}](${child.getAttribute("href") || ""})`;
       else out += inner;
     });
@@ -1122,6 +1135,27 @@ class TextPromptModal extends Modal {
       console.error(error);
       new Notice("Could not save.");
     });
+  }
+}
+
+/** Lets the description editor link any Markdown note already in the vault. */
+class VaultNoteSuggestModal extends FuzzySuggestModal {
+  constructor(app, onChoose) {
+    super(app);
+    this.onChoose = onChoose;
+    this.setPlaceholder("Search Markdown notes in this vault...");
+  }
+
+  getItems() {
+    return this.app.vault.getMarkdownFiles();
+  }
+
+  getItemText(file) {
+    return file.path.replace(/\.md$/i, "");
+  }
+
+  onChooseItem(file) {
+    this.onChoose(file);
   }
 }
 
@@ -2455,6 +2489,34 @@ class CardModal extends Modal {
       }).open();
     };
 
+    const insertVaultNote = () => {
+      const t = focusedText();
+      if (!t) return;
+      const selection = window.getSelection();
+      const hasSelection = !!(selection && selection.rangeCount && !selection.isCollapsed && t.ce.contains(selection.anchorNode));
+      const selectedText = hasSelection ? selection.toString() : "";
+      const savedRange = selection && selection.rangeCount && t.ce.contains(selection.anchorNode)
+        ? selection.getRangeAt(0).cloneRange()
+        : null;
+      new VaultNoteSuggestModal(this.app, (file) => {
+        const target = file.path.replace(/\.md$/i, "");
+        const label = selectedText || file.basename;
+        t.ce.focus();
+        if (savedRange) {
+          const restore = window.getSelection();
+          restore.removeAllRanges();
+          restore.addRange(savedRange);
+          if (hasSelection) restore.deleteFromDocument();
+        }
+        document.execCommand(
+          "insertHTML",
+          false,
+          `<a class="internal-link" data-wikilink="true" data-has-alias="${hasSelection ? "true" : "false"}" data-href="${escapeDetailsHtml(target)}" href="${escapeDetailsHtml(target)}">${escapeDetailsHtml(label)}</a>`
+        );
+        syncBlockFromDom(t);
+      }).open();
+    };
+
     // The run of consecutive image blocks around `index` (empty text slots
     // between images don't break the run) — the group a grid layout applies to.
     const imageRunAround = (index) => {
@@ -2715,6 +2777,7 @@ class CardModal extends Modal {
         makeTool("ellipsis", "Quote", () => toggleBlockFormat("blockquote")),
         makeTool("list", "Bulleted list", () => execCmd("insertUnorderedList")),
         makeTool("link", "Link", insertLink),
+        makeTool("file-text", "Link vault note", insertVaultNote),
         makeTool("image", "Add image", () => imageInput.click()),
         makeTool("plus", "Divider", () => execCmd("insertHorizontalRule"))
       );
@@ -2811,6 +2874,21 @@ class CardModal extends Modal {
     // - images, links, and buttons (Copy image, Show more) keep their own click
     //   behavior and never flip to edit.
     preview.addEventListener("click", (event) => {
+      const internalLink = event.target.closest("a.internal-link");
+      if (internalLink) {
+        event.preventDefault();
+        event.stopPropagation();
+        const target = internalLink.dataset.href || internalLink.getAttribute("data-href") || internalLink.getAttribute("href");
+        if (!target) return;
+        const sourcePath = (this.card && this.card.filePath) || "";
+        const newLeaf = event.ctrlKey || event.metaKey;
+        this.close();
+        Promise.resolve(this.app.workspace.openLinkText(target, sourcePath, newLeaf)).catch((error) => {
+          console.error(error);
+          new Notice("Could not open the linked note.");
+        });
+        return;
+      }
       if (this.readOnly) return;
       if (event.target.closest("img, a, button, .ot-inline-image")) return;
       const selection = window.getSelection();
