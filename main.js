@@ -34,6 +34,44 @@ const LABEL_COLORS = [
 // Default list-color sequence. Grey → blue → green first so a fresh board's
 // To do / Doing / Done reads the way most people expect.
 const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#ec4899"];
+const DEFAULT_APPEARANCE = {
+  preset: "obsidian",
+  colorScheme: "theme",
+  surfaceScheme: "theme",
+  density: "normal",
+  fontScale: 1,
+  background: {
+    type: "theme",
+    color: "#1e1e1e",
+    gradientStart: "#172033",
+    gradientEnd: "#0f172a",
+    imagePath: "",
+    imageSource: "vault",
+    imageFit: "original",
+    imageFitVersion: 3,
+    overlayOpacity: 0.35,
+  },
+  cards: {
+    useTheme: true,
+    background: "#25262a",
+    hoverBackground: "#30343b",
+    verticalGap: 8,
+    titleSize: 18,
+    borderRadius: 9,
+    shadow: "medium",
+  },
+  lists: {
+    useTheme: true,
+    background: "#161719",
+    columnGap: 12,
+    topBorderWidth: 3,
+    showColorDot: true,
+    borderRadius: 12,
+  },
+  motion: {
+    enabled: true,
+  },
+};
 
 /**
  * Minimal saved-data shape used when the plugin starts with no existing board.
@@ -48,6 +86,8 @@ const DEFAULT_DATA = {
   syncDeckEnabled: true,
   completionSound: true,
   compactLabels: false,
+  labelDisplayMode: "expanded",
+  appearance: DEFAULT_APPEARANCE,
   layoutMigrated: false,
   boards: [],
   cards: {},
@@ -494,6 +534,33 @@ function parseChecklistItemValue(value) {
 }
 
 /**
+ * Returns the user-authored body of a checklist item note.
+ *
+ * Frontmatter is never part of the preview. Notes created by Task Deck also
+ * contain a generated H1 and card backlink; those lines are removed only when
+ * the note identifies itself as a managed checklist item.
+ */
+function checklistItemNoteBody(markdown) {
+  let body = String(markdown || "").replace(/^\uFEFF/, "");
+  let frontmatter = "";
+  const match = body.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
+  if (match) {
+    frontmatter = match[1];
+    body = body.slice(match[0].length);
+  }
+
+  const managed = /(?:^|\r?\n)[ \t]*task-deck-checklist-item[ \t]*:[ \t]*true[ \t]*(?:#.*)?(?:\r?\n|$)/i.test(frontmatter);
+  if (!managed) return body.trim();
+
+  const lines = body.split(/\r?\n/);
+  while (lines.length && !lines[0].trim()) lines.shift();
+  if (lines.length && /^#[ \t]+\S/.test(lines[0])) lines.shift();
+  while (lines.length && !lines[0].trim()) lines.shift();
+  if (lines.length && /^Card:[ \t]*\[\[[^\]]+\]\][ \t]*$/i.test(lines[0])) lines.shift();
+  return lines.join("\n").trim();
+}
+
+/**
  * Normalizes the named checklist collection used by current cards.
  *
  * `legacyItems` keeps data.json files from versions that stored one flat
@@ -778,6 +845,7 @@ module.exports = {
   DEFAULT_LABEL_COLOR,
   LABEL_COLORS,
   LIST_COLORS,
+  DEFAULT_APPEARANCE,
   DEFAULT_DATA,
   clone,
   uid,
@@ -809,6 +877,7 @@ module.exports = {
   getSection,
   getSectionAny,
   parseChecklist,
+  checklistItemNoteBody,
   parseChecklists,
   normalizeChecklists,
   checklistToText,
@@ -828,7 +897,7 @@ module.exports = {
 
   },
   "src/modals.js": function(module, exports, __require) {
-const { FuzzySuggestModal, MarkdownRenderer, Menu, Modal, Notice, arrayBufferToBase64, setIcon } = require("obsidian");
+const { FuzzySuggestModal, MarkdownRenderer, Menu, Modal, Notice, Setting, arrayBufferToBase64, setIcon } = require("obsidian");
 
 // Modal UIs for cards, labels, dates, prompts, and the short about panel.
 const {
@@ -837,6 +906,7 @@ const {
   LIST_COLORS,
   addMonths,
   addButtonIcon,
+  checklistItemNoteBody,
   checklistStats,
   cardFileBaseName,
   cleanDate,
@@ -852,6 +922,7 @@ const {
   imageRefsFromMarkdown,
   imageSizeFromMarkup,
   imageMarkupWithSize,
+  isImagePath,
   isoFromDate,
   labelKey,
   normalizeChecklists,
@@ -1166,11 +1237,12 @@ class VaultNoteSuggestModal extends FuzzySuggestModal {
  * both back through onChange so the card modal can save them together.
  */
 class LabelPickerModal extends Modal {
-  constructor(app, labels, selectedLabels, onChange) {
+  constructor(app, labels, selectedLabels, onChange, onDelete = null) {
     super(app);
     this.labels = clone(labels || []);
     this.selectedLabels = clone(selectedLabels || []);
     this.onChange = onChange;
+    this.onDelete = onDelete;
     this.creating = false;
     this.editingKey = null;
     this.query = "";
@@ -1187,8 +1259,8 @@ class LabelPickerModal extends Modal {
     return this.selectedLabels.some((item) => labelKey(item) === key);
   }
 
-  emitChange() {
-    this.onChange(clone(this.labels), clone(this.selectedLabels));
+  emitChange(options = {}) {
+    this.onChange(clone(this.labels), clone(this.selectedLabels), options);
   }
 
   dedupeLabels(labels) {
@@ -1246,6 +1318,23 @@ class LabelPickerModal extends Modal {
     this.createName = label.name;
     this.createColor = label.color || DEFAULT_LABEL_COLOR;
     this.render();
+  }
+
+  async deleteLabel(label) {
+    if (!label || !this.onDelete) return false;
+    const deleted = await this.onDelete(clone(label));
+    if (!deleted) return false;
+    const key = labelKey(label);
+    this.labels = this.labels.filter((item) => labelKey(item) !== key);
+    this.selectedLabels = this.selectedLabels.filter((item) => labelKey(item) !== key);
+    this.creating = false;
+    this.editingKey = null;
+    this.query = "";
+    this.createName = "";
+    this.createColor = DEFAULT_LABEL_COLOR;
+    this.emitChange({ persist: false });
+    this.render();
+    return true;
   }
 
   render() {
@@ -1381,6 +1470,24 @@ class LabelPickerModal extends Modal {
     const create = createElement("button", "mod-cta", this.editingKey ? "Save" : "Create");
     addButtonIcon(create, this.editingKey ? "check" : "plus");
     create.type = "submit";
+    if (this.editingKey && this.onDelete) {
+      const original = this.labels.find((label) => labelKey(label) === this.editingKey);
+      const remove = createElement("button", "mod-warning", "Delete label");
+      remove.type = "button";
+      addButtonIcon(remove, "trash");
+      remove.addEventListener("click", async () => {
+        remove.disabled = true;
+        try {
+          const deleted = await this.deleteLabel(original);
+          if (!deleted) remove.disabled = false;
+        } catch (error) {
+          console.error(error);
+          new Notice("Could not delete the label.");
+          remove.disabled = false;
+        }
+      });
+      footer.append(remove);
+    }
     footer.append(create);
 
     title.addEventListener("input", () => {
@@ -1469,6 +1576,237 @@ class ListColorModal extends Modal {
     actions.append(cancel, save);
 
     this.contentEl.append(header, previewBand, field, customField, actions);
+  }
+}
+
+class VaultBackgroundSuggestModal extends FuzzySuggestModal {
+  constructor(app, onChoose) {
+    super(app);
+    this.onChoose = onChoose;
+    this.setPlaceholder("Choose an image from the vault");
+  }
+
+  getItems() {
+    return this.app.vault.getFiles().filter((file) => isImagePath(file.path));
+  }
+
+  getItemText(file) {
+    return file.path;
+  }
+
+  onChooseItem(file) {
+    this.onChoose(file);
+  }
+}
+
+class BoardAppearanceModal extends Modal {
+  constructor(app, plugin, boardId) {
+    super(app);
+    this.plugin = plugin;
+    this.boardId = boardId;
+  }
+
+  onOpen() {
+    this.render(false);
+  }
+
+  async update(patch, rerender = false) {
+    await this.plugin.updateBoardAppearance(this.boardId, patch);
+    if (rerender) this.render();
+  }
+
+  chooseComputerImage() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/bmp,image/avif,image/x-icon";
+    input.style.display = "none";
+    document.body.append(input);
+    const cleanup = () => input.remove();
+    input.addEventListener("cancel", cleanup, { once: true });
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      try {
+        if (!file) return;
+        const imagePath = await this.plugin.importAppearanceBackground(file);
+        await this.update({
+          background: { type: "image", imageSource: "plugin", imagePath, imageFit: "original" },
+        }, true);
+        new Notice("Background image imported into Task Deck's private data folder.");
+      } catch (error) {
+        new Notice(error && error.message ? error.message : "The background image could not be imported.");
+      } finally {
+        cleanup();
+      }
+    }, { once: true });
+    try {
+      if (typeof input.showPicker === "function") input.showPicker();
+      else input.click();
+    } catch (error) {
+      input.click();
+    }
+  }
+
+  render(preserveScroll = true) {
+    const board = this.plugin.findBoard(this.boardId);
+    if (!board) { this.close(); return; }
+    const appearance = this.plugin.getBoardAppearance(this.boardId);
+    const scrollTop = preserveScroll ? this.contentEl.scrollTop : 0;
+    this.contentEl.replaceChildren();
+    this.contentEl.addClass("ot-appearance-modal");
+    this.contentEl.append(createElement("h2", "", `${board.name} appearance`));
+    this.contentEl.append(createElement("p", "ot-appearance-modal-intro", "These settings apply only to this board."));
+
+    new Setting(this.contentEl)
+      .setName("Visual preset")
+      .addDropdown((dropdown) => dropdown
+        .addOption("obsidian", "Obsidian theme")
+        .addOption("trello-dark", "Trello dark")
+        .addOption("trello-light", "Trello light")
+        .addOption("transparent", "Transparent")
+        .addOption("high-contrast", "High contrast")
+        .addOption("custom", "Custom")
+        .setValue(appearance.preset)
+        .onChange(async (value) => {
+          if (value === "custom") await this.update({ preset: "custom" });
+          else {
+            await this.plugin.applyBoardAppearancePreset(this.boardId, value);
+            this.render();
+          }
+        }));
+
+    new Setting(this.contentEl).setName("Background").setHeading();
+    new Setting(this.contentEl)
+      .setName("Background type")
+      .addDropdown((dropdown) => dropdown
+        .addOption("theme", "Obsidian theme")
+        .addOption("solid", "Solid color")
+        .addOption("gradient", "Gradient")
+        .addOption("image", "Image")
+        .setValue(appearance.background.type)
+        .onChange((value) => this.update({ background: { type: value } }, true)));
+
+    if (appearance.background.type === "solid") {
+      new Setting(this.contentEl).setName("Background color").addColorPicker((picker) => picker
+        .setValue(appearance.background.color)
+        .onChange((value) => this.update({ background: { color: value } })));
+    }
+    if (appearance.background.type === "gradient") {
+      new Setting(this.contentEl).setName("Gradient start").addColorPicker((picker) => picker
+        .setValue(appearance.background.gradientStart)
+        .onChange((value) => this.update({ background: { gradientStart: value } })));
+      new Setting(this.contentEl).setName("Gradient end").addColorPicker((picker) => picker
+        .setValue(appearance.background.gradientEnd)
+        .onChange((value) => this.update({ background: { gradientEnd: value } })));
+    }
+    if (appearance.background.type === "image") {
+      const imageSetting = new Setting(this.contentEl)
+        .setName("Background image")
+        .setDesc(appearance.background.imagePath ? appearance.background.imagePath.split("/").pop() : "No image selected")
+        .addButton((button) => button.setButtonText("From vault").onClick(() => {
+          new VaultBackgroundSuggestModal(this.app, async (file) => {
+            await this.update({ background: { imageSource: "vault", imagePath: file.path, imageFit: "original" } }, true);
+          }).open();
+        }))
+        .addButton((button) => button.setButtonText("From computer").setCta().onClick(() => this.chooseComputerImage()));
+      if (appearance.background.imagePath) {
+        imageSetting.addButton((button) => button.setButtonText("Clear").onClick(() => this.update({ background: { imagePath: "" } }, true)));
+      }
+      new Setting(this.contentEl)
+        .setName("Image size")
+        .setDesc("Original size prevents enlargement and preserves source sharpness.")
+        .addDropdown((dropdown) => dropdown
+          .addOption("original", "Original size — no enlargement")
+          .addOption("contain", "Fit complete image")
+          .addOption("cover", "Fill and crop edges")
+          .addOption("repeat", "Repeat at original size")
+          .setValue(appearance.background.imageFit)
+          .onChange((value) => this.update({ background: { imageFit: value } })));
+      new Setting(this.contentEl)
+        .setName("Image darkening")
+        .addSlider((slider) => slider.setLimits(0, 0.85, 0.05)
+          .setValue(appearance.background.overlayOpacity).setDynamicTooltip()
+          .onChange((value) => this.update({ background: { overlayOpacity: value } })));
+    }
+
+    new Setting(this.contentEl).setName("Cards").setHeading();
+    let cardColor = null;
+    new Setting(this.contentEl).setName("Use theme card color").addToggle((toggle) => toggle
+      .setValue(appearance.cards.useTheme).onChange(async (value) => {
+        await this.update({ cards: { useTheme: value } });
+        if (cardColor) cardColor.setDisabled(value);
+      }));
+    new Setting(this.contentEl).setName("Card color").addColorPicker((picker) => {
+      cardColor = picker;
+      picker.setValue(appearance.cards.background).setDisabled(appearance.cards.useTheme)
+        .onChange((value) => this.update({ cards: { background: value } }));
+    });
+    new Setting(this.contentEl).setName("Hover color").setDesc("Card color while the pointer is over it.")
+      .addColorPicker((picker) => picker.setValue(appearance.cards.hoverBackground)
+        .onChange((value) => this.update({ cards: { hoverBackground: value } })));
+    new Setting(this.contentEl).setName("Vertical spacing").setDesc("Space between cards inside each column.")
+      .addSlider((slider) => slider.setLimits(0, 28, 1).setValue(appearance.cards.verticalGap).setDynamicTooltip()
+        .onChange((value) => this.update({ cards: { verticalGap: value } })));
+    new Setting(this.contentEl).setName("Title size").addSlider((slider) => slider
+      .setLimits(12, 30, 1).setValue(appearance.cards.titleSize).setDynamicTooltip()
+      .onChange((value) => this.update({ cards: { titleSize: value } })));
+
+    new Setting(this.contentEl).setName("Columns").setHeading();
+    let columnColor = null;
+    new Setting(this.contentEl).setName("Use theme column color").addToggle((toggle) => toggle
+      .setValue(appearance.lists.useTheme).onChange(async (value) => {
+        await this.update({ lists: { useTheme: value } });
+        if (columnColor) columnColor.setDisabled(value);
+      }));
+    new Setting(this.contentEl).setName("Column color").addColorPicker((picker) => {
+      columnColor = picker;
+      picker.setValue(appearance.lists.background).setDisabled(appearance.lists.useTheme)
+        .onChange((value) => this.update({ lists: { background: value } }));
+    });
+    new Setting(this.contentEl).setName("Column spacing").addSlider((slider) => slider
+      .setLimits(0, 40, 1).setValue(appearance.lists.columnGap).setDynamicTooltip()
+      .onChange((value) => this.update({ lists: { columnGap: value } })));
+    new Setting(this.contentEl).setName("Top border thickness").addSlider((slider) => slider
+      .setLimits(0, 12, 1).setValue(appearance.lists.topBorderWidth).setDynamicTooltip()
+      .onChange((value) => this.update({ lists: { topBorderWidth: value } })));
+    new Setting(this.contentEl).setName("Show color dot").addToggle((toggle) => toggle
+      .setValue(appearance.lists.showColorDot)
+      .onChange((value) => this.update({ lists: { showColorDot: value } })));
+
+    new Setting(this.contentEl).setName("Layout and typography").setHeading();
+    new Setting(this.contentEl).setName("Content contrast").addDropdown((dropdown) => dropdown
+      .addOption("theme", "Follow Obsidian theme").addOption("dark", "Light text").addOption("light", "Neutral dark text")
+      .setValue(appearance.colorScheme).onChange((value) => this.update({ colorScheme: value })));
+    new Setting(this.contentEl).setName("Density").addDropdown((dropdown) => dropdown
+      .addOption("compact", "Compact").addOption("normal", "Normal").addOption("comfortable", "Comfortable")
+      .setValue(appearance.density).onChange((value) => this.update({ density: value })));
+    new Setting(this.contentEl).setName("Text scale").addSlider((slider) => slider
+      .setLimits(0.85, 1.4, 0.05).setValue(appearance.fontScale).setDynamicTooltip()
+      .onChange((value) => this.update({ fontScale: value })));
+    new Setting(this.contentEl).setName("Card corners").addSlider((slider) => slider
+      .setLimits(0, 24, 1).setValue(appearance.cards.borderRadius).setDynamicTooltip()
+      .onChange((value) => this.update({ cards: { borderRadius: value } })));
+    new Setting(this.contentEl).setName("Column corners").addSlider((slider) => slider
+      .setLimits(0, 24, 1).setValue(appearance.lists.borderRadius).setDynamicTooltip()
+      .onChange((value) => this.update({ lists: { borderRadius: value } })));
+    new Setting(this.contentEl).setName("Card shadow").addDropdown((dropdown) => dropdown
+      .addOption("none", "None").addOption("small", "Small").addOption("medium", "Medium").addOption("large", "Large")
+      .setValue(appearance.cards.shadow).onChange((value) => this.update({ cards: { shadow: value } })));
+    new Setting(this.contentEl).setName("Animations").addToggle((toggle) => toggle
+      .setValue(appearance.motion.enabled).onChange((value) => this.update({ motion: { enabled: value } })));
+
+    const actions = createElement("div", "ot-modal-actions");
+    const reset = createElement("button", "mod-warning", "Reset this board");
+    const close = createElement("button", "mod-cta", "Done");
+    reset.type = "button";
+    close.type = "button";
+    reset.addEventListener("click", async () => {
+      await this.plugin.applyBoardAppearancePreset(this.boardId, "obsidian");
+      this.render();
+    });
+    close.addEventListener("click", () => this.close());
+    actions.append(reset, close);
+    this.contentEl.append(actions);
+    if (preserveScroll) requestAnimationFrame(() => { this.contentEl.scrollTop = scrollTop; });
   }
 }
 
@@ -1709,6 +2047,7 @@ class CardModal extends Modal {
     this.detailsDraft = "";
     this.editingDetails = false;
     this.localChecklists = [];
+    this.expandedChecklistNotes = new Set();
     this.detailsTextarea = null;
     this.addingChecklistId = null;
     this.saveTimer = null;
@@ -2017,7 +2356,7 @@ class CardModal extends Modal {
   disableEditing(fields) {
     fields.forEach((field) => {
       field.querySelectorAll("input, textarea, button, [contenteditable]").forEach((el) => {
-        if (el.classList.contains("ot-image-tile")) return;
+        if (el.classList.contains("ot-image-tile") || el.classList.contains("ot-checklist-note-action")) return;
         if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "BUTTON") {
           el.disabled = true;
         } else {
@@ -2047,12 +2386,12 @@ class CardModal extends Modal {
     field.append(createElement("span", "", "Labels"));
     const labelsWrap = createElement("div", "ot-selected-labels");
     const addButton = iconButton("plus", "Choose labels", () => {
-      new LabelPickerModal(this.app, this.localGlobalLabels, this.localLabels, (labels, selectedLabels) => {
+      new LabelPickerModal(this.app, this.localGlobalLabels, this.localLabels, (labels, selectedLabels, options = {}) => {
         this.localGlobalLabels = labels;
         this.localLabels = selectedLabels;
         renderLabels();
-        this.saveNow().catch(console.error);
-      }).open();
+        if (options.persist !== false) this.saveNow().catch(console.error);
+      }, (label) => this.plugin.deleteLabel(label)).open();
     });
     addButton.classList.add("ot-label-add-button");
 
@@ -3395,6 +3734,38 @@ class CardModal extends Modal {
    */
   renderChecklistField() {
     const field = createElement("div", "ot-checklists-field");
+    const checklistRenderers = new Map();
+    let draggedChecklistItem = null;
+
+    const clearChecklistDropState = () => {
+      field.querySelectorAll(".is-checklist-drop-before, .is-checklist-drop-after, .is-checklist-drop-end, .is-checklist-dragging")
+        .forEach((element) => element.classList.remove(
+          "is-checklist-drop-before",
+          "is-checklist-drop-after",
+          "is-checklist-drop-end",
+          "is-checklist-dragging",
+        ));
+    };
+
+    const moveChecklistItem = async (targetGroup, insertionIndex) => {
+      if (!draggedChecklistItem || !targetGroup) return;
+      const sourceGroup = this.localChecklists.find((candidate) => candidate.id === draggedChecklistItem.groupId);
+      if (!sourceGroup) return;
+      const sourceIndex = sourceGroup.items.indexOf(draggedChecklistItem.item);
+      if (sourceIndex < 0) return;
+
+      let nextIndex = insertionIndex;
+      sourceGroup.items.splice(sourceIndex, 1);
+      if (sourceGroup === targetGroup && sourceIndex < nextIndex) nextIndex -= 1;
+      nextIndex = Math.max(0, Math.min(nextIndex, targetGroup.items.length));
+      targetGroup.items.splice(nextIndex, 0, draggedChecklistItem.item);
+
+      const sourceRenderer = checklistRenderers.get(sourceGroup.id);
+      const targetRenderer = checklistRenderers.get(targetGroup.id);
+      if (sourceRenderer) sourceRenderer();
+      if (targetRenderer && targetRenderer !== sourceRenderer) targetRenderer();
+      await this.saveNow();
+    };
 
     const renderGroup = (group) => {
       const section = createElement("div", "ot-field ot-checklist-group");
@@ -3473,6 +3844,23 @@ class CardModal extends Modal {
       progress.append(progressText, progressTrack);
 
       const list = createElement("div", "ot-checklist");
+      list.addEventListener("dragover", (event) => {
+        if (!draggedChecklistItem || this.readOnly) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        list.classList.add("is-checklist-drop-end");
+      });
+      list.addEventListener("dragleave", (event) => {
+        if (!list.contains(event.relatedTarget)) list.classList.remove("is-checklist-drop-end");
+      });
+      list.addEventListener("drop", async (event) => {
+        if (!draggedChecklistItem || this.readOnly) return;
+        event.preventDefault();
+        list.classList.remove("is-checklist-drop-end");
+        await moveChecklistItem(group, group.items.length);
+        draggedChecklistItem = null;
+        clearChecklistDropState();
+      });
       const updateProgress = () => {
         const stats = checklistStats(group.items);
         progressText.textContent = `${stats.percent}%`;
@@ -3484,16 +3872,76 @@ class CardModal extends Modal {
         if (!group.items.length) list.append(createElement("span", "ot-empty-text", "No checklist items"));
 
         group.items.forEach((item, index) => {
+          const itemWrap = createElement("div", "ot-checklist-item");
           const row = createElement("div", "ot-checklist-row");
+          const dragHandle = createElement("span", "ot-checklist-drag-handle");
+          dragHandle.draggable = !this.readOnly;
+          dragHandle.title = "Drag to reorder checklist item";
+          dragHandle.setAttribute("aria-label", "Drag to reorder checklist item");
+          try {
+            setIcon(dragHandle, "grip-vertical");
+          } catch (error) {
+            dragHandle.textContent = "⋮⋮";
+          }
+          dragHandle.addEventListener("dragstart", (event) => {
+            if (this.readOnly) {
+              event.preventDefault();
+              return;
+            }
+            draggedChecklistItem = { groupId: group.id, item };
+            itemWrap.classList.add("is-checklist-dragging");
+            if (event.dataTransfer) {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", item.text || "Checklist item");
+            }
+          });
+          dragHandle.addEventListener("dragend", () => {
+            draggedChecklistItem = null;
+            clearChecklistDropState();
+          });
+          itemWrap.addEventListener("dragover", (event) => {
+            if (!draggedChecklistItem || this.readOnly) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (draggedChecklistItem.item === item) return;
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            const after = event.clientY >= itemWrap.getBoundingClientRect().top + (itemWrap.offsetHeight / 2);
+            itemWrap.classList.toggle("is-checklist-drop-before", !after);
+            itemWrap.classList.toggle("is-checklist-drop-after", after);
+          });
+          itemWrap.addEventListener("dragleave", () => {
+            itemWrap.classList.remove("is-checklist-drop-before", "is-checklist-drop-after");
+          });
+          itemWrap.addEventListener("drop", async (event) => {
+            if (!draggedChecklistItem || this.readOnly) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (draggedChecklistItem.item === item) {
+              clearChecklistDropState();
+              return;
+            }
+            const targetIndex = group.items.indexOf(item);
+            const after = itemWrap.classList.contains("is-checklist-drop-after");
+            itemWrap.classList.remove("is-checklist-drop-before", "is-checklist-drop-after");
+            await moveChecklistItem(group, targetIndex + (after ? 1 : 0));
+            draggedChecklistItem = null;
+            clearChecklistDropState();
+          });
           const checkbox = createElement("input");
           checkbox.type = "checkbox";
           checkbox.checked = !!item.done;
-          const input = createElement("input", "ot-checklist-title");
-          input.type = "text";
+          const input = createElement("textarea", "ot-checklist-title");
+          input.rows = 1;
           input.value = item.text || "";
+          input.setAttribute("aria-label", "Checklist item");
+          const resizeTitle = () => {
+            input.style.height = "auto";
+            input.style.height = `${input.scrollHeight}px`;
+          };
+          requestAnimationFrame(resizeTitle);
           const actions = createElement("div", "ot-checklist-item-actions");
-          const noteButton = iconButton(item.filePath ? "file-text" : "file-plus", item.filePath ? "Open Markdown note" : "Create Markdown note", async () => {
-            noteButton.disabled = true;
+          const createNoteButton = !item.filePath ? iconButton("file-plus", "Create Markdown note", async () => {
+            createNoteButton.disabled = true;
             try {
               const file = await this.plugin.ensureChecklistItemFile(this.card, item);
               item.filePath = file.path;
@@ -3502,12 +3950,78 @@ class CardModal extends Modal {
               this.close();
             } catch (error) {
               console.error(error);
-              new Notice("Could not open the checklist item note.");
-              noteButton.disabled = false;
+              new Notice("Could not create the checklist item note.");
+              createNoteButton.disabled = false;
             }
-          });
-          noteButton.classList.add("ot-checklist-note");
-          noteButton.classList.toggle("is-linked", !!item.filePath);
+          }) : null;
+
+          if (createNoteButton) createNoteButton.classList.add("ot-checklist-note");
+
+          const noteKey = item.filePath || "";
+          let notePanel = null;
+          let noteToggle = null;
+          let noteContent = null;
+
+          const showNoteBody = async () => {
+            noteContent.replaceChildren(createElement("span", "ot-checklist-note-status", "Loading Markdown description..."));
+            try {
+              const file = this.plugin.resolveChecklistItemFile(this.card, item);
+              if (!file) throw new Error("Checklist item note not found");
+              const markdown = await this.app.vault.read(file);
+              if (!this.expandedChecklistNotes.has(noteKey) || !noteContent.isConnected) return;
+              const body = checklistItemNoteBody(markdown);
+              noteContent.replaceChildren();
+              if (!body) {
+                noteContent.append(createElement("span", "ot-checklist-note-status", "This note has no description."));
+                return;
+              }
+              await MarkdownRenderer.render(this.app, body, noteContent, file.path, this);
+            } catch (error) {
+              console.error(error);
+              if (!this.expandedChecklistNotes.has(noteKey) || !noteContent.isConnected) return;
+              noteContent.replaceChildren(createElement("span", "ot-checklist-note-status is-error", "Could not read the Markdown description."));
+            }
+          };
+
+          if (item.filePath) {
+            noteToggle = textButton("file-text", "Markdown", () => {
+              const expanded = !this.expandedChecklistNotes.has(noteKey);
+              if (expanded) this.expandedChecklistNotes.add(noteKey);
+              else this.expandedChecklistNotes.delete(noteKey);
+              notePanel.hidden = !expanded;
+              noteToggle.classList.toggle("is-expanded", expanded);
+              noteToggle.setAttribute("aria-expanded", String(expanded));
+              noteToggle.title = expanded ? "Hide Markdown description" : "Show Markdown description";
+              setIcon(noteToggle.querySelector(".ot-checklist-note-chevron"), expanded ? "chevron-up" : "chevron-down");
+              if (expanded) showNoteBody();
+            }, "ot-checklist-note-toggle ot-checklist-note-action");
+            noteToggle.title = "Show Markdown description";
+            noteToggle.setAttribute("aria-expanded", "false");
+            const chevron = createElement("span", "ot-checklist-note-chevron");
+            setIcon(chevron, "chevron-down");
+            noteToggle.append(chevron);
+
+            const openNoteButton = iconButton("file-text", "Open Markdown note", async () => {
+              openNoteButton.disabled = true;
+              try {
+                const file = this.plugin.resolveChecklistItemFile(this.card, item);
+                if (!file) throw new Error("Checklist item note not found");
+                await this.plugin.openChecklistItemFile(file.path);
+                this.close();
+              } catch (error) {
+                console.error(error);
+                new Notice("Could not open the checklist item note.");
+                openNoteButton.disabled = false;
+              }
+            });
+            openNoteButton.classList.add("ot-checklist-note-open", "ot-checklist-note-action");
+            actions.append(noteToggle, openNoteButton);
+
+            notePanel = createElement("div", "ot-checklist-note-panel");
+            notePanel.hidden = true;
+            noteContent = createElement("div", "ot-checklist-note-content markdown-rendered");
+            notePanel.append(noteContent);
+          }
           const remove = iconButton("x", "Remove item", async () => {
             if (item.filePath) {
               const confirmed = window.confirm(`Remove "${item.text || "Checklist item"}"? Its linked Markdown note will also be moved to the trash.`);
@@ -3532,7 +4046,17 @@ class CardModal extends Modal {
           });
           input.addEventListener("input", () => {
             item.text = input.value;
+            resizeTitle();
             this.queueSave();
+          });
+          input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") event.preventDefault();
+          });
+          input.addEventListener("blur", () => {
+            item.text = textLine(input.value);
+            input.value = item.text;
+            resizeTitle();
+            this.saveNow().catch(console.error);
           });
 
           let assigneeBtn = null;
@@ -3572,17 +4096,31 @@ class CardModal extends Modal {
             });
           }
 
-          actions.append(noteButton, remove);
+          if (createNoteButton) actions.append(createNoteButton);
+          actions.append(remove);
           if (assigneeBtn) {
-            row.append(assigneeBtn, checkbox, input, actions);
+            row.append(dragHandle, assigneeBtn, checkbox, input, actions);
           } else {
-            row.style.setProperty("grid-template-columns", "20px minmax(0, 1fr) auto", "important");
-            row.append(checkbox, input, actions);
+            row.style.setProperty("grid-template-columns", "18px 20px minmax(0, 1fr) auto", "important");
+            row.append(dragHandle, checkbox, input, actions);
           }
-          list.append(row);
+          itemWrap.append(row);
+          if (notePanel) {
+            itemWrap.append(notePanel);
+            if (this.expandedChecklistNotes.has(noteKey)) {
+              notePanel.hidden = false;
+              noteToggle.classList.add("is-expanded");
+              noteToggle.setAttribute("aria-expanded", "true");
+              noteToggle.title = "Hide Markdown description";
+              setIcon(noteToggle.querySelector(".ot-checklist-note-chevron"), "chevron-up");
+              showNoteBody();
+            }
+          }
+          list.append(itemWrap);
         });
         updateProgress();
       };
+      checklistRenderers.set(group.id, renderItems);
 
       const addArea = createElement("div", "ot-checklist-add");
       const renderAddArea = () => {
@@ -3712,6 +4250,7 @@ module.exports = {
   TextPromptModal,
   LabelPickerModal,
   ListColorModal,
+  BoardAppearanceModal,
   CardDatesModal,
   AboutModal,
   CardModal,
@@ -3738,7 +4277,7 @@ const {
   textButton,
   textLine,
 } = __require("src/helpers.js");
-const { AboutModal, CardDatesModal, CardModal, LabelPickerModal, ListColorModal } = __require("src/modals.js");
+const { AboutModal, BoardAppearanceModal, CardDatesModal, CardModal, LabelPickerModal, ListColorModal } = __require("src/modals.js");
 
 // Live board presence (SyncDeck cursors) tuning.
 // The transport stays plain HTTP polling; smoothness comes from client-side
@@ -3794,7 +4333,11 @@ class BoardView extends ItemView {
     this.stopPresence();
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-board-root");
-    this.contentEl.classList.toggle("is-compact-labels", !!this.plugin.data.compactLabels);
+    const labelDisplayMode = this.plugin.getLabelDisplayMode();
+    this.contentEl.classList.toggle("is-compact-labels", labelDisplayMode === "compact");
+    this.contentEl.classList.toggle("is-hover-labels", labelDisplayMode === "hover");
+    this.contentEl.classList.toggle("is-card-hover-labels", labelDisplayMode === "card-hover");
+    this.applyAppearance();
 
     // Update banner sits above everything (board home OR a board), so it shows
     // before the user does anything.
@@ -3817,16 +4360,20 @@ class BoardView extends ItemView {
     if (this.plugin.data.boards.length > 1) title.append(this.renderBoardSelect(board));
     title.append(this.renderViewSwitch(board, mode));
     toolbar.append(title);
+    const primaryActions = createElement("div", "ot-toolbar-primary");
+    primaryActions.append(
+      textButton("plus-square", "New board", () => this.plugin.createBoardPrompt()),
+      textButton("plus", "Add list", () => this.plugin.addList())
+    );
+    toolbar.append(primaryActions);
     const actions = createElement("div", "ot-toolbar-actions");
-    actions.append(textButton("plus-square", "New board", () => this.plugin.createBoardPrompt()));
     // Cross-sell only for users who don't have Sync Deck yet; hide once installed.
     if (this.plugin.isSyncDeckEnabled() && !this.plugin.getSyncDeckPlugin()) {
       actions.append(textButton("cloud", "Sync Boards", () => this.plugin.openSyncDeck(), "ot-cloud-cta"));
     }
     actions.append(
-      textButton("info", "About", () => new AboutModal(this.app, this.plugin).open()),
-      textButton("heart", "Support", () => window.open(DONATION_URL, "_blank")),
-      textButton("plus", "Add list", () => this.plugin.addList())
+      textButton("palette", "Customize", () => new BoardAppearanceModal(this.app, this.plugin, board.id).open()),
+      textButton("info", "About", () => new AboutModal(this.app, this.plugin).open())
     );
     toolbar.append(actions);
 
@@ -4365,9 +4912,82 @@ class BoardView extends ItemView {
   }
 
   openLabelPicker(card) {
-    new LabelPickerModal(this.app, this.plugin.data.labels || [], card.labels || [], async (labels, selectedLabels) => {
+    new LabelPickerModal(this.app, this.plugin.data.labels || [], card.labels || [], async (labels, selectedLabels, options = {}) => {
+      if (options.persist === false) return;
       await this.plugin.updateCard(card.id, { labels: selectedLabels }, labels);
-    }).open();
+    }, (label) => this.plugin.deleteLabel(label)).open();
+  }
+
+  applyAppearance() {
+    const root = this.contentEl;
+    const appearance = this.plugin.getAppearance();
+    const density = {
+      compact: { listWidth: 258, listMinWidth: 244, cardPadding: "7px 8px", cardGap: 6 },
+      normal: { listWidth: 292, listMinWidth: 272, cardPadding: "9px 10px", cardGap: 8 },
+      comfortable: { listWidth: 326, listMinWidth: 300, cardPadding: "12px", cardGap: 10 },
+    }[appearance.density];
+    const shadows = {
+      none: "none",
+      small: "0 1px 2px rgb(0 0 0 / 16%)",
+      medium: "0 2px 4px rgb(0 0 0 / 24%), 0 1px 1px rgb(0 0 0 / 16%)",
+      large: "0 6px 16px rgb(0 0 0 / 32%), 0 2px 4px rgb(0 0 0 / 22%)",
+    };
+
+    root.style.setProperty("--ot-font-scale", String(appearance.fontScale));
+    root.style.setProperty("--ot-list-width", `${density.listWidth}px`);
+    root.style.setProperty("--ot-list-min-width", `${density.listMinWidth}px`);
+    root.style.setProperty("--ot-card-padding", density.cardPadding);
+    root.style.setProperty("--ot-card-gap", `${appearance.cards.verticalGap}px`);
+    root.style.setProperty("--ot-card-radius", `${appearance.cards.borderRadius}px`);
+    root.style.setProperty("--ot-card-hover-background", appearance.cards.hoverBackground);
+    root.style.setProperty("--ot-card-title-size", `${appearance.cards.titleSize}px`);
+    root.style.setProperty("--ot-column-gap", `${appearance.lists.columnGap}px`);
+    root.style.setProperty("--ot-list-top-border-width", `${appearance.lists.topBorderWidth}px`);
+    root.style.setProperty("--ot-list-radius", `${appearance.lists.borderRadius}px`);
+    root.style.setProperty("--ot-card-shadow", shadows[appearance.cards.shadow] || shadows.medium);
+    root.style.setProperty("--ot-card-background", appearance.cards.useTheme
+      ? "color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 88%, var(--background-modifier-hover) 12%)"
+      : appearance.cards.background);
+    root.style.setProperty("--ot-list-background", appearance.lists.useTheme
+      ? "color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%)"
+      : appearance.lists.background);
+    root.classList.toggle("is-motion-disabled", !appearance.motion.enabled);
+    root.classList.toggle("is-appearance-dark", appearance.colorScheme === "dark");
+    root.classList.toggle("is-appearance-light", appearance.colorScheme === "light");
+    root.classList.toggle("is-surfaces-dark", appearance.surfaceScheme === "dark");
+    root.classList.toggle("is-surfaces-light", appearance.surfaceScheme === "light");
+    root.classList.toggle("is-list-color-dot-hidden", !appearance.lists.showColorDot);
+
+    root.style.removeProperty("background-image");
+    root.style.removeProperty("background-color");
+    root.style.removeProperty("background-size");
+    root.style.removeProperty("background-position");
+    root.style.removeProperty("background-repeat");
+    root.style.removeProperty("background-attachment");
+    const background = appearance.background;
+    if (background.type === "solid") {
+      root.style.setProperty("background-color", background.color, "important");
+    } else if (background.type === "gradient") {
+      root.style.setProperty("background-color", background.gradientEnd, "important");
+      root.style.setProperty("background-image", `linear-gradient(135deg, ${background.gradientStart}, ${background.gradientEnd})`);
+    } else if (background.type === "image" && background.imagePath) {
+      const resourcePath = this.plugin.getAppearanceBackgroundResource(background);
+      if (resourcePath) {
+        const resource = resourcePath.replace(/"/g, "\\\"");
+        const alpha = background.overlayOpacity;
+        const imageSize = ["repeat", "original"].includes(background.imageFit) ? "auto" : background.imageFit;
+        root.style.setProperty("background-color", "var(--background-primary)", "important");
+        root.style.setProperty("background-image", `linear-gradient(rgb(0 0 0 / ${alpha}), rgb(0 0 0 / ${alpha})), url("${resource}")`);
+        root.style.setProperty("background-position", "center, center");
+        root.style.setProperty("background-size", `auto, ${imageSize}`);
+        root.style.setProperty("background-repeat", background.imageFit === "repeat" ? "no-repeat, repeat" : "no-repeat, no-repeat");
+        root.style.setProperty("background-attachment", "local");
+      } else {
+        root.style.setProperty("background-color", "var(--background-primary)", "important");
+      }
+    } else {
+      root.style.setProperty("background-color", "var(--background-primary)", "important");
+    }
   }
 
   renderTableComposer(board) {
@@ -4972,10 +5592,6 @@ class BoardView extends ItemView {
       const pill = createElement("span", "ot-card-label", label.name);
       pill.style.backgroundColor = label.color;
       pill.title = label.name;
-      pill.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        await this.plugin.toggleCompactLabels();
-      });
       labels.append(pill);
     });
 
@@ -5130,6 +5746,7 @@ class BoardView extends ItemView {
     if (checklist.length) {
       const stats = checklistStats(checklist);
       const badge = createElement("span", "ot-card-meta-item ot-card-checklist-badge");
+      badge.classList.toggle("is-complete", stats.total > 0 && stats.done === stats.total);
       const icon = createElement("span", "ot-card-checklist-icon");
       try {
         setIcon(icon, "check-square");
@@ -5216,10 +5833,30 @@ module.exports = { COMPLETION_SOUND_URL };
 
   },
   "src/settings-tab.js": function(module, exports, __require) {
-const { Notice, PluginSettingTab, Setting } = require("obsidian");
+const { FuzzySuggestModal, Notice, PluginSettingTab, Setting } = require("obsidian");
 
 // Settings tab for board access, sync, preferences, support, and version info.
-const { DONATION_URL } = __require("src/helpers.js");
+const { DONATION_URL, isImagePath } = __require("src/helpers.js");
+
+class VaultImageSuggestModal extends FuzzySuggestModal {
+  constructor(app, onChoose) {
+    super(app);
+    this.onChoose = onChoose;
+    this.setPlaceholder("Choose an image from the vault");
+  }
+
+  getItems() {
+    return this.app.vault.getFiles().filter((file) => isImagePath(file.path));
+  }
+
+  getItemText(file) {
+    return file.path;
+  }
+
+  onChooseItem(file) {
+    this.onChoose(file);
+  }
+}
 
 /**
  * Obsidian settings tab for Task Deck.
@@ -5228,6 +5865,38 @@ class TaskDeckSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+  }
+
+  redisplayPreservingScroll() {
+    const scroller = this.containerEl.closest(".vertical-tab-content-container") || this.containerEl.parentElement || this.containerEl;
+    const top = scroller.scrollTop;
+    const left = scroller.scrollLeft;
+    this.display();
+    requestAnimationFrame(() => {
+      scroller.scrollTop = top;
+      scroller.scrollLeft = left;
+    });
+  }
+
+  chooseComputerBackground() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/bmp,image/avif,image/x-icon";
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      try {
+        const imagePath = await this.plugin.importAppearanceBackground(file);
+        await this.plugin.updateAppearance({
+          background: { type: "image", imageSource: "plugin", imagePath, imageFit: "contain" },
+        });
+        this.redisplayPreservingScroll();
+        new Notice("Background image imported into Task Deck's private data folder.");
+      } catch (error) {
+        new Notice(error && error.message ? error.message : "The background image could not be imported.");
+      }
+    }, { once: true });
+    input.click();
   }
 
   display() {
@@ -5261,14 +5930,16 @@ class TaskDeckSettingTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
-      .setName("Compact labels")
-      .setDesc("Show labels as small colour bars on cards instead of full pills.")
-      .addToggle((toggle) => toggle
-        .setValue(!!this.plugin.data.compactLabels)
+      .setName("Label display")
+      .setDesc("Choose whether card labels show their names or remain compact.")
+      .addDropdown((dropdown) => dropdown
+        .addOption("compact", "Always compact")
+        .addOption("expanded", "Always expanded")
+        .addOption("hover", "Expand when label is hovered")
+        .addOption("card-hover", "Expand when card is hovered")
+        .setValue(this.plugin.getLabelDisplayMode())
         .onChange(async (value) => {
-          this.plugin.data.compactLabels = value;
-          await this.plugin.savePluginData();
-          this.plugin.refreshViews();
+          await this.plugin.setLabelDisplayMode(value);
         }));
 
     new Setting(containerEl)
@@ -5300,7 +5971,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
         .setValue(this.plugin.isSyncDeckEnabled())
         .onChange(async (value) => {
           await this.plugin.setSyncDeckEnabled(value);
-          this.display();
+          this.redisplayPreservingScroll();
         }));
 
     if (!this.plugin.isSyncDeckEnabled()) {
@@ -5323,6 +5994,224 @@ class TaskDeckSettingTab extends PluginSettingTab {
         .onClick(() => this.plugin.openSyncDeck()));
 
     this.renderAbout(containerEl);
+  }
+
+  renderAppearance(containerEl) {
+    const appearance = this.plugin.getAppearance();
+    const update = (patch, rerender = false) => this.plugin.updateAppearance(patch).then(() => {
+      if (rerender) this.redisplayPreservingScroll();
+    });
+
+    new Setting(containerEl).setName("Appearance").setHeading();
+
+    new Setting(containerEl)
+      .setName("Visual preset")
+      .setDesc("Start from a complete visual style, then customize individual values.")
+      .addDropdown((dropdown) => dropdown
+        .addOption("obsidian", "Obsidian theme")
+        .addOption("trello-dark", "Trello dark")
+        .addOption("trello-light", "Trello light")
+        .addOption("transparent", "Transparent")
+        .addOption("high-contrast", "High contrast")
+        .addOption("custom", "Custom")
+        .setValue(appearance.preset)
+        .onChange(async (value) => {
+          if (value === "custom") {
+            await this.plugin.updateAppearance({ preset: "custom" }, { keepPreset: true });
+            return;
+          }
+          await this.plugin.applyAppearancePreset(value);
+          this.redisplayPreservingScroll();
+        }));
+
+    new Setting(containerEl)
+      .setName("Content contrast")
+      .setDesc("Changes text color only. Background and surface colors remain unchanged.")
+      .addDropdown((dropdown) => dropdown
+        .addOption("theme", "Follow Obsidian theme")
+        .addOption("dark", "Light text on dark surfaces")
+        .addOption("light", "Dark text on light surfaces")
+        .setValue(appearance.colorScheme)
+        .onChange((value) => update({ colorScheme: value })));
+
+    new Setting(containerEl).setName("Background").setHeading();
+
+    new Setting(containerEl)
+      .setName("Board background")
+      .setDesc("Use the Obsidian theme, a solid color, a gradient, or an image.")
+      .addDropdown((dropdown) => dropdown
+        .addOption("theme", "Obsidian theme")
+        .addOption("solid", "Solid color")
+        .addOption("gradient", "Gradient")
+        .addOption("image", "Image")
+        .setValue(appearance.background.type)
+        .onChange((value) => update({ background: { type: value } }, true)));
+
+    if (appearance.background.type === "solid") {
+      new Setting(containerEl)
+        .setName("Background color")
+        .addColorPicker((picker) => picker
+          .setValue(appearance.background.color)
+          .onChange((value) => update({ background: { color: value } })));
+    }
+
+    if (appearance.background.type === "gradient") {
+      new Setting(containerEl)
+        .setName("Gradient start")
+        .addColorPicker((picker) => picker
+          .setValue(appearance.background.gradientStart)
+          .onChange((value) => update({ background: { gradientStart: value } })));
+      new Setting(containerEl)
+        .setName("Gradient end")
+        .addColorPicker((picker) => picker
+          .setValue(appearance.background.gradientEnd)
+          .onChange((value) => update({ background: { gradientEnd: value } })));
+    }
+
+    if (appearance.background.type === "image") {
+      const imageSetting = new Setting(containerEl)
+        .setName("Background image")
+        .setDesc(appearance.background.imagePath
+          ? `${appearance.background.imageSource === "plugin" ? "Task Deck data" : "Vault"}: ${appearance.background.imagePath.split("/").pop()}`
+          : "No image selected.")
+        .addButton((button) => button.setButtonText("From vault").onClick(() => {
+          new VaultImageSuggestModal(this.app, async (file) => {
+            await update({ background: { imageSource: "vault", imagePath: file.path, imageFit: "contain" } });
+            this.redisplayPreservingScroll();
+          }).open();
+        }))
+        .addButton((button) => button.setButtonText("From computer").setCta().onClick(() => this.chooseComputerBackground()));
+      if (appearance.background.imagePath) {
+        imageSetting.addButton((button) => button.setButtonText("Clear").onClick(() => update({ background: { imagePath: "" } }, true)));
+      }
+
+      new Setting(containerEl)
+        .setName("Image fit")
+        .setDesc("Fit shows the complete image without stretching or cropping it.")
+        .addDropdown((dropdown) => dropdown
+          .addOption("contain", "Fit — no cropping")
+          .addOption("cover", "Fill — crop edges")
+          .addOption("repeat", "Repeat")
+          .setValue(appearance.background.imageFit)
+          .onChange((value) => update({ background: { imageFit: value } })));
+
+      new Setting(containerEl)
+        .setName("Image darkening")
+        .setDesc("Adds a dark overlay so cards and controls remain readable.")
+        .addSlider((slider) => slider
+          .setLimits(0, 0.85, 0.05)
+          .setValue(appearance.background.overlayOpacity)
+          .setDynamicTooltip()
+          .onChange((value) => update({ background: { overlayOpacity: value } })));
+    }
+
+    new Setting(containerEl).setName("Cards and columns").setHeading();
+
+    let cardColorPicker = null;
+    new Setting(containerEl)
+      .setName("Use theme card color")
+      .setDesc("Derive card surfaces from the active Obsidian theme.")
+      .addToggle((toggle) => toggle
+        .setValue(appearance.cards.useTheme)
+        .onChange(async (value) => {
+          await update({ cards: { useTheme: value } });
+          if (cardColorPicker) cardColorPicker.setDisabled(value);
+        }));
+    new Setting(containerEl)
+      .setName("Card color")
+      .setDesc(appearance.cards.useTheme ? "Disable theme card color to customize this value." : "Global card surface color.")
+      .addColorPicker((picker) => {
+        cardColorPicker = picker;
+        picker
+          .setValue(appearance.cards.background)
+          .setDisabled(appearance.cards.useTheme)
+          .onChange((value) => update({ cards: { background: value } }));
+      });
+
+    let columnColorPicker = null;
+    new Setting(containerEl)
+      .setName("Use theme column color")
+      .setDesc("Derive column surfaces from the active Obsidian theme.")
+      .addToggle((toggle) => toggle
+        .setValue(appearance.lists.useTheme)
+        .onChange(async (value) => {
+          await update({ lists: { useTheme: value } });
+          if (columnColorPicker) columnColorPicker.setDisabled(value);
+        }));
+    new Setting(containerEl)
+      .setName("Column color")
+      .setDesc(appearance.lists.useTheme ? "Disable theme column color to customize this value." : "Global column surface color.")
+      .addColorPicker((picker) => {
+        columnColorPicker = picker;
+        picker
+          .setValue(appearance.lists.background)
+          .setDisabled(appearance.lists.useTheme)
+          .onChange((value) => update({ lists: { background: value } }));
+      });
+
+    new Setting(containerEl).setName("Layout and typography").setHeading();
+
+    new Setting(containerEl)
+      .setName("Density")
+      .setDesc("Controls column width, card padding, and spacing between cards.")
+      .addDropdown((dropdown) => dropdown
+        .addOption("compact", "Compact")
+        .addOption("normal", "Normal")
+        .addOption("comfortable", "Comfortable")
+        .setValue(appearance.density)
+        .onChange((value) => update({ density: value })));
+
+    new Setting(containerEl)
+      .setName("Text scale")
+      .setDesc("Scale text throughout the board.")
+      .addSlider((slider) => slider
+        .setLimits(0.85, 1.4, 0.05)
+        .setValue(appearance.fontScale)
+        .setDynamicTooltip()
+        .onChange((value) => update({ fontScale: value })));
+
+    new Setting(containerEl)
+      .setName("Card corners")
+      .addSlider((slider) => slider
+        .setLimits(0, 24, 1)
+        .setValue(appearance.cards.borderRadius)
+        .setDynamicTooltip()
+        .onChange((value) => update({ cards: { borderRadius: value } })));
+
+    new Setting(containerEl)
+      .setName("Column corners")
+      .addSlider((slider) => slider
+        .setLimits(0, 24, 1)
+        .setValue(appearance.lists.borderRadius)
+        .setDynamicTooltip()
+        .onChange((value) => update({ lists: { borderRadius: value } })));
+
+    new Setting(containerEl)
+      .setName("Card shadow")
+      .addDropdown((dropdown) => dropdown
+        .addOption("none", "None")
+        .addOption("small", "Small")
+        .addOption("medium", "Medium")
+        .addOption("large", "Large")
+        .setValue(appearance.cards.shadow)
+        .onChange((value) => update({ cards: { shadow: value } })));
+
+    new Setting(containerEl).setName("Motion").setHeading();
+
+    new Setting(containerEl)
+      .setName("Animations")
+      .setDesc("Enable hover, completion, drag, and label transitions.")
+      .addToggle((toggle) => toggle
+        .setValue(appearance.motion.enabled)
+        .onChange((value) => update({ motion: { enabled: value } })));
+
+    new Setting(containerEl)
+      .setName("Reset appearance")
+      .setDesc("Restore Task Deck's Obsidian-theme appearance defaults.")
+      .addButton((button) => button.setButtonText("Reset").setWarning().onClick(async () => {
+        await this.plugin.applyAppearancePreset("obsidian");
+        this.redisplayPreservingScroll();
+      }));
   }
 
   renderAbout(containerEl) {
@@ -5349,6 +6238,7 @@ const { Notice, Plugin, addIcon, requestUrl } = require("obsidian");
 // Owns the Obsidian plugin lifecycle, saved board data, and Markdown card sync.
 const {
   BOARD_INDEX_MARKER,
+  DEFAULT_APPEARANCE,
   DEFAULT_DATA,
   LEGACY_BOARD_INDEX_SUFFIX,
   LEGACY_CARD_FOLDER,
@@ -5553,16 +6443,34 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
    */
   async loadPluginData() {
     const saved = await this.loadData();
+    const savedLabelDisplayMode = saved && saved.labelDisplayMode;
+    const needsLabelDisplayMigration = !["compact", "expanded", "hover", "card-hover"].includes(savedLabelDisplayMode);
+    const savedBackground = saved && saved.appearance && saved.appearance.background;
+    const needsImageFitMigration = !!savedBackground
+      && savedBackground.type === "image"
+      && savedBackground.imageFitVersion !== 3;
     this.data = Object.assign(clone(DEFAULT_DATA), saved || {});
     this.data.boards = Array.isArray(this.data.boards) ? this.data.boards : [];
     this.data.cards = this.data.cards || {};
     this.data.labels = this.data.labels || [];
     this.data.syncDeckEnabled = this.data.syncDeckEnabled !== false;
     this.data.completionSound = this.data.completionSound !== false;
-    this.data.compactLabels = !!this.data.compactLabels;
+    this.data.labelDisplayMode = needsLabelDisplayMigration
+      ? (this.data.compactLabels ? "compact" : "expanded")
+      : savedLabelDisplayMode;
+    this.data.compactLabels = this.data.labelDisplayMode === "compact";
+    if (needsImageFitMigration) this.data.appearance.background.imageFit = "original";
+    this.data.appearance = this.normalizeAppearance(this.data.appearance);
     this.data.labels = this.normalizeGlobalLabels(this.data.labels);
-    this.data.boards = this.data.boards.map((board) => this.normalizeBoard(board));
-    this.loadNeedsSave = this.ensureListColors();
+    const needsBoardAppearanceMigration = this.data.boards.some((board) => {
+      const background = board && board.appearance && board.appearance.background;
+      return !board || !board.appearance || (background && background.type === "image" && background.imageFitVersion !== 3);
+    });
+    this.data.boards = this.data.boards.map((board) => this.normalizeBoard(board, this.data.appearance));
+    this.loadNeedsSave = this.ensureListColors()
+      || needsLabelDisplayMigration
+      || needsImageFitMigration
+      || needsBoardAppearanceMigration;
     Object.values(this.data.cards).forEach((card) => {
       const needsChecklistMigration = !Array.isArray(card.checklists) || Object.prototype.hasOwnProperty.call(card, "checklist");
       card.boardId = card.boardId || this.boardIdForList(card.listId) || this.data.activeBoardId || "";
@@ -5658,7 +6566,13 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     return this.data.boards.find((board) => board.id === boardId) || null;
   }
 
-  normalizeBoard(board) {
+  normalizeBoard(board, fallbackAppearance = DEFAULT_APPEARANCE) {
+    const appearance = clone((board && board.appearance) || fallbackAppearance);
+    if (appearance.background
+      && appearance.background.type === "image"
+      && appearance.background.imageFitVersion !== 3) {
+      appearance.background.imageFit = "original";
+    }
     return {
       id: board && board.id ? board.id : uid("board"),
       name: textLine(board && board.name) || "Untitled board",
@@ -5672,6 +6586,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         }))
         : [],
       deletedListIds: Array.isArray(board && board.deletedListIds) ? board.deletedListIds : [],
+      appearance: this.normalizeAppearance(appearance),
     };
   }
 
@@ -5870,6 +6785,283 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         seen.add(key);
         return true;
       });
+  }
+
+  normalizeAppearance(appearance) {
+    const source = appearance && typeof appearance === "object" ? appearance : {};
+    const background = source.background && typeof source.background === "object" ? source.background : {};
+    const cards = source.cards && typeof source.cards === "object" ? source.cards : {};
+    const lists = source.lists && typeof source.lists === "object" ? source.lists : {};
+    const motion = source.motion && typeof source.motion === "object" ? source.motion : {};
+    const inferredSurfaceScheme = source.preset === "trello-light"
+      ? "light"
+      : (["trello-dark", "high-contrast"].includes(source.preset) ? "dark" : DEFAULT_APPEARANCE.surfaceScheme);
+    const inferredCardHover = source.preset === "trello-light" || source.surfaceScheme === "light"
+      ? "#f4f5f7"
+      : DEFAULT_APPEARANCE.cards.hoverBackground;
+    const number = (value, fallback, min, max) => Number.isFinite(Number(value))
+      ? Math.min(max, Math.max(min, Number(value)))
+      : fallback;
+    const choice = (value, choices, fallback) => choices.includes(value) ? value : fallback;
+
+    return {
+      preset: choice(source.preset, ["obsidian", "trello-dark", "trello-light", "transparent", "high-contrast", "custom"], DEFAULT_APPEARANCE.preset),
+      colorScheme: choice(source.colorScheme, ["theme", "dark", "light"], DEFAULT_APPEARANCE.colorScheme),
+      surfaceScheme: choice(source.surfaceScheme, ["theme", "dark", "light"], inferredSurfaceScheme),
+      density: choice(source.density, ["compact", "normal", "comfortable"], DEFAULT_APPEARANCE.density),
+      fontScale: number(source.fontScale, DEFAULT_APPEARANCE.fontScale, 0.85, 1.4),
+      background: {
+        type: choice(background.type, ["theme", "solid", "gradient", "image"], DEFAULT_APPEARANCE.background.type),
+        color: cleanColor(background.color) || DEFAULT_APPEARANCE.background.color,
+        gradientStart: cleanColor(background.gradientStart) || DEFAULT_APPEARANCE.background.gradientStart,
+        gradientEnd: cleanColor(background.gradientEnd) || DEFAULT_APPEARANCE.background.gradientEnd,
+        imagePath: textLine(background.imagePath),
+        imageSource: choice(background.imageSource, ["vault", "plugin"], DEFAULT_APPEARANCE.background.imageSource),
+        imageFit: choice(background.imageFit, ["original", "cover", "contain", "repeat"], DEFAULT_APPEARANCE.background.imageFit),
+        imageFitVersion: 3,
+        overlayOpacity: number(background.overlayOpacity, DEFAULT_APPEARANCE.background.overlayOpacity, 0, 0.85),
+      },
+      cards: {
+        useTheme: cards.useTheme !== false,
+        background: cleanColor(cards.background) || DEFAULT_APPEARANCE.cards.background,
+        hoverBackground: cleanColor(cards.hoverBackground) || inferredCardHover,
+        verticalGap: number(cards.verticalGap, DEFAULT_APPEARANCE.cards.verticalGap, 0, 28),
+        titleSize: number(cards.titleSize, DEFAULT_APPEARANCE.cards.titleSize, 12, 30),
+        borderRadius: number(cards.borderRadius, DEFAULT_APPEARANCE.cards.borderRadius, 0, 24),
+        shadow: choice(cards.shadow, ["none", "small", "medium", "large"], DEFAULT_APPEARANCE.cards.shadow),
+      },
+      lists: {
+        useTheme: lists.useTheme !== false,
+        background: cleanColor(lists.background) || DEFAULT_APPEARANCE.lists.background,
+        columnGap: number(lists.columnGap, DEFAULT_APPEARANCE.lists.columnGap, 0, 40),
+        topBorderWidth: number(lists.topBorderWidth, DEFAULT_APPEARANCE.lists.topBorderWidth, 0, 12),
+        showColorDot: lists.showColorDot !== false,
+        borderRadius: number(lists.borderRadius, DEFAULT_APPEARANCE.lists.borderRadius, 0, 24),
+      },
+      motion: {
+        enabled: motion.enabled !== false,
+      },
+    };
+  }
+
+  getAppearance() {
+    const board = this.getBoard();
+    if (!board) {
+      this.data.appearance = this.normalizeAppearance(this.data.appearance);
+      return this.data.appearance;
+    }
+    board.appearance = this.normalizeAppearance(board.appearance || this.data.appearance);
+    return board.appearance;
+  }
+
+  getBoardAppearance(boardId) {
+    const board = this.findBoard(boardId);
+    if (!board) return this.normalizeAppearance(DEFAULT_APPEARANCE);
+    board.appearance = this.normalizeAppearance(board.appearance || this.data.appearance);
+    return board.appearance;
+  }
+
+  getAppearanceAssetFolder() {
+    const configDir = this.app.vault.configDir || ".obsidian";
+    return `${configDir}/task-deck/backgrounds`.replace(/\\/g, "/");
+  }
+
+  async importAppearanceBackground(file) {
+    if (!file || typeof file.arrayBuffer !== "function" || !isImagePath(file.name)) {
+      throw new Error("Choose a supported image file.");
+    }
+    const adapter = this.app.vault.adapter;
+    if (!adapter || !adapter.exists || !adapter.writeBinary || !adapter.mkdir) {
+      throw new Error("This Obsidian storage adapter cannot import images.");
+    }
+    const folder = this.getAppearanceAssetFolder();
+    const parentFolder = folder.slice(0, folder.lastIndexOf("/"));
+    if (!await adapter.exists(parentFolder)) await adapter.mkdir(parentFolder);
+    if (!await adapter.exists(folder)) await adapter.mkdir(folder);
+    const extension = file.name.split(".").pop().toLowerCase();
+    const target = `${folder}/background-${Date.now().toString(36)}.${extension}`;
+    await adapter.writeBinary(target, await file.arrayBuffer());
+    return target;
+  }
+
+  getAppearanceBackgroundResource(background) {
+    if (!background || !background.imagePath) return "";
+    if (background.imageSource === "plugin") {
+      const adapter = this.app.vault.adapter;
+      return adapter && adapter.getResourcePath ? adapter.getResourcePath(background.imagePath) : "";
+    }
+    const file = this.app.vault.getAbstractFileByPath(background.imagePath);
+    return file ? this.app.vault.getResourcePath(file) : "";
+  }
+
+  async updateAppearance(patch, options = {}) {
+    const current = clone(this.getAppearance());
+    Object.entries(patch || {}).forEach(([key, value]) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        current[key] = Object.assign({}, current[key] || {}, value);
+      } else {
+        current[key] = value;
+      }
+    });
+    if (!options.keepPreset && !Object.prototype.hasOwnProperty.call(patch || {}, "preset")) current.preset = "custom";
+    this.data.appearance = this.normalizeAppearance(current);
+    await this.saveData(this.data);
+    this.refreshViews();
+  }
+
+  async updateBoardAppearance(boardId, patch, options = {}) {
+    const board = this.findBoard(boardId);
+    if (!board) return;
+    const current = clone(this.getBoardAppearance(boardId));
+    Object.entries(patch || {}).forEach(([key, value]) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        current[key] = Object.assign({}, current[key] || {}, value);
+      } else {
+        current[key] = value;
+      }
+    });
+    if (!options.keepPreset && !Object.prototype.hasOwnProperty.call(patch || {}, "preset")) current.preset = "custom";
+    board.appearance = this.normalizeAppearance(current);
+    await this.saveData(this.data);
+    this.refreshViews();
+  }
+
+  async applyAppearancePreset(preset) {
+    const presets = {
+      obsidian: clone(DEFAULT_APPEARANCE),
+      "trello-dark": {
+        preset: "trello-dark",
+        colorScheme: "dark",
+        surfaceScheme: "dark",
+        density: "normal",
+        fontScale: 1,
+        background: { type: "solid", color: "#0f172a", overlayOpacity: 0.35 },
+        cards: { useTheme: false, background: "#26282c", hoverBackground: "#30343b", borderRadius: 9, shadow: "medium" },
+        lists: { useTheme: false, background: "#101214", borderRadius: 12 },
+        motion: { enabled: true },
+      },
+      "trello-light": {
+        preset: "trello-light",
+        colorScheme: "light",
+        surfaceScheme: "light",
+        density: "normal",
+        fontScale: 1,
+        background: { type: "solid", color: "#dbeafe", overlayOpacity: 0.1 },
+        cards: { useTheme: false, background: "#ffffff", hoverBackground: "#f4f5f7", borderRadius: 9, shadow: "medium" },
+        lists: { useTheme: false, background: "#f1f2f4", borderRadius: 12 },
+        motion: { enabled: true },
+      },
+      transparent: {
+        preset: "transparent",
+        colorScheme: "theme",
+        surfaceScheme: "theme",
+        density: "normal",
+        fontScale: 1,
+        background: { type: "theme", overlayOpacity: 0 },
+        cards: { useTheme: true, borderRadius: 9, shadow: "small" },
+        lists: { useTheme: true, borderRadius: 12 },
+        motion: { enabled: true },
+      },
+      "high-contrast": {
+        preset: "high-contrast",
+        colorScheme: "dark",
+        surfaceScheme: "dark",
+        density: "comfortable",
+        fontScale: 1.12,
+        background: { type: "solid", color: "#000000", overlayOpacity: 0 },
+        cards: { useTheme: false, background: "#242424", hoverBackground: "#303030", borderRadius: 6, shadow: "large" },
+        lists: { useTheme: false, background: "#080808", borderRadius: 8 },
+        motion: { enabled: false },
+      },
+    };
+    const selected = presets[preset] || presets.obsidian;
+    this.data.appearance = this.normalizeAppearance(selected);
+    this.data.appearance.preset = presets[preset] ? preset : "obsidian";
+    await this.saveData(this.data);
+    this.refreshViews();
+  }
+
+  async applyBoardAppearancePreset(boardId, preset) {
+    const presets = {
+      obsidian: clone(DEFAULT_APPEARANCE),
+      "trello-dark": {
+        preset: "trello-dark", colorScheme: "dark", surfaceScheme: "dark", density: "normal", fontScale: 1,
+        background: { type: "solid", color: "#0f172a", overlayOpacity: 0.35 },
+        cards: { useTheme: false, background: "#26282c", hoverBackground: "#30343b", borderRadius: 9, shadow: "medium" },
+        lists: { useTheme: false, background: "#101214", borderRadius: 12 }, motion: { enabled: true },
+      },
+      "trello-light": {
+        preset: "trello-light", colorScheme: "light", surfaceScheme: "light", density: "normal", fontScale: 1,
+        background: { type: "solid", color: "#dbeafe", overlayOpacity: 0.1 },
+        cards: { useTheme: false, background: "#ffffff", hoverBackground: "#f4f5f7", borderRadius: 9, shadow: "medium" },
+        lists: { useTheme: false, background: "#f1f2f4", borderRadius: 12 }, motion: { enabled: true },
+      },
+      transparent: {
+        preset: "transparent", colorScheme: "theme", surfaceScheme: "theme", density: "normal", fontScale: 1,
+        background: { type: "theme", overlayOpacity: 0 },
+        cards: { useTheme: true, borderRadius: 9, shadow: "small" },
+        lists: { useTheme: true, borderRadius: 12 }, motion: { enabled: true },
+      },
+      "high-contrast": {
+        preset: "high-contrast", colorScheme: "dark", surfaceScheme: "dark", density: "comfortable", fontScale: 1.12,
+        background: { type: "solid", color: "#000000", overlayOpacity: 0 },
+        cards: { useTheme: false, background: "#242424", hoverBackground: "#303030", borderRadius: 6, shadow: "large" },
+        lists: { useTheme: false, background: "#080808", borderRadius: 8 }, motion: { enabled: false },
+      },
+    };
+    const selected = this.normalizeAppearance(presets[preset] || presets.obsidian);
+    selected.preset = presets[preset] ? preset : "obsidian";
+    const board = this.findBoard(boardId);
+    if (board) board.appearance = selected;
+    await this.saveData(this.data);
+    this.refreshViews();
+  }
+
+  /**
+   * Deletes a global label and removes it from every card and Markdown note.
+   * The full label state is captured so the operation remains undoable.
+   */
+  async deleteLabel(label) {
+    const key = labelKey(label);
+    if (!key) return false;
+
+    const storedLabel = (this.data.labels || []).find((item) => labelKey(item) === key) || label;
+    const affected = Object.values(this.data.cards)
+      .filter((card) => (card.labels || []).some((item) => labelKey(item) === key));
+    const warning = affected.length
+      ? `Delete label "${storedLabel.name}"? It will be removed from ${affected.length} ${affected.length === 1 ? "card" : "cards"}.`
+      : `Delete label "${storedLabel.name}"?`;
+    if (!window.confirm(warning)) return false;
+
+    const previousGlobalLabels = clone(this.data.labels || []);
+    const previousCardLabels = affected.map((card) => ({
+      cardId: card.id,
+      labels: clone(card.labels || []),
+    }));
+
+    if (!this.applyingUndo) {
+      this.recordUndo(async () => {
+        this.data.labels = this.normalizeGlobalLabels(previousGlobalLabels);
+        for (const snapshot of previousCardLabels) {
+          const card = this.data.cards[snapshot.cardId];
+          if (!card) continue;
+          card.labels = this.normalizeCardLabels(snapshot.labels);
+          await this.writeCardFile(card);
+        }
+        await this.savePluginData();
+        this.refreshViews();
+      });
+    }
+
+    this.data.labels = (this.data.labels || []).filter((item) => labelKey(item) !== key);
+    for (const card of affected) {
+      card.labels = (card.labels || []).filter((item) => labelKey(item) !== key);
+      card.updatedAt = new Date().toISOString();
+      await this.writeCardFile(card);
+    }
+    await this.savePluginData();
+    this.refreshViews();
+    return true;
   }
 
   findList(listId, board = this.getBoard()) {
@@ -6203,7 +7395,21 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
   }
 
   async toggleCompactLabels() {
-    this.data.compactLabels = !this.data.compactLabels;
+    const next = this.getLabelDisplayMode() === "compact" ? "expanded" : "compact";
+    await this.setLabelDisplayMode(next);
+  }
+
+  getLabelDisplayMode() {
+    const mode = this.data && this.data.labelDisplayMode;
+    return ["compact", "expanded", "hover", "card-hover"].includes(mode)
+      ? mode
+      : (this.data && this.data.compactLabels ? "compact" : "expanded");
+  }
+
+  async setLabelDisplayMode(mode) {
+    const next = ["compact", "expanded", "hover", "card-hover"].includes(mode) ? mode : "expanded";
+    this.data.labelDisplayMode = next;
+    this.data.compactLabels = next === "compact";
     await this.savePluginData();
     this.refreshViews();
   }

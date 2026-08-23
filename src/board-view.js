@@ -17,7 +17,7 @@ const {
   textButton,
   textLine,
 } = require("./helpers");
-const { AboutModal, CardDatesModal, CardModal, LabelPickerModal, ListColorModal } = require("./modals");
+const { AboutModal, BoardAppearanceModal, CardDatesModal, CardModal, LabelPickerModal, ListColorModal } = require("./modals");
 
 // Live board presence (SyncDeck cursors) tuning.
 // The transport stays plain HTTP polling; smoothness comes from client-side
@@ -73,7 +73,11 @@ class BoardView extends ItemView {
     this.stopPresence();
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-board-root");
-    this.contentEl.classList.toggle("is-compact-labels", !!this.plugin.data.compactLabels);
+    const labelDisplayMode = this.plugin.getLabelDisplayMode();
+    this.contentEl.classList.toggle("is-compact-labels", labelDisplayMode === "compact");
+    this.contentEl.classList.toggle("is-hover-labels", labelDisplayMode === "hover");
+    this.contentEl.classList.toggle("is-card-hover-labels", labelDisplayMode === "card-hover");
+    this.applyAppearance();
 
     // Update banner sits above everything (board home OR a board), so it shows
     // before the user does anything.
@@ -96,16 +100,20 @@ class BoardView extends ItemView {
     if (this.plugin.data.boards.length > 1) title.append(this.renderBoardSelect(board));
     title.append(this.renderViewSwitch(board, mode));
     toolbar.append(title);
+    const primaryActions = createElement("div", "ot-toolbar-primary");
+    primaryActions.append(
+      textButton("plus-square", "New board", () => this.plugin.createBoardPrompt()),
+      textButton("plus", "Add list", () => this.plugin.addList())
+    );
+    toolbar.append(primaryActions);
     const actions = createElement("div", "ot-toolbar-actions");
-    actions.append(textButton("plus-square", "New board", () => this.plugin.createBoardPrompt()));
     // Cross-sell only for users who don't have Sync Deck yet; hide once installed.
     if (this.plugin.isSyncDeckEnabled() && !this.plugin.getSyncDeckPlugin()) {
       actions.append(textButton("cloud", "Sync Boards", () => this.plugin.openSyncDeck(), "ot-cloud-cta"));
     }
     actions.append(
-      textButton("info", "About", () => new AboutModal(this.app, this.plugin).open()),
-      textButton("heart", "Support", () => window.open(DONATION_URL, "_blank")),
-      textButton("plus", "Add list", () => this.plugin.addList())
+      textButton("palette", "Customize", () => new BoardAppearanceModal(this.app, this.plugin, board.id).open()),
+      textButton("info", "About", () => new AboutModal(this.app, this.plugin).open())
     );
     toolbar.append(actions);
 
@@ -644,9 +652,82 @@ class BoardView extends ItemView {
   }
 
   openLabelPicker(card) {
-    new LabelPickerModal(this.app, this.plugin.data.labels || [], card.labels || [], async (labels, selectedLabels) => {
+    new LabelPickerModal(this.app, this.plugin.data.labels || [], card.labels || [], async (labels, selectedLabels, options = {}) => {
+      if (options.persist === false) return;
       await this.plugin.updateCard(card.id, { labels: selectedLabels }, labels);
-    }).open();
+    }, (label) => this.plugin.deleteLabel(label)).open();
+  }
+
+  applyAppearance() {
+    const root = this.contentEl;
+    const appearance = this.plugin.getAppearance();
+    const density = {
+      compact: { listWidth: 258, listMinWidth: 244, cardPadding: "7px 8px", cardGap: 6 },
+      normal: { listWidth: 292, listMinWidth: 272, cardPadding: "9px 10px", cardGap: 8 },
+      comfortable: { listWidth: 326, listMinWidth: 300, cardPadding: "12px", cardGap: 10 },
+    }[appearance.density];
+    const shadows = {
+      none: "none",
+      small: "0 1px 2px rgb(0 0 0 / 16%)",
+      medium: "0 2px 4px rgb(0 0 0 / 24%), 0 1px 1px rgb(0 0 0 / 16%)",
+      large: "0 6px 16px rgb(0 0 0 / 32%), 0 2px 4px rgb(0 0 0 / 22%)",
+    };
+
+    root.style.setProperty("--ot-font-scale", String(appearance.fontScale));
+    root.style.setProperty("--ot-list-width", `${density.listWidth}px`);
+    root.style.setProperty("--ot-list-min-width", `${density.listMinWidth}px`);
+    root.style.setProperty("--ot-card-padding", density.cardPadding);
+    root.style.setProperty("--ot-card-gap", `${appearance.cards.verticalGap}px`);
+    root.style.setProperty("--ot-card-radius", `${appearance.cards.borderRadius}px`);
+    root.style.setProperty("--ot-card-hover-background", appearance.cards.hoverBackground);
+    root.style.setProperty("--ot-card-title-size", `${appearance.cards.titleSize}px`);
+    root.style.setProperty("--ot-column-gap", `${appearance.lists.columnGap}px`);
+    root.style.setProperty("--ot-list-top-border-width", `${appearance.lists.topBorderWidth}px`);
+    root.style.setProperty("--ot-list-radius", `${appearance.lists.borderRadius}px`);
+    root.style.setProperty("--ot-card-shadow", shadows[appearance.cards.shadow] || shadows.medium);
+    root.style.setProperty("--ot-card-background", appearance.cards.useTheme
+      ? "color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 88%, var(--background-modifier-hover) 12%)"
+      : appearance.cards.background);
+    root.style.setProperty("--ot-list-background", appearance.lists.useTheme
+      ? "color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%)"
+      : appearance.lists.background);
+    root.classList.toggle("is-motion-disabled", !appearance.motion.enabled);
+    root.classList.toggle("is-appearance-dark", appearance.colorScheme === "dark");
+    root.classList.toggle("is-appearance-light", appearance.colorScheme === "light");
+    root.classList.toggle("is-surfaces-dark", appearance.surfaceScheme === "dark");
+    root.classList.toggle("is-surfaces-light", appearance.surfaceScheme === "light");
+    root.classList.toggle("is-list-color-dot-hidden", !appearance.lists.showColorDot);
+
+    root.style.removeProperty("background-image");
+    root.style.removeProperty("background-color");
+    root.style.removeProperty("background-size");
+    root.style.removeProperty("background-position");
+    root.style.removeProperty("background-repeat");
+    root.style.removeProperty("background-attachment");
+    const background = appearance.background;
+    if (background.type === "solid") {
+      root.style.setProperty("background-color", background.color, "important");
+    } else if (background.type === "gradient") {
+      root.style.setProperty("background-color", background.gradientEnd, "important");
+      root.style.setProperty("background-image", `linear-gradient(135deg, ${background.gradientStart}, ${background.gradientEnd})`);
+    } else if (background.type === "image" && background.imagePath) {
+      const resourcePath = this.plugin.getAppearanceBackgroundResource(background);
+      if (resourcePath) {
+        const resource = resourcePath.replace(/"/g, "\\\"");
+        const alpha = background.overlayOpacity;
+        const imageSize = ["repeat", "original"].includes(background.imageFit) ? "auto" : background.imageFit;
+        root.style.setProperty("background-color", "var(--background-primary)", "important");
+        root.style.setProperty("background-image", `linear-gradient(rgb(0 0 0 / ${alpha}), rgb(0 0 0 / ${alpha})), url("${resource}")`);
+        root.style.setProperty("background-position", "center, center");
+        root.style.setProperty("background-size", `auto, ${imageSize}`);
+        root.style.setProperty("background-repeat", background.imageFit === "repeat" ? "no-repeat, repeat" : "no-repeat, no-repeat");
+        root.style.setProperty("background-attachment", "local");
+      } else {
+        root.style.setProperty("background-color", "var(--background-primary)", "important");
+      }
+    } else {
+      root.style.setProperty("background-color", "var(--background-primary)", "important");
+    }
   }
 
   renderTableComposer(board) {
@@ -1251,10 +1332,6 @@ class BoardView extends ItemView {
       const pill = createElement("span", "ot-card-label", label.name);
       pill.style.backgroundColor = label.color;
       pill.title = label.name;
-      pill.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        await this.plugin.toggleCompactLabels();
-      });
       labels.append(pill);
     });
 
@@ -1409,6 +1486,7 @@ class BoardView extends ItemView {
     if (checklist.length) {
       const stats = checklistStats(checklist);
       const badge = createElement("span", "ot-card-meta-item ot-card-checklist-badge");
+      badge.classList.toggle("is-complete", stats.total > 0 && stats.done === stats.total);
       const icon = createElement("span", "ot-card-checklist-icon");
       try {
         setIcon(icon, "check-square");
