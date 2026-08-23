@@ -10,12 +10,13 @@ const {
   TASK_DECK_ICON,
   TASK_DECK_ICON_SVG,
   VIEW_TYPE,
-  checklistToMarkdown,
+  checklistsToMarkdown,
   cleanDate,
   cleanColor,
   cleanLabelName,
   clone,
   labelKey,
+  normalizeChecklists,
   labelsToFrontmatter,
   assigneesToFrontmatter,
   imageRefsFromMarkdown,
@@ -210,17 +211,22 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     this.data.boards = Array.isArray(this.data.boards) ? this.data.boards : [];
     this.data.cards = this.data.cards || {};
     this.data.labels = this.data.labels || [];
+    this.data.syncDeckEnabled = this.data.syncDeckEnabled !== false;
     this.data.completionSound = this.data.completionSound !== false;
     this.data.compactLabels = !!this.data.compactLabels;
     this.data.labels = this.normalizeGlobalLabels(this.data.labels);
     this.data.boards = this.data.boards.map((board) => this.normalizeBoard(board));
     this.loadNeedsSave = this.ensureListColors();
     Object.values(this.data.cards).forEach((card) => {
+      const needsChecklistMigration = !Array.isArray(card.checklists) || Object.prototype.hasOwnProperty.call(card, "checklist");
       card.boardId = card.boardId || this.boardIdForList(card.listId) || this.data.activeBoardId || "";
       card.labels = this.normalizeCardLabels(card.labels || []);
       card.completed = !!card.completed;
       card.startDate = cleanDate(card.startDate);
       card.dueDate = cleanDate(card.dueDate);
+      card.checklists = normalizeChecklists(card.checklists, card.checklist);
+      delete card.checklist;
+      if (needsChecklistMigration) this.loadNeedsSave = true;
     });
     this.data.boards.forEach((board) => {
       board.folderPath = board.folderPath || this.inferBoardFolder(board) || cardFileBaseName(board.name);
@@ -542,7 +548,22 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     });
   }
 
+  isSyncDeckEnabled() {
+    return this.data.syncDeckEnabled !== false;
+  }
+
+  async setSyncDeckEnabled(enabled) {
+    this.data.syncDeckEnabled = !!enabled;
+    if (!enabled) {
+      this.cardLocks = new Map();
+      this.editingCardId = null;
+    }
+    await this.saveData(this.data);
+    this.refreshViews();
+  }
+
   getSyncDeckPlugin() {
+    if (!this.isSyncDeckEnabled()) return null;
     const plugins = this.app.plugins && this.app.plugins.plugins;
     return (plugins && plugins["sync-deck"]) || null;
   }
@@ -806,6 +827,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
   // The holder if this card is being edited by someone else, otherwise null.
   getCardLockHolder(cardId) {
+    if (!this.isSyncDeckEnabled()) return null;
     return (this.cardLocks && this.cardLocks.get(cardId)) || null;
   }
 
@@ -849,9 +871,19 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     return this.data.boards.find((board) => {
       return board.folderPath
         && file.path.startsWith(`${board.folderPath}/`)
+        && !this.isChecklistItemPath(file.path, board)
         && file.path !== this.boardIndexPath(board)
         && file.path !== this.legacyBoardIndexPath(board);
     }) || null;
+  }
+
+  checklistItemsFolder(board) {
+    return board && board.folderPath ? `${board.folderPath}/checklist-items` : "";
+  }
+
+  isChecklistItemPath(path, board) {
+    const folder = this.checklistItemsFolder(board);
+    return !!(folder && path && String(path).startsWith(`${folder}/`));
   }
 
   isBoardFolder(file) {
@@ -1151,6 +1183,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     const files = [];
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (!file.path.startsWith(`${board.folderPath}/`)) continue;
+      if (this.isChecklistItemPath(file.path, board)) continue;
       if (file.path === this.boardIndexPath(board) || file.path === this.legacyBoardIndexPath(board)) continue;
       if (await this.isGeneratedBoardIndexFile(file)) continue;
       files.push(file);
@@ -1184,7 +1217,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         labels: parsed.labels.length ? this.normalizeCardLabels(parsed.labels) : this.normalizeCardLabels(card.labels || []),
         assignees: this.normalizeAssignees(parsed.assignees !== null ? parsed.assignees : card.assignees || []),
         details: parsed.details,
-        checklist: parsed.checklist,
+        checklists: normalizeChecklists(parsed.checklists, []),
         completed: parsed.completed !== null ? parsed.completed : !!card.completed,
         startDate: parsed.startDate !== null ? parsed.startDate : cleanDate(card.startDate),
         dueDate: parsed.dueDate !== null ? parsed.dueDate : cleanDate(card.dueDate),
@@ -1301,6 +1334,15 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       Object.values(this.data.cards).forEach((card) => {
         if (card.boardId === board.id && card.filePath && card.filePath.startsWith(`${board.folderPath}/`)) {
           card.filePath = `${nextFolder}/${card.filePath.slice(board.folderPath.length + 1)}`;
+        }
+        if (card.boardId === board.id) {
+          (card.checklists || []).forEach((checklist) => {
+            (checklist.items || []).forEach((item) => {
+              if (item.filePath && item.filePath.startsWith(`${board.folderPath}/`)) {
+                item.filePath = `${nextFolder}/${item.filePath.slice(board.folderPath.length + 1)}`;
+              }
+            });
+          });
         }
       });
       board.folderPath = nextFolder;
@@ -1420,7 +1462,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       labels: [],
       assignees: [],
       details: "",
-      checklist: [],
+      checklists: normalizeChecklists(undefined, []),
       completed: false,
       startDate: "",
       dueDate: "",
@@ -1464,6 +1506,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (Object.prototype.hasOwnProperty.call(patch, "completed")) patch.completed = !!patch.completed;
     if (Object.prototype.hasOwnProperty.call(patch, "startDate")) patch.startDate = cleanDate(patch.startDate);
     if (Object.prototype.hasOwnProperty.call(patch, "dueDate")) patch.dueDate = cleanDate(patch.dueDate);
+    if (Object.prototype.hasOwnProperty.call(patch, "checklists")) {
+      patch.checklists = normalizeChecklists(patch.checklists, []);
+    }
     if (patch.title && textLine(patch.title) !== textLine(card.title)) {
       await this.renameCardFile(card, patch.title);
     }
@@ -1623,7 +1668,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (parsed.dueDate !== null) card.dueDate = parsed.dueDate;
     if (parsed.position !== null) card.position = parsed.position;
     card.details = parsed.details;
-    card.checklist = parsed.checklist;
+    card.checklists = normalizeChecklists(parsed.checklists, []);
     this.diskSignatures.set(card.id, markdown);
   }
 
@@ -1636,6 +1681,72 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (!file) return;
 
     await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  resolveChecklistItemFile(card, item) {
+    const filePath = textLine(item && item.filePath);
+    if (!filePath) return null;
+    let file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file && this.app.metadataCache && this.app.metadataCache.getFirstLinkpathDest) {
+      try {
+        file = this.app.metadataCache.getFirstLinkpathDest(filePath.replace(/\.md$/i, ""), (card && card.filePath) || "");
+      } catch (error) {
+        file = null;
+      }
+    }
+    return file && file.extension === "md" ? file : null;
+  }
+
+  async ensureChecklistItemFile(card, item) {
+    const existing = this.resolveChecklistItemFile(card, item);
+    if (existing) return existing;
+
+    const board = this.findBoardForCard(card);
+    if (!board) throw new Error("no board available for checklist item note");
+    await this.ensureBoardFolder(board);
+    const folder = this.checklistItemsFolder(board);
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      await this.app.vault.createFolder(folder).catch(() => {});
+    }
+
+    const base = cardFileBaseName((item && item.text) || "Checklist item");
+    let path = `${folder}/${base}.md`;
+    let index = 2;
+    while (this.app.vault.getAbstractFileByPath(path)) {
+      path = `${folder}/${base} ${index}.md`;
+      index += 1;
+    }
+
+    const markdown = [
+      "---",
+      "task-deck-checklist-item: true",
+      `task-deck-card-id: ${card.id}`,
+      "---",
+      "",
+      `# ${textLine(item && item.text) || "Checklist item"}`,
+      "",
+      `Card: ${this.cardWikiLink(card)}`,
+      "",
+    ].join("\n");
+    return this.app.vault.create(path, markdown);
+  }
+
+  async openChecklistItemFile(filePath) {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file || file.extension !== "md") return;
+    await this.app.workspace.getLeaf(false).openFile(file);
+  }
+
+  async deleteChecklistItemFile(card, item) {
+    const file = this.resolveChecklistItemFile(card, item);
+    if (!file) return;
+    await this.app.vault.trash(file, true);
+  }
+
+  async deleteChecklistItemFiles(card, items) {
+    for (const item of Array.isArray(items) ? items : []) {
+      if (item && item.filePath) await this.deleteChecklistItemFile(card, item);
+    }
   }
 
   async ensureBoardFolder(board) {
@@ -2188,7 +2299,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       card.details || "",
       "",
       "## Checklist",
-      checklistToMarkdown(card.checklist),
+      checklistsToMarkdown(card.checklists),
       "",
     ].join("\n");
 

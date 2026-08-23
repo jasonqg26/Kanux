@@ -1,4 +1,4 @@
-const { MarkdownRenderer, Menu, Modal, Notice, arrayBufferToBase64, setIcon } = require("obsidian");
+const { FuzzySuggestModal, MarkdownRenderer, Menu, Modal, Notice, arrayBufferToBase64, setIcon } = require("obsidian");
 
 // Modal UIs for cards, labels, dates, prompts, and the short about panel.
 const {
@@ -24,10 +24,12 @@ const {
   imageMarkupWithSize,
   isoFromDate,
   labelKey,
+  normalizeChecklists,
   stripImageEmbeds,
   textButton,
   textLine,
   initials,
+  uid,
 } = require("./helpers");
 
 // ---- Markdown <-> HTML for the WYSIWYG description blocks ----
@@ -36,11 +38,20 @@ const {
 // md -> html -> md round-trips bytes for everything these converters produce.
 // Unrecognized markdown stays literal text and survives untouched.
 function escapeDetailsHtml(text) {
-  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function inlineMdToHtml(text) {
   let out = escapeDetailsHtml(text);
+  out = out.replace(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g, (match, target, alias) => {
+    const hasAlias = alias != null;
+    const label = hasAlias ? alias : target.split("/").pop();
+    return `<a class="internal-link" data-wikilink="true" data-has-alias="${hasAlias ? "true" : "false"}" data-href="${target}" href="${target}">${label}</a>`;
+  });
   out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
@@ -125,6 +136,10 @@ function detailsHtmlToMd(root) {
       if (tag === "B" || tag === "STRONG") out += inner.trim() ? `**${inner}**` : inner;
       else if (tag === "I" || tag === "EM") out += inner.trim() ? `*${inner}*` : inner;
       else if (tag === "CODE") out += inner.trim() ? `\`${inner}\`` : inner;
+      else if (tag === "A" && child.dataset.wikilink === "true") {
+        const target = child.dataset.href || child.getAttribute("href") || "";
+        out += child.dataset.hasAlias === "true" ? `[[${target}|${inner || target}]]` : `[[${target}]]`;
+      }
       else if (tag === "A") out += `[${inner || child.getAttribute("href") || "link"}](${child.getAttribute("href") || ""})`;
       else out += inner;
     });
@@ -290,6 +305,27 @@ class TextPromptModal extends Modal {
       console.error(error);
       new Notice("Could not save.");
     });
+  }
+}
+
+/** Lets the description editor link any Markdown note already in the vault. */
+class VaultNoteSuggestModal extends FuzzySuggestModal {
+  constructor(app, onChoose) {
+    super(app);
+    this.onChoose = onChoose;
+    this.setPlaceholder("Search Markdown notes in this vault...");
+  }
+
+  getItems() {
+    return this.app.vault.getMarkdownFiles();
+  }
+
+  getItemText(file) {
+    return file.path.replace(/\.md$/i, "");
+  }
+
+  onChooseItem(file) {
+    this.onChoose(file);
   }
 }
 
@@ -533,11 +569,12 @@ class LabelPickerModal extends Modal {
 }
 
 class ListColorModal extends Modal {
-  constructor(app, title, currentColor, onSelect) {
+  constructor(app, title, currentColor, onSelect, kind = "List") {
     super(app);
     this.title = title;
     this.currentColor = cleanColor(currentColor) || LIST_COLORS[0];
     this.onSelect = onSelect;
+    this.kind = kind;
   }
 
   onOpen() {
@@ -545,10 +582,10 @@ class ListColorModal extends Modal {
     this.contentEl.addClass("ot-label-modal", "ot-list-color-modal");
 
     const header = createElement("div", "ot-label-modal-header");
-    header.append(createElement("h2", "", "List color"));
+    header.append(createElement("h2", "", `${this.kind} color`));
 
     const previewBand = createElement("div", "ot-label-create-preview-band");
-    const preview = createElement("div", "ot-label-preview-pill", this.title || "List");
+    const preview = createElement("div", "ot-label-preview-pill", this.title || this.kind);
     preview.style.backgroundColor = this.currentColor;
     previewBand.append(preview);
 
@@ -797,7 +834,7 @@ class AboutModal extends Modal {
 
     const actions = createElement("div", "ot-modal-actions");
     const openSettings = createElement("button", "", "Open settings");
-    const sync = createElement("button", "", "Sync notes");
+    const sync = createElement("button", "", "Re-import notes");
     const close = createElement("button", "mod-cta", "Close");
     addButtonIcon(openSettings, "settings");
     addButtonIcon(sync, "refresh-cw");
@@ -813,7 +850,7 @@ class AboutModal extends Modal {
     sync.addEventListener("click", async () => {
       await this.plugin.syncCardsFromFolder();
       this.plugin.refreshViews();
-      new Notice("Task Deck synced.");
+      new Notice("Task Deck notes re-imported.");
     });
     close.addEventListener("click", () => this.close());
     actions.append(openSettings, sync, close);
@@ -841,9 +878,9 @@ class CardModal extends Modal {
     this.localDetails = "";
     this.detailsDraft = "";
     this.editingDetails = false;
-    this.localChecklist = [];
+    this.localChecklists = [];
     this.detailsTextarea = null;
-    this.addingChecklistItem = false;
+    this.addingChecklistId = null;
     this.saveTimer = null;
     this.savePromise = Promise.resolve();
     this.readOnly = false;
@@ -882,7 +919,7 @@ class CardModal extends Modal {
     this.localDetails = card.details || "";
     this.detailsDraft = "";
     this.editingDetails = false;
-    this.localChecklist = clone(card.checklist || []);
+    this.localChecklists = normalizeChecklists(clone(card.checklists || []), []);
     this.localAssignees = clone(card.assignees || []);
     await this.setupCardLock();
     this.render();
@@ -1072,6 +1109,8 @@ class CardModal extends Modal {
     const card = this.card;
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-card-modal");
+    const collaborationEnabled = this.plugin.isSyncDeckEnabled();
+    this.contentEl.classList.toggle("is-sync-disabled", !collaborationEnabled);
 
     const title = createElement("input", "ot-title-input");
     title.type = "text";
@@ -1083,7 +1122,7 @@ class CardModal extends Modal {
     });
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
-    const assigneesField = this.notesOnly ? null : this.renderAssigneesField();
+    const assigneesField = this.notesOnly || !collaborationEnabled ? null : this.renderAssigneesField();
     const detailsField = this.renderDetailsField();
     const checklistField = this.renderChecklistField();
 
@@ -1123,7 +1162,9 @@ class CardModal extends Modal {
 
     actions.append(deleteButton, openNote, exportPdf, close);
 
-    const editableFields = this.notesOnly ? [detailsField, checklistField] : [labelsField, assigneesField, detailsField, checklistField];
+    const editableFields = (this.notesOnly
+      ? [detailsField, checklistField]
+      : [labelsField, assigneesField, detailsField, checklistField]).filter(Boolean);
     const children = [title, ...editableFields, actions];
     if (this.readOnly) {
       this.contentEl.addClass("ot-card-readonly");
@@ -1618,6 +1659,34 @@ class CardModal extends Modal {
       }).open();
     };
 
+    const insertVaultNote = () => {
+      const t = focusedText();
+      if (!t) return;
+      const selection = window.getSelection();
+      const hasSelection = !!(selection && selection.rangeCount && !selection.isCollapsed && t.ce.contains(selection.anchorNode));
+      const selectedText = hasSelection ? selection.toString() : "";
+      const savedRange = selection && selection.rangeCount && t.ce.contains(selection.anchorNode)
+        ? selection.getRangeAt(0).cloneRange()
+        : null;
+      new VaultNoteSuggestModal(this.app, (file) => {
+        const target = file.path.replace(/\.md$/i, "");
+        const label = selectedText || file.basename;
+        t.ce.focus();
+        if (savedRange) {
+          const restore = window.getSelection();
+          restore.removeAllRanges();
+          restore.addRange(savedRange);
+          if (hasSelection) restore.deleteFromDocument();
+        }
+        document.execCommand(
+          "insertHTML",
+          false,
+          `<a class="internal-link" data-wikilink="true" data-has-alias="${hasSelection ? "true" : "false"}" data-href="${escapeDetailsHtml(target)}" href="${escapeDetailsHtml(target)}">${escapeDetailsHtml(label)}</a>`
+        );
+        syncBlockFromDom(t);
+      }).open();
+    };
+
     // The run of consecutive image blocks around `index` (empty text slots
     // between images don't break the run) — the group a grid layout applies to.
     const imageRunAround = (index) => {
@@ -1878,6 +1947,7 @@ class CardModal extends Modal {
         makeTool("ellipsis", "Quote", () => toggleBlockFormat("blockquote")),
         makeTool("list", "Bulleted list", () => execCmd("insertUnorderedList")),
         makeTool("link", "Link", insertLink),
+        makeTool("file-text", "Link vault note", insertVaultNote),
         makeTool("image", "Add image", () => imageInput.click()),
         makeTool("plus", "Divider", () => execCmd("insertHorizontalRule"))
       );
@@ -1974,6 +2044,21 @@ class CardModal extends Modal {
     // - images, links, and buttons (Copy image, Show more) keep their own click
     //   behavior and never flip to edit.
     preview.addEventListener("click", (event) => {
+      const internalLink = event.target.closest("a.internal-link");
+      if (internalLink) {
+        event.preventDefault();
+        event.stopPropagation();
+        const target = internalLink.dataset.href || internalLink.getAttribute("data-href") || internalLink.getAttribute("href");
+        if (!target) return;
+        const sourcePath = (this.card && this.card.filePath) || "";
+        const newLeaf = event.ctrlKey || event.metaKey;
+        this.close();
+        Promise.resolve(this.app.workspace.openLinkText(target, sourcePath, newLeaf)).catch((error) => {
+          console.error(error);
+          new Notice("Could not open the linked note.");
+        });
+        return;
+      }
       if (this.readOnly) return;
       if (event.target.closest("img, a, button, .ot-inline-image")) return;
       const selection = window.getSelection();
@@ -2249,10 +2334,20 @@ class CardModal extends Modal {
       const labelsHtml = (this.localLabels || [])
         .map((label) => `<span class="pill" style="background:${esc(label.color || "#2f6fd6")}">${esc(label.name)}</span>`)
         .join("");
-      const membersText = (this.localAssignees || []).map((a) => a.name || a.email).filter(Boolean).join(", ");
+      const collaborationEnabled = this.plugin.isSyncDeckEnabled();
+      const membersText = collaborationEnabled
+        ? (this.localAssignees || []).map((a) => a.name || a.email).filter(Boolean).join(", ")
+        : "";
       const datesText = dateRangeLabel(card.startDate, card.dueDate) || "";
-      const checklistHtml = (this.localChecklist || [])
-        .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
+      const checklistHtml = (this.localChecklists || [])
+        .map((group) => {
+          const stats = checklistStats(group.items);
+          const items = (group.items || [])
+            .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${collaborationEnabled && item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
+            .join("");
+          const color = cleanColor(group.color) || LIST_COLORS[1];
+          return `<div class="checklist-group" style="border-left:3px solid ${esc(color)};padding-left:10px"><h3 style="color:${esc(color)}">${esc(group.title || "Checklist")}</h3><div class="checklist-progress">${stats.percent}% · ${stats.done}/${stats.total}</div>${items}</div>`;
+        })
         .join("");
       const metaBits = [
         board ? esc(board.name) : "",
@@ -2268,6 +2363,9 @@ class CardModal extends Modal {
         .pill { display: inline-block; color: #fff; border-radius: 4px; padding: 2px 10px; font-size: 12px; font-weight: 700; margin: 0 6px 6px 0; }
         .section { margin-top: 22px; }
         .section h2 { font-size: 15px; margin: 0 0 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+        .checklist-group + .checklist-group { margin-top: 18px; }
+        .checklist-group h3 { font-size: 14px; margin: 0 0 2px; }
+        .checklist-progress { color: #667085; font-size: 11px; margin-bottom: 6px; }
         img { max-width: 100%; border-radius: 8px; margin: 10px 0; }
         .imgrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin: 10px 0; }
         .imgrow img { margin: 0; }
@@ -2463,157 +2561,261 @@ class CardModal extends Modal {
   }
 
   /**
-   * Renders checklist items plus the progress bar used by the card badges.
+   * Renders every named checklist as an independent progress bar.
    */
   renderChecklistField() {
-    const field = createElement("div", "ot-field");
-    const header = createElement("div", "ot-checklist-header");
-    const heading = createElement("div", "ot-checklist-heading");
-    const headingIcon = createElement("span", "ot-checklist-heading-icon");
-    try {
-      setIcon(headingIcon, "check-square");
-    } catch (error) {
-      headingIcon.textContent = "☑";
-    }
-    heading.append(headingIcon, createElement("span", "", "Checklist"));
-    header.append(heading);
+    const field = createElement("div", "ot-checklists-field");
 
-    const progress = createElement("div", "ot-checklist-progress");
-    const progressText = createElement("span", "ot-checklist-percent", "0%");
-    const progressTrack = createElement("div", "ot-progress-track");
-    const progressFill = createElement("div", "ot-progress-fill");
-    progressTrack.append(progressFill);
-    progress.append(progressText, progressTrack);
-
-    const list = createElement("div", "ot-checklist");
-    const updateProgress = () => {
-      const stats = checklistStats(this.localChecklist);
-      progressText.textContent = `${stats.percent}%`;
-      progressFill.style.width = `${stats.percent}%`;
-    };
-
-    const renderChecklist = () => {
-      list.replaceChildren();
-      if (!this.localChecklist.length) {
-        list.append(createElement("span", "ot-empty-text", "No checklist items"));
+    const renderGroup = (group) => {
+      const section = createElement("div", "ot-field ot-checklist-group");
+      const groupColor = cleanColor(group.color) || LIST_COLORS[1];
+      section.style.setProperty("--ot-checklist-color", groupColor);
+      section.style.setProperty("border", `1px solid ${groupColor}`, "important");
+      const header = createElement("div", "ot-checklist-header");
+      const heading = createElement("div", "ot-checklist-heading");
+      const headingIcon = createElement("span", "ot-checklist-heading-icon");
+      headingIcon.style.setProperty("color", groupColor, "important");
+      try {
+        setIcon(headingIcon, "check-square");
+      } catch (error) {
+        headingIcon.textContent = "☑";
       }
-
-      this.localChecklist.forEach((item, index) => {
-        const row = createElement("div", "ot-checklist-row");
-        const checkbox = createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = !!item.done;
-        const input = createElement("input", "ot-checklist-title");
-        input.type = "text";
-        input.value = item.text || "";
-        const remove = iconButton("x", "Remove item", () => {
-          this.localChecklist.splice(index, 1);
-          renderChecklist();
-          this.saveNow().catch(console.error);
-        });
-        remove.addEventListener("click", (event) => event.stopPropagation());
-
-        checkbox.addEventListener("change", () => {
-          item.done = checkbox.checked;
-          updateProgress();
-          this.saveNow().catch(console.error);
-        });
-        input.addEventListener("input", () => {
-          item.text = input.value;
-          this.queueSave();
-        });
-
-        // Per-item member circle (leftmost): click to assign this item to a member.
-        const assigneeBtn = createElement("button", "ot-checklist-assignee");
-        assigneeBtn.type = "button";
-        const paintAssignee = () => {
-          assigneeBtn.replaceChildren();
-          const a = item.assignee;
-          if (a && a.email) {
-            assigneeBtn.classList.add("is-assigned");
-            assigneeBtn.title = a.name || a.email;
-            const avatar = createElement("span", "ot-card-avatar");
-            avatar.style.setProperty("--ot-avatar-color", a.color || "#8b5cf6");
-            const picture = this.plugin.getMemberPicture(a.email);
-            if (picture) {
-              const img = createElement("img", "");
-              img.src = picture;
-              img.alt = "";
-              avatar.append(img);
-            } else {
-              avatar.textContent = initials(a.name || a.email);
-              avatar.classList.add("is-initials");
-            }
-            assigneeBtn.append(avatar);
-          } else {
-            assigneeBtn.classList.remove("is-assigned");
-            assigneeBtn.title = "Assign member";
-            assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
-          }
-        };
-        paintAssignee();
-        assigneeBtn.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          this.showChecklistMemberMenu(event, item, paintAssignee);
-        });
-
-        row.append(assigneeBtn, checkbox, input, remove);
-        list.append(row);
+      const name = createElement("input", "ot-checklist-name");
+      name.type = "text";
+      name.value = group.title || "Checklist";
+      name.placeholder = "Checklist name";
+      name.setAttribute("aria-label", "Checklist name");
+      name.addEventListener("input", () => {
+        group.title = name.value;
+        this.queueSave();
       });
-      updateProgress();
-    };
-
-    const addArea = createElement("div", "ot-checklist-add");
-    const renderAddArea = () => {
-      addArea.replaceChildren();
-
-      if (!this.addingChecklistItem) {
-        addArea.append(textButton("plus", "Add item", () => {
-          this.addingChecklistItem = true;
-          renderAddArea();
-        }));
-        return;
-      }
-
-      const addForm = createElement("form", "ot-checklist-add-form");
-      const addInput = createElement("input", "ot-input");
-      addInput.type = "text";
-      addInput.placeholder = "Checklist item";
-      const addButton = createElement("button", "mod-cta", "Add");
-      addButtonIcon(addButton, "plus");
-      const cancel = iconButton("x", "Cancel", () => {
-        this.addingChecklistItem = false;
-        renderAddArea();
-      });
-      addButton.type = "submit";
-      addForm.append(addInput, addButton, cancel);
-      addForm.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const text = textLine(addInput.value);
-        if (!text) {
-          addInput.focus();
-          return;
-        }
-        this.localChecklist.push({ done: false, text });
-        this.addingChecklistItem = false;
-        renderChecklist();
-        renderAddArea();
+      name.addEventListener("blur", () => {
+        group.title = textLine(name.value) || "Checklist";
+        name.value = group.title;
         this.saveNow().catch(console.error);
       });
-      addInput.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
-          this.addingChecklistItem = false;
-          renderAddArea();
-        }
+      heading.append(headingIcon, name);
+      header.append(heading);
+
+      const colorButton = createElement("button", "ot-checklist-color");
+      colorButton.type = "button";
+      colorButton.title = "Choose checklist color";
+      colorButton.setAttribute("aria-label", "Choose checklist color");
+      colorButton.style.backgroundColor = groupColor;
+      colorButton.addEventListener("click", () => {
+        new ListColorModal(this.app, group.title || "Checklist", groupColor, async (color) => {
+          group.color = cleanColor(color) || LIST_COLORS[1];
+          this.render();
+          await this.saveNow();
+        }, "Checklist").open();
       });
-      addArea.append(addForm);
-      requestAnimationFrame(() => addInput.focus());
+      header.append(colorButton);
+
+      if (this.localChecklists.length > 1) {
+        const removeGroup = iconButton("trash", "Delete checklist", async () => {
+          const items = group.items || [];
+          const linkedNotes = items.filter((item) => item && item.filePath).length;
+          const warning = linkedNotes
+            ? `Delete "${group.title || "Checklist"}" and its items? This will also move ${linkedNotes} linked Markdown ${linkedNotes === 1 ? "note" : "notes"} to the trash.`
+            : `Delete "${group.title || "Checklist"}" and its items?`;
+          if (items.length && !window.confirm(warning)) return;
+          try {
+            await this.plugin.deleteChecklistItemFiles(this.card, items);
+            this.localChecklists = this.localChecklists.filter((item) => item.id !== group.id);
+            if (this.addingChecklistId === group.id) this.addingChecklistId = null;
+            this.render();
+            await this.saveNow();
+          } catch (error) {
+            console.error(error);
+            new Notice("Could not delete the linked checklist notes.");
+          }
+        });
+        removeGroup.classList.add("ot-checklist-delete");
+        header.append(removeGroup);
+      }
+
+      const progress = createElement("div", "ot-checklist-progress");
+      const progressText = createElement("span", "ot-checklist-percent", "0%");
+      const progressTrack = createElement("div", "ot-progress-track");
+      const progressFill = createElement("div", "ot-progress-fill");
+      progressFill.style.setProperty("background", groupColor, "important");
+      progressTrack.append(progressFill);
+      progress.append(progressText, progressTrack);
+
+      const list = createElement("div", "ot-checklist");
+      const updateProgress = () => {
+        const stats = checklistStats(group.items);
+        progressText.textContent = `${stats.percent}%`;
+        progressFill.style.width = `${stats.percent}%`;
+      };
+
+      const renderItems = () => {
+        list.replaceChildren();
+        if (!group.items.length) list.append(createElement("span", "ot-empty-text", "No checklist items"));
+
+        group.items.forEach((item, index) => {
+          const row = createElement("div", "ot-checklist-row");
+          const checkbox = createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = !!item.done;
+          const input = createElement("input", "ot-checklist-title");
+          input.type = "text";
+          input.value = item.text || "";
+          const actions = createElement("div", "ot-checklist-item-actions");
+          const noteButton = iconButton(item.filePath ? "file-text" : "file-plus", item.filePath ? "Open Markdown note" : "Create Markdown note", async () => {
+            noteButton.disabled = true;
+            try {
+              const file = await this.plugin.ensureChecklistItemFile(this.card, item);
+              item.filePath = file.path;
+              await this.saveNow();
+              await this.plugin.openChecklistItemFile(file.path);
+              this.close();
+            } catch (error) {
+              console.error(error);
+              new Notice("Could not open the checklist item note.");
+              noteButton.disabled = false;
+            }
+          });
+          noteButton.classList.add("ot-checklist-note");
+          noteButton.classList.toggle("is-linked", !!item.filePath);
+          const remove = iconButton("x", "Remove item", async () => {
+            if (item.filePath) {
+              const confirmed = window.confirm(`Remove "${item.text || "Checklist item"}"? Its linked Markdown note will also be moved to the trash.`);
+              if (!confirmed) return;
+            }
+            try {
+              await this.plugin.deleteChecklistItemFile(this.card, item);
+              group.items.splice(index, 1);
+              renderItems();
+              await this.saveNow();
+            } catch (error) {
+              console.error(error);
+              new Notice("Could not delete the linked checklist note.");
+            }
+          });
+          remove.addEventListener("click", (event) => event.stopPropagation());
+
+          checkbox.addEventListener("change", () => {
+            item.done = checkbox.checked;
+            updateProgress();
+            this.saveNow().catch(console.error);
+          });
+          input.addEventListener("input", () => {
+            item.text = input.value;
+            this.queueSave();
+          });
+
+          let assigneeBtn = null;
+          if (this.plugin.isSyncDeckEnabled()) {
+            assigneeBtn = createElement("button", "ot-checklist-assignee");
+            assigneeBtn.type = "button";
+            const paintAssignee = () => {
+              assigneeBtn.replaceChildren();
+              const a = item.assignee;
+              if (a && a.email) {
+                assigneeBtn.classList.add("is-assigned");
+                assigneeBtn.title = a.name || a.email;
+                const avatar = createElement("span", "ot-card-avatar");
+                avatar.style.setProperty("--ot-avatar-color", a.color || "#8b5cf6");
+                const picture = this.plugin.getMemberPicture(a.email);
+                if (picture) {
+                  const img = createElement("img", "");
+                  img.src = picture;
+                  img.alt = "";
+                  avatar.append(img);
+                } else {
+                  avatar.textContent = initials(a.name || a.email);
+                  avatar.classList.add("is-initials");
+                }
+                assigneeBtn.append(avatar);
+              } else {
+                assigneeBtn.classList.remove("is-assigned");
+                assigneeBtn.title = "Assign member";
+                assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
+              }
+            };
+            paintAssignee();
+            assigneeBtn.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              this.showChecklistMemberMenu(event, item, paintAssignee);
+            });
+          }
+
+          actions.append(noteButton, remove);
+          if (assigneeBtn) {
+            row.append(assigneeBtn, checkbox, input, actions);
+          } else {
+            row.style.setProperty("grid-template-columns", "20px minmax(0, 1fr) auto", "important");
+            row.append(checkbox, input, actions);
+          }
+          list.append(row);
+        });
+        updateProgress();
+      };
+
+      const addArea = createElement("div", "ot-checklist-add");
+      const renderAddArea = () => {
+        addArea.replaceChildren();
+        if (this.addingChecklistId !== group.id) {
+          addArea.append(textButton("plus", "Add item", () => {
+            this.addingChecklistId = group.id;
+            renderAddArea();
+          }));
+          return;
+        }
+
+        const addForm = createElement("form", "ot-checklist-add-form");
+        const addInput = createElement("input", "ot-input");
+        addInput.type = "text";
+        addInput.placeholder = "Checklist item";
+        const addButton = createElement("button", "mod-cta", "Add");
+        addButtonIcon(addButton, "plus");
+        const cancel = iconButton("x", "Cancel", () => {
+          this.addingChecklistId = null;
+          renderAddArea();
+        });
+        addButton.type = "submit";
+        addForm.append(addInput, addButton, cancel);
+        addForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          const text = textLine(addInput.value);
+          if (!text) {
+            addInput.focus();
+            return;
+          }
+          group.items.push({ done: false, text, filePath: "", assignee: null });
+          this.addingChecklistId = null;
+          renderItems();
+          renderAddArea();
+          this.saveNow().catch(console.error);
+        });
+        addInput.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            this.addingChecklistId = null;
+            renderAddArea();
+          }
+        });
+        addArea.append(addForm);
+        requestAnimationFrame(() => addInput.focus());
+      };
+
+      renderItems();
+      renderAddArea();
+      section.append(header, progress, list, addArea);
+      return section;
     };
 
-    renderChecklist();
-    renderAddArea();
-    field.append(header, progress, list, addArea);
+    this.localChecklists.forEach((group) => field.append(renderGroup(group)));
+    const addChecklist = textButton("plus", "Add checklist", () => {
+      new TextPromptModal(this.app, "Add checklist", "Checklist name", "", (title) => {
+        const color = LIST_COLORS[this.localChecklists.length % LIST_COLORS.length] || LIST_COLORS[1];
+        this.localChecklists.push({ id: uid("checklist"), title, color, items: [] });
+        this.render();
+        return this.saveNow();
+      }).open();
+    }, "ot-add-checklist");
+    field.append(addChecklist);
     return field;
   }
 
@@ -2626,15 +2828,21 @@ class CardModal extends Modal {
       labels: clone(this.localLabels),
       assignees: clone(this.localAssignees || []),
       details: this.localDetails.trim(),
-      checklist: this.localChecklist
-        .map((item) => ({
-          done: !!item.done,
-          text: textLine(item.text),
-          assignee: item.assignee && item.assignee.email
-            ? { email: item.assignee.email, name: item.assignee.name || "", color: item.assignee.color || "" }
-            : null,
-        }))
-        .filter((item) => item.text),
+      checklists: this.localChecklists.map((group, index) => ({
+        id: group.id || uid("checklist"),
+        title: textLine(group.title) || `Checklist ${index + 1}`,
+        color: cleanColor(group.color) || LIST_COLORS[1],
+        items: (group.items || [])
+          .map((item) => ({
+            done: !!item.done,
+            text: textLine(item.text),
+            filePath: textLine(item.filePath),
+            assignee: item.assignee && item.assignee.email
+              ? { email: item.assignee.email, name: item.assignee.name || "", color: item.assignee.color || "" }
+              : null,
+          }))
+          .filter((item) => item.text),
+      })),
     };
   }
 

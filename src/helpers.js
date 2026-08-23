@@ -42,6 +42,7 @@ const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b
 const DEFAULT_DATA = {
   version: 1,
   activeBoardId: "",
+  syncDeckEnabled: true,
   completionSound: true,
   compactLabels: false,
   layoutMigrated: false,
@@ -462,28 +463,126 @@ function parseChecklist(text) {
 
       const match = core.match(/^(?:-\s*)?\[([ xX])\]\s*(.*)$/);
       if (!match) {
-        return { done: false, text: core.replace(/^- /, "").trim(), assignee };
+        const value = core.replace(/^- /, "").trim();
+        return Object.assign({ done: false, assignee }, parseChecklistItemValue(value));
       }
 
-      return {
+      return Object.assign({
         done: match[1].toLowerCase() === "x",
-        text: match[2].trim(),
         assignee,
-      };
+      }, parseChecklistItemValue(match[2].trim()));
     })
     .filter((item) => item.text);
 }
 
+// A checklist item can be a normal string or a wikilink to a Markdown note.
+// Only a link that occupies the whole item is treated as file-backed; inline
+// links inside ordinary item text remain ordinary text.
+function parseChecklistItemValue(value) {
+  const text = String(value || "").trim();
+  const link = text.match(/^\[\[([^|\]]+)(?:\|([^\]]+))?\]\]$/);
+  if (!link) return { text, filePath: "" };
+
+  const target = textLine(link[1]).split("#")[0].trim();
+  if (!target) return { text, filePath: "" };
+  const filePath = /\.md$/i.test(target) ? target : `${target}.md`;
+  const fallback = target.split("/").pop().replace(/\.md$/i, "") || "Checklist item";
+  return { text: textLine(link[2]) || fallback, filePath };
+}
+
+/**
+ * Normalizes the named checklist collection used by current cards.
+ *
+ * `legacyItems` keeps data.json files from versions that stored one flat
+ * `checklist` array compatible. An explicitly supplied empty `checklists`
+ * array remains empty; only a missing collection receives the legacy/default
+ * Checklist group.
+ */
+function normalizeChecklists(checklists, legacyItems) {
+  const source = Array.isArray(checklists)
+    ? checklists
+    : [{ title: "Checklist", items: Array.isArray(legacyItems) ? legacyItems : [] }];
+
+  return source
+    .filter((group) => group && typeof group === "object")
+    .map((group, index) => ({
+      id: group.id || uid("checklist"),
+      title: textLine(group.title) || `Checklist ${index + 1}`,
+      color: cleanColor(group.color) || LIST_COLORS[1],
+      items: (Array.isArray(group.items) ? group.items : [])
+        .map((item) => ({
+          done: !!(item && item.done),
+          text: textLine(item && item.text),
+          filePath: textLine(item && item.filePath),
+          assignee: item && item.assignee && item.assignee.email
+            ? {
+              email: textLine(item.assignee.email),
+              name: textLine(item.assignee.name),
+              color: textLine(item.assignee.color),
+            }
+            : null,
+        }))
+        .filter((item) => item.text),
+    }));
+}
+
+/**
+ * Parses the body of `## Checklist`.
+ *
+ * Current notes use H3 headings for named groups. Notes from older versions
+ * contain task items directly under H2 and become one group named Checklist.
+ */
+function parseChecklists(text) {
+  const groups = [];
+  let current = null;
+
+  const finish = () => {
+    if (!current) return;
+    groups.push({
+      id: uid("checklist"),
+      title: textLine(current.title) || `Checklist ${groups.length + 1}`,
+      color: cleanColor(current.color) || LIST_COLORS[1],
+      items: parseChecklist(current.lines.join("\n")),
+    });
+    current = null;
+  };
+
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const heading = line.match(/^###\s+(.+?)\s*$/);
+    if (heading) {
+      finish();
+      const colorMeta = heading[1].match(/\s*<!--task-deck-checklist-color:(#[0-9a-fA-F]{6})-->\s*$/);
+      const title = colorMeta ? heading[1].slice(0, colorMeta.index).trim() : heading[1];
+      current = { title, color: colorMeta ? colorMeta[1] : "", lines: [] };
+      continue;
+    }
+    if (!current) current = { title: "Checklist", lines: [] };
+    current.lines.push(line);
+  }
+  finish();
+
+  return groups.length ? groups : normalizeChecklists(undefined, []);
+}
+
 function checklistToText(items) {
   return (items || [])
-    .map((item) => `[${item.done ? "x" : " "}] ${item.text}`)
+    .map((item) => `[${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`)
     .join("\n");
+}
+
+function checklistItemMarkdown(item) {
+  const title = textLine(item && item.text);
+  const filePath = textLine(item && item.filePath);
+  if (!filePath) return title;
+  const target = filePath.replace(/\.md$/i, "").replace(/[|\[\]]/g, " ").trim();
+  const alias = title.replace(/[|\[\]]/g, " ").trim() || target.split("/").pop() || "Checklist item";
+  return `[[${target}|${alias}]]`;
 }
 
 function checklistToMarkdown(items) {
   return (items || [])
     .map((item) => {
-      const base = `- [${item.done ? "x" : " "}] ${textLine(item.text)}`;
+      const base = `- [${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`;
       const a = item.assignee;
       if (a && a.email) {
         // Per-item member assignment, hidden in an HTML comment so it round-trips
@@ -496,9 +595,27 @@ function checklistToMarkdown(items) {
     .join("\n");
 }
 
+function checklistsToMarkdown(checklists) {
+  return normalizeChecklists(checklists, [])
+    .map((group) => {
+      const items = checklistToMarkdown(group.items);
+      const color = cleanColor(group.color) || LIST_COLORS[1];
+      return `### ${textLine(group.title) || "Checklist"} <!--task-deck-checklist-color:${color}-->${items ? `\n${items}` : ""}`;
+    })
+    .join("\n\n");
+}
+
+function checklistItems(checklists) {
+  return (Array.isArray(checklists) ? checklists : [])
+    .flatMap((group) => (group && Array.isArray(group.items) ? group.items : []));
+}
+
 function checklistStats(items) {
-  const total = (items || []).length;
-  const done = (items || []).filter((item) => item.done).length;
+  const source = Array.isArray(items) && items.some((item) => item && Array.isArray(item.items))
+    ? checklistItems(items)
+    : (items || []);
+  const total = source.length;
+  const done = source.filter((item) => item.done).length;
   return {
     done,
     total,
@@ -641,7 +758,7 @@ function parseCardMarkdown(markdown) {
     startDate: start !== null ? cleanDate(start) : null,
     dueDate: due !== null ? cleanDate(due) : null,
     details: getSectionAny(markdown, ["Details", "Detaylar"]),
-    checklist: parseChecklist(getSectionAny(markdown, ["Checklist", "Yapılacaklar", "Kontrol listesi"])),
+    checklists: parseChecklists(getSectionAny(markdown, ["Checklist", "Yapılacaklar", "Kontrol listesi"])),
   };
 }
 
@@ -689,8 +806,12 @@ module.exports = {
   getSection,
   getSectionAny,
   parseChecklist,
+  parseChecklists,
+  normalizeChecklists,
   checklistToText,
   checklistToMarkdown,
+  checklistsToMarkdown,
+  checklistItems,
   checklistStats,
   parseLabels,
   labelsToFrontmatter,

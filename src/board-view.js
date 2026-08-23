@@ -7,6 +7,7 @@ const {
   TASK_DECK_ICON,
   VIEW_TYPE,
   addButtonIcon,
+  checklistItems,
   checklistStats,
   createElement,
   dateRangeLabel,
@@ -98,7 +99,7 @@ class BoardView extends ItemView {
     const actions = createElement("div", "ot-toolbar-actions");
     actions.append(textButton("plus-square", "New board", () => this.plugin.createBoardPrompt()));
     // Cross-sell only for users who don't have Sync Deck yet; hide once installed.
-    if (!this.plugin.getSyncDeckPlugin()) {
+    if (this.plugin.isSyncDeckEnabled() && !this.plugin.getSyncDeckPlugin()) {
       actions.append(textButton("cloud", "Sync Boards", () => this.plugin.openSyncDeck(), "ot-cloud-cta"));
     }
     actions.append(
@@ -179,12 +180,13 @@ class BoardView extends ItemView {
   // is always the fixed first column. Definitions live here; per-board layout
   // (order / hidden / widths) is a per-device preference in data.json.
   tableColumnDefs() {
-    return [
+    const defs = [
       { key: "status", label: "Status" },
       { key: "assignee", label: "Assignee" },
       { key: "dates", label: "Dates" },
       { key: "labels", label: "Labels" },
     ];
+    return this.plugin.isSyncDeckEnabled() ? defs : defs.filter((def) => def.key !== "assignee");
   }
 
   defaultColWidth(key) {
@@ -444,8 +446,9 @@ class BoardView extends ItemView {
     if (card.completed) complete.append(createElement("span", "ot-card-complete-mark", "✓"));
     nameInner.append(complete, createElement("span", "ot-td-title", card.title));
     const hints = createElement("span", "ot-td-hints");
-    if ((card.checklist || []).length) {
-      const stats = checklistStats(card.checklist);
+    const checklist = checklistItems(card.checklists);
+    if (checklist.length) {
+      const stats = checklistStats(checklist);
       hints.append(createElement("span", "ot-td-hint", `☑ ${stats.done}/${stats.total}`));
     }
     if (card.details) hints.append(createElement("span", "ot-td-hint", "☰"));
@@ -993,12 +996,12 @@ class BoardView extends ItemView {
     // Same action as the About modal's "Sync notes": re-import every card from
     // its Markdown note so changes synced by SyncDeck show up on the boards.
     try {
-      new Notice("Syncing Task Deck notes...");
+      new Notice("Re-importing Task Deck notes...");
       await this.plugin.syncCardsFromFolder();
       this.plugin.refreshViews();
-      new Notice("Task Deck synced.");
+      new Notice("Task Deck notes re-imported.");
     } catch (error) {
-      new Notice(`Sync failed: ${error.message}`);
+      new Notice(`Re-import failed: ${error.message}`);
     }
   }
 
@@ -1011,11 +1014,11 @@ class BoardView extends ItemView {
     );
     const welcomeActions = createElement("div", "ot-welcome-actions");
     welcomeActions.append(textButton("plus", "Create board", () => this.plugin.createBoardPrompt()));
-    if (!this.plugin.getSyncDeckPlugin()) {
+    if (this.plugin.isSyncDeckEnabled() && !this.plugin.getSyncDeckPlugin()) {
       welcomeActions.append(textButton("cloud", "Sync your boards & vaults", () => this.plugin.openSyncDeck(), "ot-cloud-cta"));
     }
     welcomeActions.append(
-      textButton("refresh-cw", "Sync", () => this.syncNotes()),
+      textButton("refresh-cw", "Re-import notes", () => this.syncNotes()),
       textButton("info", "About", () => new AboutModal(this.app, this.plugin).open()),
       textButton("heart", "Support developer", () => window.open(DONATION_URL, "_blank"))
     );
@@ -1298,6 +1301,7 @@ class BoardView extends ItemView {
 
   renderCardAssignees(card) {
     const wrap = createElement("div", "ot-card-assignees");
+    if (!this.plugin.isSyncDeckEnabled()) return wrap;
     const assignees = (card.assignees || []).filter((a) => a && a.email);
     const max = 3;
     assignees.slice(0, max).forEach((assignee) => wrap.append(this.buildAvatar(assignee)));
@@ -1401,8 +1405,9 @@ class BoardView extends ItemView {
       meta.append(badge);
     }
 
-    if ((card.checklist || []).length) {
-      const stats = checklistStats(card.checklist);
+    const checklist = checklistItems(card.checklists);
+    if (checklist.length) {
+      const stats = checklistStats(checklist);
       const badge = createElement("span", "ot-card-meta-item ot-card-checklist-badge");
       const icon = createElement("span", "ot-card-checklist-icon");
       try {

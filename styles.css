@@ -1710,6 +1710,20 @@
   font-weight: 400;
 }
 
+.ot-checklists-field {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ot-checklist-group {
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--ot-checklist-color, var(--interactive-accent));
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
 .ot-checklist {
   display: flex;
   flex-direction: column;
@@ -1727,22 +1741,79 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex: 1;
   color: var(--text-normal);
   font-size: 16px;
   font-weight: 800;
+}
+
+.ot-field .ot-checklist-name {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 2px 6px;
+  border: 0 !important;
+  border-radius: 5px;
+  background: transparent !important;
+  color: var(--text-normal);
+  font-size: 16px;
+  font-weight: 800;
+  box-shadow: none !important;
+}
+
+.ot-field .ot-checklist-name:hover {
+  background: var(--background-modifier-hover) !important;
+}
+
+.ot-field .ot-checklist-name:focus {
+  background: var(--background-modifier-form-field) !important;
+  box-shadow: inset 0 0 0 1px var(--interactive-accent) !important;
+}
+
+.ot-checklist-delete {
+  flex: 0 0 auto;
+  background: transparent !important;
+  color: var(--text-faint);
+  box-shadow: none !important;
+  opacity: 0.55;
+}
+
+.ot-checklist-color {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid color-mix(in srgb, var(--text-normal) 28%, transparent);
+  border-radius: 999px;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+
+.ot-checklist-color:hover,
+.ot-checklist-color:focus-visible {
+  border-color: var(--text-normal);
+  transform: scale(1.08);
+}
+
+.ot-checklist-group:hover .ot-checklist-delete,
+.ot-checklist-delete:focus-visible {
+  opacity: 1;
 }
 
 .ot-checklist-heading-icon {
   display: inline-flex;
   width: 22px;
   height: 22px;
+  color: var(--ot-checklist-color, var(--interactive-accent));
 }
 
 .ot-checklist-progress {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .ot-checklist-percent {
@@ -1751,7 +1822,7 @@
 }
 
 .ot-progress-track {
-  height: 8px;
+  height: 6px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--background-modifier-border);
@@ -1761,13 +1832,13 @@
   width: 0%;
   height: 100%;
   border-radius: inherit;
-  background: var(--interactive-accent);
+  background: var(--ot-checklist-color, var(--interactive-accent));
   transition: width 120ms ease;
 }
 
 .ot-checklist-row {
   display: grid;
-  grid-template-columns: 26px 20px minmax(0, 1fr) 30px;
+  grid-template-columns: 26px 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-height: 32px;
@@ -1827,6 +1898,30 @@
   pointer-events: auto;
 }
 
+.ot-card-modal.is-sync-disabled .ot-checklist-row {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+}
+
+.ot-card-modal.is-sync-disabled .ot-checklist-assignee {
+  display: none;
+}
+
+.ot-checklist-item-actions {
+  display: inline-flex;
+  align-items: center;
+  min-width: 60px;
+}
+
+.ot-checklist-row .ot-checklist-note {
+  opacity: 0.55;
+  pointer-events: auto;
+}
+
+.ot-checklist-row .ot-checklist-note.is-linked {
+  color: var(--interactive-accent);
+  opacity: 1;
+}
+
 .ot-checklist-title {
   width: 100%;
   border: 0;
@@ -1845,12 +1940,34 @@
   padding-left: 30px;
 }
 
+.ot-checklist-add .ot-text-button {
+  background: transparent;
+  box-shadow: none;
+}
+
+.ot-checklist-group .ot-empty-text {
+  padding: 4px 0 4px 62px;
+}
+
 .ot-checklist-add-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 30px;
   align-items: center;
   gap: 8px;
   width: 100%;
+}
+
+.ot-add-checklist {
+  align-self: stretch;
+  min-height: 38px;
+  border: 1px dashed var(--background-modifier-border);
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.ot-add-checklist:hover {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
 }
 
 .is-hidden {
