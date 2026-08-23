@@ -31,6 +31,44 @@ const LABEL_COLORS = [
 // Default list-color sequence. Grey → blue → green first so a fresh board's
 // To do / Doing / Done reads the way most people expect.
 const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#ec4899"];
+const DEFAULT_APPEARANCE = {
+  preset: "obsidian",
+  colorScheme: "theme",
+  surfaceScheme: "theme",
+  density: "normal",
+  fontScale: 1,
+  background: {
+    type: "theme",
+    color: "#1e1e1e",
+    gradientStart: "#172033",
+    gradientEnd: "#0f172a",
+    imagePath: "",
+    imageSource: "vault",
+    imageFit: "original",
+    imageFitVersion: 3,
+    overlayOpacity: 0.35,
+  },
+  cards: {
+    useTheme: true,
+    background: "#25262a",
+    hoverBackground: "#30343b",
+    verticalGap: 8,
+    titleSize: 18,
+    borderRadius: 9,
+    shadow: "medium",
+  },
+  lists: {
+    useTheme: true,
+    background: "#161719",
+    columnGap: 12,
+    topBorderWidth: 3,
+    showColorDot: true,
+    borderRadius: 12,
+  },
+  motion: {
+    enabled: true,
+  },
+};
 
 /**
  * Minimal saved-data shape used when the plugin starts with no existing board.
@@ -45,6 +83,8 @@ const DEFAULT_DATA = {
   syncDeckEnabled: true,
   completionSound: true,
   compactLabels: false,
+  labelDisplayMode: "expanded",
+  appearance: DEFAULT_APPEARANCE,
   layoutMigrated: false,
   boards: [],
   cards: {},
@@ -491,6 +531,33 @@ function parseChecklistItemValue(value) {
 }
 
 /**
+ * Returns the user-authored body of a checklist item note.
+ *
+ * Frontmatter is never part of the preview. Notes created by Task Deck also
+ * contain a generated H1 and card backlink; those lines are removed only when
+ * the note identifies itself as a managed checklist item.
+ */
+function checklistItemNoteBody(markdown) {
+  let body = String(markdown || "").replace(/^\uFEFF/, "");
+  let frontmatter = "";
+  const match = body.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
+  if (match) {
+    frontmatter = match[1];
+    body = body.slice(match[0].length);
+  }
+
+  const managed = /(?:^|\r?\n)[ \t]*task-deck-checklist-item[ \t]*:[ \t]*true[ \t]*(?:#.*)?(?:\r?\n|$)/i.test(frontmatter);
+  if (!managed) return body.trim();
+
+  const lines = body.split(/\r?\n/);
+  while (lines.length && !lines[0].trim()) lines.shift();
+  if (lines.length && /^#[ \t]+\S/.test(lines[0])) lines.shift();
+  while (lines.length && !lines[0].trim()) lines.shift();
+  if (lines.length && /^Card:[ \t]*\[\[[^\]]+\]\][ \t]*$/i.test(lines[0])) lines.shift();
+  return lines.join("\n").trim();
+}
+
+/**
  * Normalizes the named checklist collection used by current cards.
  *
  * `legacyItems` keeps data.json files from versions that stored one flat
@@ -775,6 +842,7 @@ module.exports = {
   DEFAULT_LABEL_COLOR,
   LABEL_COLORS,
   LIST_COLORS,
+  DEFAULT_APPEARANCE,
   DEFAULT_DATA,
   clone,
   uid,
@@ -806,6 +874,7 @@ module.exports = {
   getSection,
   getSectionAny,
   parseChecklist,
+  checklistItemNoteBody,
   parseChecklists,
   normalizeChecklists,
   checklistToText,

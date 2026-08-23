@@ -9,11 +9,51 @@ Module._load = function load(request, parent, isMain) {
 
 const {
   checklistItems,
+  checklistItemNoteBody,
   checklistStats,
   checklistsToMarkdown,
   parseCardMarkdown,
   parseChecklists,
 } = require("../src/helpers");
+
+function testChecklistItemNoteBody() {
+  const managed = [
+    "---",
+    "task-deck-checklist-item: true",
+    "task-deck-card-id: card-1",
+    "---",
+    "",
+    "# Review implementation",
+    "",
+    "Card: [[Board/Card|Card title]]",
+    "",
+    "Review the parser and keep [[Architecture]] in sync.",
+    "",
+    "- Confirm lists",
+    "- Confirm links",
+  ].join("\n");
+  assert.strictEqual(
+    checklistItemNoteBody(managed),
+    "Review the parser and keep [[Architecture]] in sync.\n\n- Confirm lists\n- Confirm links",
+  );
+
+  const external = [
+    "---",
+    "owner: docs",
+    "---",
+    "",
+    "# External heading",
+    "",
+    "Paragraph with [[Reference]].",
+    "",
+    "- First",
+    "- Second",
+  ].join("\n");
+  assert.strictEqual(
+    checklistItemNoteBody(external),
+    "# External heading\n\nParagraph with [[Reference]].\n\n- First\n- Second",
+  );
+}
 
 function testLegacyChecklistMigration() {
   const groups = parseChecklists("- [x] Existing item\n- [ ] Pending item");
@@ -90,6 +130,7 @@ function testCardParserAndAggregateStats() {
 }
 
 testLegacyChecklistMigration();
+testChecklistItemNoteBody();
 testNamedChecklistRoundTrip();
 testCardParserAndAggregateStats();
 console.log("helpers tests passed");

@@ -3,10 +3,43 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 12px;
   color: var(--text-normal);
-  background: var(--background-primary);
+  background-color: var(--ot-board-background, var(--background-primary));
+  font-size: calc(16px * var(--ot-font-scale, 1));
+}
+
+.ot-board-root.is-appearance-dark {
+  --text-normal: #f1f2f4;
+  --text-muted: #b6c2cf;
+  --text-faint: #8c9bab;
+}
+
+.ot-board-root.is-surfaces-dark {
+  --background-primary: #1d2125;
+  --background-primary-alt: #22272b;
+  --background-secondary: #101214;
+  --background-modifier-hover: #323940;
+  --background-modifier-border: #45505a;
+  --background-modifier-border-hover: #738496;
+}
+
+.ot-board-root.is-appearance-light {
+  --text-normal: #20242b;
+  --text-muted: #515966;
+  --text-faint: #737b87;
+}
+
+.ot-board-root.is-surfaces-light {
+  --background-primary: #ffffff;
+  --background-primary-alt: #ffffff;
+  --background-secondary: #f1f2f4;
+  --background-modifier-hover: #dcdfe4;
+  --background-modifier-border: #b7bdc8;
+  --background-modifier-border-hover: #8590a2;
+  --interactive-normal: #ffffff;
+  --interactive-hover: #e8ebf0;
 }
 
 .ot-card.is-locked {
@@ -102,10 +135,16 @@
 }
 
 .ot-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  min-height: 44px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: var(--background-secondary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
 }
 
 .ot-toolbar-title {
@@ -117,7 +156,7 @@
 
 .ot-toolbar h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: calc(22px * var(--ot-font-scale, 1));
   line-height: 1.2;
 }
 
@@ -131,6 +170,35 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.ot-toolbar-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ot-toolbar .ot-text-button {
+  transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ot-toolbar .ot-text-button:hover {
+  box-shadow: 0 3px 8px rgb(0 0 0 / 16%);
+  transform: translateY(-1px);
+}
+
+.ot-board-root.is-surfaces-light .ot-toolbar .ot-text-button,
+.ot-board-root.is-surfaces-light .ot-list-footer .ot-text-button {
+  border-color: #c8cdd5;
+  color: #252a32;
+  background: #ffffff;
+}
+
+.ot-board-root.is-surfaces-light .ot-toolbar .ot-text-button:hover,
+.ot-board-root.is-surfaces-light .ot-list-footer .ot-text-button:hover {
+  color: #111318;
+  background: #e8ebf0;
 }
 
 .ot-welcome-panel {
@@ -237,23 +305,32 @@
 .ot-board-scroll {
   display: flex;
   flex: 1;
+  align-items: flex-start;
   min-height: 0;
-  gap: 16px;
+  gap: var(--ot-column-gap, 12px);
   overflow-x: auto;
-  padding-bottom: 10px;
+  padding: 2px 2px 10px;
+  scrollbar-color: var(--background-modifier-border-hover) transparent;
+  scrollbar-width: thin;
 }
 
 .ot-list {
   display: flex;
-  flex: 0 0 320px;
+  flex: 0 0 var(--ot-list-width, 292px);
   flex-direction: column;
   max-height: 100%;
-  min-width: 280px;
-  border: 1px solid var(--background-modifier-border);
-  border-top: 3px solid var(--ot-list-color, var(--background-modifier-border));
-  border-radius: 8px;
-  background: var(--background-secondary);
+  min-width: var(--ot-list-min-width, 272px);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+  border-top: var(--ot-list-top-border-width, 3px) solid var(--ot-list-color, var(--background-modifier-border));
+  border-radius: var(--ot-list-radius, 12px);
+  background: var(--ot-list-background, color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%));
+  box-shadow: 0 3px 10px rgb(0 0 0 / 20%);
   overflow: hidden;
+  transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ot-list:hover {
+  box-shadow: 0 5px 16px rgb(0 0 0 / 24%);
 }
 
 .ot-list.is-dragging-list {
@@ -273,7 +350,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px;
+  padding: 10px;
+}
+
+.ot-list-header {
+  align-items: flex-start;
+  border-bottom: 1px solid color-mix(in srgb, var(--ot-list-color, var(--background-modifier-border)) 34%, var(--background-modifier-border));
 }
 
 .ot-list-drag-source {
@@ -289,6 +371,7 @@
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
+  margin-top: 6px;
   color: var(--text-muted);
 }
 
@@ -296,6 +379,7 @@
   flex: 0 0 auto;
   width: 9px;
   height: 9px;
+  margin-top: 7px;
   border-radius: 999px;
   background: var(--ot-list-color, var(--text-faint));
   box-shadow: 0 0 0 2px rgb(0 0 0 / 12%);
@@ -303,32 +387,64 @@
 
 .ot-list-footer {
   flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.ot-board-root.is-list-color-dot-hidden .ot-list-color-dot {
+  display: none;
+}
+
+.ot-list-footer .ot-text-button {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 32px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.ot-list-footer .ot-text-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
 }
 
 .ot-list-header h3 {
   flex: 1;
   min-width: 0;
   margin: 0;
-  overflow: hidden;
-  font-size: 16px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  color: var(--text-normal) !important;
+  font-size: calc(20px * var(--ot-font-scale, 1));
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .ot-list-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
   color: var(--text-muted);
+  font-size: calc(14px * var(--ot-font-scale, 1));
   font-weight: 700;
+}
+
+.ot-list-header > .ot-icon-button {
+  flex: 0 0 30px;
 }
 
 .ot-cards {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--ot-card-gap, 8px);
   min-height: 80px;
   overflow-y: auto;
-  padding: 6px 12px 12px;
+  padding: 10px 8px 8px;
+  scrollbar-color: var(--background-modifier-border-hover) transparent;
+  scrollbar-width: thin;
 }
 
 .ot-cards.is-drop-zone {
@@ -340,21 +456,27 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  padding: 10px;
-  background: var(--background-primary);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  border-radius: var(--ot-card-radius, 9px);
+  padding: var(--ot-card-padding, 9px 10px);
+  background: var(--ot-card-background, color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 88%, var(--background-modifier-hover) 12%));
+  box-shadow: var(--ot-card-shadow, 0 2px 4px rgb(0 0 0 / 24%), 0 1px 1px rgb(0 0 0 / 16%));
   cursor: pointer;
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition: background-color 220ms ease, border-color 220ms ease, box-shadow 220ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .ot-card:hover {
   z-index: 1;
-  border-color: var(--background-modifier-border-hover);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 28%, transparent), 0 8px 18px rgb(0 0 0 / 18%);
-  transform: translateY(-1px);
+  background: var(--ot-card-hover-background, var(--ot-card-background));
+  border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--background-modifier-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 18%, transparent), 0 8px 18px rgb(0 0 0 / 24%);
+  transform: translateY(-2px) scale(1.008);
+}
+
+.ot-card:active {
+  transform: translateY(0) scale(0.996);
+  transition-duration: 90ms;
 }
 
 .ot-card.is-drop-target {
@@ -419,7 +541,7 @@
 .ot-card-labels {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .ot-card-label,
@@ -427,10 +549,10 @@
   max-width: 100%;
   border: 0;
   border-radius: 4px;
-  padding: 2px 8px;
+  padding: 3px 9px;
   overflow: hidden;
   color: white;
-  font-size: 11px;
+  font-size: calc(14px * var(--ot-font-scale, 1));
   font-weight: 700;
   line-height: 1.5;
   text-overflow: ellipsis;
@@ -438,16 +560,18 @@
 }
 
 .ot-card-label {
-  cursor: pointer;
-  transition: width 140ms ease, min-width 140ms ease, padding 140ms ease, color 100ms ease;
+  cursor: default;
+  transition: max-width 260ms cubic-bezier(0.2, 0.8, 0.2, 1), height 220ms ease, min-height 220ms ease, padding 220ms ease, color 180ms ease, line-height 220ms ease;
 }
 
-.ot-board-root.is-compact-labels .ot-card-label {
-  width: 44px;
-  min-width: 44px;
-  height: 7px;
-  min-height: 7px;
-  flex: 0 0 44px;
+.ot-board-root.is-compact-labels .ot-card-label,
+.ot-board-root.is-hover-labels .ot-card-label,
+.ot-board-root.is-card-hover-labels .ot-card-label {
+  width: 40px;
+  min-width: 40px;
+  height: 8px;
+  min-height: 8px;
+  flex: 0 0 40px;
   box-sizing: border-box;
   display: block;
   margin: 1px 0;
@@ -456,6 +580,48 @@
   font-size: 0;
   line-height: 0;
   background-clip: padding-box;
+}
+
+.ot-board-root.is-hover-labels .ot-card-label:hover {
+  max-width: 240px;
+  height: calc(29px * var(--ot-font-scale, 1));
+  min-height: calc(29px * var(--ot-font-scale, 1));
+  flex: 0 1 auto;
+  margin: 0;
+  padding: 3px 9px;
+  color: white;
+  font-size: calc(14px * var(--ot-font-scale, 1));
+  line-height: 1.5;
+}
+
+.ot-board-root.is-card-hover-labels .ot-card:hover .ot-card-label,
+.ot-board-root.is-card-hover-labels .ot-card:focus-within .ot-card-label {
+  width: max-content;
+  max-width: 240px;
+  height: calc(29px * var(--ot-font-scale, 1));
+  min-height: calc(29px * var(--ot-font-scale, 1));
+  flex: 0 1 auto;
+  margin: 0;
+  padding: 3px 9px;
+  color: white;
+  font-size: calc(14px * var(--ot-font-scale, 1));
+  line-height: 1.5;
+}
+
+.ot-board-root.is-hover-labels .ot-card-label,
+.ot-board-root.is-card-hover-labels .ot-card-label {
+  width: max-content;
+  max-width: 40px;
+  flex: 0 1 auto;
+  font-size: calc(14px * var(--ot-font-scale, 1));
+  will-change: max-width, height, padding;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ot-board-root.is-hover-labels .ot-card-label,
+  .ot-board-root.is-card-hover-labels .ot-card-label {
+    transition: none;
+  }
 }
 
 .ot-label-pill {
@@ -476,7 +642,7 @@
   border-radius: 6px;
   padding: 0 12px;
   color: white;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   letter-spacing: 0;
   cursor: pointer;
@@ -492,35 +658,44 @@
 
 .ot-card-main {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 24px;
   align-items: center;
-  min-height: 28px;
-  padding: 0 34px 0 30px;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0;
 }
 
 .ot-card-title {
-  flex: 1;
   min-width: 0;
   overflow-wrap: break-word;
+  color: var(--text-normal);
+  font-size: calc(var(--ot-card-title-size, 18px) * var(--ot-font-scale, 1));
   font-weight: 650;
-  line-height: 1.35;
+  line-height: 1.4;
+  text-align: left;
 }
 
 .ot-card .ot-card-complete-toggle,
 .ot-card .ot-card-actions {
-  position: absolute;
-  top: 50%;
+  position: static;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-50%);
-  transition: opacity 120ms ease;
+  transition: opacity 170ms ease, transform 210ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .ot-card .ot-card-complete-toggle {
-  left: -3px;
-  width: 26px;
-  height: 26px;
-  border: 2px solid var(--text-muted);
+  transform: scale(0.78);
+}
+
+.ot-card .ot-card-actions {
+  transform: translateX(5px) scale(0.9);
+}
+
+.ot-card .ot-card-complete-toggle {
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--text-muted);
   border-radius: 999px;
   background: transparent;
   color: var(--text-muted);
@@ -529,12 +704,11 @@
 .ot-card .ot-card-actions {
   display: flex;
   gap: 2px;
-  right: -3px;
 }
 
 .ot-card .ot-card-action-button {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
 }
 
 .ot-card:hover .ot-card-complete-toggle,
@@ -544,6 +718,7 @@
 .ot-card.is-completed .ot-card-complete-toggle {
   opacity: 1;
   pointer-events: auto;
+  transform: none;
 }
 
 .ot-card.is-completed .ot-card-complete-toggle {
@@ -562,7 +737,7 @@
   justify-content: center;
   width: 100%;
   height: 100%;
-  font-size: 19px;
+  font-size: 15px;
   font-weight: 900;
   line-height: 1;
 }
@@ -594,15 +769,15 @@
 
 @keyframes ot-complete-toggle-pop {
   0% {
-    transform: translateY(-50%) scale(0.72);
+    transform: scale(0.72);
   }
 
   58% {
-    transform: translateY(-50%) scale(1.18);
+    transform: scale(1.18);
   }
 
   100% {
-    transform: translateY(-50%) scale(1);
+    transform: scale(1);
   }
 }
 
@@ -706,9 +881,9 @@
 .ot-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(13px * var(--ot-font-scale, 1));
 }
 
 .ot-card-meta-item {
@@ -721,8 +896,8 @@
   padding: 0;
   background: transparent;
   color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: calc(13px * var(--ot-font-scale, 1));
+  font-weight: 650;
 }
 
 .ot-card-date-icon {
@@ -732,12 +907,17 @@
 }
 
 .ot-card-checklist-badge {
-  border-radius: 6px;
-  padding: 4px 8px;
-  color: #d8b8ff;
-  background: #4f246a;
-  font-size: 13px;
-  font-weight: 800;
+  border-radius: 4px;
+  padding: 2px 5px;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  font-size: calc(13px * var(--ot-font-scale, 1));
+  font-weight: 700;
+}
+
+.ot-card-checklist-badge.is-complete {
+  color: #17210d;
+  background: #8cc63f;
 }
 
 .ot-card-checklist-icon {
@@ -768,6 +948,18 @@
   min-height: 32px;
   padding: 0 8px;
   font-weight: 650;
+}
+
+.ot-board-root .ot-text-button {
+  font-size: calc(15px * var(--ot-font-scale, 1));
+}
+
+.ot-board-root.is-motion-disabled *,
+.ot-board-root.is-motion-disabled *::before,
+.ot-board-root.is-motion-disabled *::after {
+  animation: none !important;
+  scroll-behavior: auto !important;
+  transition: none !important;
 }
 
 .ot-icon-button:hover,
@@ -1185,8 +1377,36 @@
 }
 
 .ot-label-create-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   border-top: 1px solid var(--background-modifier-border);
   padding-top: 16px;
+}
+
+.modal:has(.ot-appearance-modal) {
+  width: min(720px, calc(100vw - 32px));
+  max-width: 720px;
+}
+
+.ot-appearance-modal {
+  max-height: min(78vh, 760px);
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.ot-appearance-modal > h2 {
+  margin-bottom: 4px;
+}
+
+.ot-appearance-modal-intro {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+}
+
+.ot-label-create-footer .mod-cta {
+  margin-left: auto;
 }
 
 .ot-color-input {
@@ -1838,13 +2058,33 @@
 
 .ot-checklist-row {
   display: grid;
-  grid-template-columns: 26px 20px minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: 18px 26px 20px minmax(0, 1fr) auto;
+  align-items: start;
   gap: 8px;
   min-height: 32px;
   border-radius: 6px;
   padding: 2px 4px;
   background: transparent;
+}
+
+.ot-checklist-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 30px;
+  color: var(--text-faint);
+  cursor: grab;
+  touch-action: none;
+}
+
+.ot-checklist-drag-handle:active {
+  cursor: grabbing;
+}
+
+.ot-checklist-drag-handle > svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* Per-item member assignment circle (leftmost). */
@@ -1878,7 +2118,7 @@
 }
 
 .ot-checklist-row input[type="checkbox"] {
-  margin: 0;
+  margin: 8px 0 0;
 }
 
 .ot-checklist-row:hover,
@@ -1898,8 +2138,41 @@
   pointer-events: auto;
 }
 
+.ot-checklist-item {
+  position: relative;
+  min-width: 0;
+}
+
+.ot-checklist-item.is-checklist-dragging {
+  opacity: 0.45;
+}
+
+.ot-checklist-item.is-checklist-drop-before::before,
+.ot-checklist-item.is-checklist-drop-after::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  left: 4px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--ot-checklist-color, var(--interactive-accent));
+}
+
+.ot-checklist-item.is-checklist-drop-before::before {
+  top: -1px;
+}
+
+.ot-checklist-item.is-checklist-drop-after::after {
+  bottom: -1px;
+}
+
+.ot-checklist.is-checklist-drop-end {
+  box-shadow: inset 0 -2px var(--ot-checklist-color, var(--interactive-accent));
+}
+
 .ot-card-modal.is-sync-disabled .ot-checklist-row {
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 18px 20px minmax(0, 1fr) auto;
 }
 
 .ot-card-modal.is-sync-disabled .ot-checklist-assignee {
@@ -1909,6 +2182,7 @@
 .ot-checklist-item-actions {
   display: inline-flex;
   align-items: center;
+  gap: 2px;
   min-width: 60px;
 }
 
@@ -1922,22 +2196,93 @@
   opacity: 1;
 }
 
+.ot-checklist-row .ot-checklist-note-toggle {
+  min-height: 28px;
+  padding: 0 6px;
+  color: var(--interactive-accent);
+  font-size: var(--font-ui-smaller);
+  opacity: 1;
+  white-space: nowrap;
+}
+
+.ot-checklist-note-chevron,
+.ot-checklist-note-chevron > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ot-checklist-note-panel {
+  margin: 4px 4px 8px 88px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--ot-checklist-color, var(--interactive-accent));
+  border-radius: 0 6px 6px 0;
+  background: var(--background-secondary);
+}
+
+.ot-card-modal.is-sync-disabled .ot-checklist-note-panel {
+  margin-left: 54px;
+}
+
+.ot-checklist-note-panel[hidden] {
+  display: none;
+}
+
+.ot-checklist-note-content > :first-child {
+  margin-top: 0;
+}
+
+.ot-checklist-note-content > :last-child {
+  margin-bottom: 0;
+}
+
+.ot-checklist-note-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ot-checklist-note-status.is-error {
+  color: var(--text-error);
+}
+
 .ot-checklist-title {
+  display: block;
   width: 100%;
-  border: 0;
-  background: transparent;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--input-radius, 5px);
+  box-sizing: border-box;
+  overflow: hidden;
+  resize: none;
+  background: var(--background-modifier-form-field);
+  box-shadow: var(--input-shadow);
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: inherit;
   font-weight: 600;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
 .ot-checklist-title:focus {
   outline: none;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.ot-checklist-title:hover:not(:focus) {
+  border-color: var(--background-modifier-border-hover, var(--background-modifier-border));
+  box-shadow: var(--input-shadow-hover, var(--input-shadow));
 }
 
 .ot-checklist-add {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-left: 30px;
+  padding-left: 56px;
 }
 
 .ot-checklist-add .ot-text-button {
@@ -1946,7 +2291,11 @@
 }
 
 .ot-checklist-group .ot-empty-text {
-  padding: 4px 0 4px 62px;
+  padding: 4px 0 4px 88px;
+}
+
+.ot-card-modal.is-sync-disabled .ot-checklist-group .ot-empty-text {
+  padding-left: 54px;
 }
 
 .ot-checklist-add-form {
@@ -1994,6 +2343,16 @@
     padding: 10px;
   }
 
+  .ot-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .ot-toolbar-title,
+  .ot-toolbar-primary,
+  .ot-toolbar-actions {
+    justify-content: flex-start;
+  }
+
   .ot-welcome-panel {
     align-items: flex-start;
     flex-direction: column;
@@ -2031,6 +2390,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 22px;
+  margin-top: 1px;
 }
 
 .ot-card-assignees {
