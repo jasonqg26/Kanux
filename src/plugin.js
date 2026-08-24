@@ -1,4 +1,4 @@
-const { Notice, Plugin, addIcon, requestUrl } = require("obsidian");
+const { Notice, Plugin, addIcon } = require("obsidian");
 
 // Owns the Obsidian plugin lifecycle, saved board data, and Markdown card sync.
 const {
@@ -100,8 +100,6 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     }, 30000));
 
     this.addRibbonIcon(TASK_DECK_ICON, "Open Task Deck", () => this.activateView());
-    // Fire-and-forget update check (manual installs get no store prompt).
-    this.checkForUpdate();
     this.addCommand({
       id: "open-board",
       name: "Open board",
@@ -224,12 +222,25 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       ? (this.data.compactLabels ? "compact" : "expanded")
       : savedLabelDisplayMode;
     this.data.compactLabels = this.data.labelDisplayMode === "compact";
+    if (!this.data.appearance || typeof this.data.appearance !== "object") this.data.appearance = {};
+    if (!this.data.appearance.labels) this.data.appearance.labels = { displayMode: this.data.labelDisplayMode };
+    this.data.appearancePresets = Array.isArray(this.data.appearancePresets)
+      ? this.data.appearancePresets.map((preset) => ({
+        id: textLine(preset && preset.id) || uid("appearance-preset"),
+        name: textLine(preset && preset.name) || "Untitled preset",
+        appearance: this.normalizeAppearance(preset && preset.appearance),
+        createdAt: textLine(preset && preset.createdAt) || new Date().toISOString(),
+      }))
+      : [];
     if (needsImageFitMigration) this.data.appearance.background.imageFit = "original";
     this.data.appearance = this.normalizeAppearance(this.data.appearance);
     this.data.labels = this.normalizeGlobalLabels(this.data.labels);
     const needsBoardAppearanceMigration = this.data.boards.some((board) => {
       const background = board && board.appearance && board.appearance.background;
-      return !board || !board.appearance || (background && background.type === "image" && background.imageFitVersion !== 3);
+      return !board
+        || !board.appearance
+        || !board.appearance.labels
+        || (background && background.type === "image" && background.imageFitVersion !== 3);
     });
     this.data.boards = this.data.boards.map((board) => this.normalizeBoard(board, this.data.appearance));
     this.loadNeedsSave = this.ensureListColors()
@@ -333,6 +344,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
   normalizeBoard(board, fallbackAppearance = DEFAULT_APPEARANCE) {
     const appearance = clone((board && board.appearance) || fallbackAppearance);
+    if (!appearance.labels) {
+      appearance.labels = { displayMode: (this.data && this.data.labelDisplayMode) || "expanded" };
+    }
     if (appearance.background
       && appearance.background.type === "image"
       && appearance.background.imageFitVersion !== 3) {
@@ -557,6 +571,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     const background = source.background && typeof source.background === "object" ? source.background : {};
     const cards = source.cards && typeof source.cards === "object" ? source.cards : {};
     const lists = source.lists && typeof source.lists === "object" ? source.lists : {};
+    const labels = source.labels && typeof source.labels === "object" ? source.labels : {};
     const motion = source.motion && typeof source.motion === "object" ? source.motion : {};
     const inferredSurfaceScheme = source.preset === "trello-light"
       ? "light"
@@ -575,6 +590,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       surfaceScheme: choice(source.surfaceScheme, ["theme", "dark", "light"], inferredSurfaceScheme),
       density: choice(source.density, ["compact", "normal", "comfortable"], DEFAULT_APPEARANCE.density),
       fontScale: number(source.fontScale, DEFAULT_APPEARANCE.fontScale, 0.85, 1.4),
+      labels: {
+        displayMode: choice(labels.displayMode, ["compact", "expanded", "hover", "card-hover"], DEFAULT_APPEARANCE.labels.displayMode),
+      },
       background: {
         type: choice(background.type, ["theme", "solid", "gradient", "image"], DEFAULT_APPEARANCE.background.type),
         color: cleanColor(background.color) || DEFAULT_APPEARANCE.background.color,
@@ -782,6 +800,63 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     this.refreshViews();
   }
 
+  getAppearancePresets() {
+    return Array.isArray(this.data.appearancePresets) ? this.data.appearancePresets : [];
+  }
+
+  async saveAppearancePreset(name, appearance) {
+    const cleanName = textLine(name);
+    if (!cleanName) return null;
+    this.data.appearancePresets = this.getAppearancePresets();
+    const existing = this.data.appearancePresets.find((preset) => preset.name.toLowerCase() === cleanName.toLowerCase());
+    if (existing) {
+      existing.name = cleanName;
+      existing.appearance = this.normalizeAppearance(clone(appearance));
+      existing.createdAt = new Date().toISOString();
+      await this.saveData(this.data);
+      return existing;
+    }
+    const preset = {
+      id: uid("appearance-preset"),
+      name: cleanName,
+      appearance: this.normalizeAppearance(clone(appearance)),
+      createdAt: new Date().toISOString(),
+    };
+    this.data.appearancePresets.push(preset);
+    await this.saveData(this.data);
+    return preset;
+  }
+
+  async deleteAppearancePreset(presetId) {
+    const before = this.getAppearancePresets().length;
+    this.data.appearancePresets = this.getAppearancePresets().filter((preset) => preset.id !== presetId);
+    if (this.data.appearancePresets.length === before) return false;
+    await this.saveData(this.data);
+    return true;
+  }
+
+  async applyCustomAppearancePreset(boardId, presetId) {
+    const board = this.findBoard(boardId);
+    const preset = this.getAppearancePresets().find((item) => item.id === presetId);
+    if (!board || !preset) return false;
+    board.appearance = this.normalizeAppearance(clone(preset.appearance));
+    board.appearance.preset = "custom";
+    await this.saveData(this.data);
+    this.refreshViews();
+    return true;
+  }
+
+  async copyBoardAppearance(targetBoardId, sourceBoardId) {
+    const target = this.findBoard(targetBoardId);
+    const source = this.findBoard(sourceBoardId);
+    if (!target || !source || target.id === source.id) return false;
+    target.appearance = this.normalizeAppearance(clone(this.getBoardAppearance(source.id)));
+    target.appearance.preset = "custom";
+    await this.saveData(this.data);
+    this.refreshViews();
+    return true;
+  }
+
   /**
    * Deletes a global label and removes it from every card and Markdown note.
    * The full label state is captured so the operation remains undoable.
@@ -877,39 +952,12 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     const syncDeck = this.getSyncDeckPlugin();
     if (!syncDeck || typeof syncDeck.activateView !== "function") {
       new Notice("Install the Sync Deck plugin to sync your boards and vaults across devices.");
-      window.open("https://github.com/ismailivanov/SyncDeck");
       return;
     }
     try {
       await syncDeck.activateView();
     } catch (error) {
       new Notice("Could not open Sync Deck.");
-    }
-  }
-
-  // Task Deck is installed manually (not from the community store), so it can't
-  // get store update prompts. Check the GitHub releases once per session; if a
-  // newer version is out, the board view shows an "Update" banner. Fails silent
-  // (offline / rate-limited) — never blocks or nags.
-  async checkForUpdate() {
-    if (this._updateChecked) return;
-    this._updateChecked = true;
-    try {
-      const res = await requestUrl({
-        url: "https://api.github.com/repos/ismailivanov/task-deck/releases/latest",
-        headers: { Accept: "application/vnd.github+json" },
-        throw: false,
-      });
-      const body = res && res.json;
-      const latest = body && body.tag_name;
-      if (!latest || !this.isNewerVersion(latest, this.manifest.version)) return;
-      this.updateAvailable = {
-        version: String(latest).replace(/^v/, ""),
-        url: (body && body.html_url) || "https://github.com/ismailivanov/task-deck/releases/latest",
-      };
-      this.refreshViews();
-    } catch (error) {
-      // offline or GitHub rate-limited — just don't show a banner
     }
   }
 
@@ -1165,18 +1213,14 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
   }
 
   getLabelDisplayMode() {
-    const mode = this.data && this.data.labelDisplayMode;
-    return ["compact", "expanded", "hover", "card-hover"].includes(mode)
-      ? mode
-      : (this.data && this.data.compactLabels ? "compact" : "expanded");
+    return this.getAppearance().labels.displayMode;
   }
 
   async setLabelDisplayMode(mode) {
     const next = ["compact", "expanded", "hover", "card-hover"].includes(mode) ? mode : "expanded";
-    this.data.labelDisplayMode = next;
-    this.data.compactLabels = next === "compact";
-    await this.savePluginData();
-    this.refreshViews();
+    const board = this.getBoard();
+    if (!board) return;
+    await this.updateBoardAppearance(board.id, { labels: { displayMode: next } });
   }
 
   isCardFile(file) {

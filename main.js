@@ -20,7 +20,6 @@ const TASK_DECK_ICON_SVG = `
   </g>
 `;
 const LIST_DRAG_TYPE = "application/x-task-deck-list";
-const DONATION_URL = "https://buymeacoffee.com/carbon06";
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "ico"];
 const DEFAULT_LABEL_COLOR = "#2f6fd6";
 const LABEL_COLORS = [
@@ -40,6 +39,9 @@ const DEFAULT_APPEARANCE = {
   surfaceScheme: "theme",
   density: "normal",
   fontScale: 1,
+  labels: {
+    displayMode: "expanded",
+  },
   background: {
     type: "theme",
     color: "#1e1e1e",
@@ -88,6 +90,7 @@ const DEFAULT_DATA = {
   compactLabels: false,
   labelDisplayMode: "expanded",
   appearance: DEFAULT_APPEARANCE,
+  appearancePresets: [],
   layoutMigrated: false,
   boards: [],
   cards: {},
@@ -840,7 +843,6 @@ module.exports = {
   TASK_DECK_ICON,
   TASK_DECK_ICON_SVG,
   LIST_DRAG_TYPE,
-  DONATION_URL,
   IMAGE_EXTENSIONS,
   DEFAULT_LABEL_COLOR,
   LABEL_COLORS,
@@ -1674,6 +1676,55 @@ class BoardAppearanceModal extends Modal {
           }
         }));
 
+    new Setting(this.contentEl).setName("Saved appearances").setHeading();
+    const presets = this.plugin.getAppearancePresets();
+    let selectedPresetId = presets[0] ? presets[0].id : "";
+    const presetSetting = new Setting(this.contentEl)
+      .setName("Custom preset")
+      .setDesc(presets.length ? "Apply or delete a saved appearance." : "No custom appearances saved yet.")
+      .addDropdown((dropdown) => {
+        if (!presets.length) dropdown.addOption("", "No saved presets");
+        presets.forEach((preset) => dropdown.addOption(preset.id, preset.name));
+        dropdown.setValue(selectedPresetId).onChange((value) => { selectedPresetId = value; });
+      })
+      .addButton((button) => button.setButtonText("Apply").setDisabled(!presets.length).onClick(async () => {
+        if (!selectedPresetId) return;
+        await this.plugin.applyCustomAppearancePreset(this.boardId, selectedPresetId);
+        this.render();
+      }))
+      .addButton((button) => button.setButtonText("Delete").setWarning().setDisabled(!presets.length).onClick(async () => {
+        if (!selectedPresetId) return;
+        const selected = presets.find((preset) => preset.id === selectedPresetId);
+        if (!selected || !window.confirm(`Delete appearance preset "${selected.name}"?`)) return;
+        await this.plugin.deleteAppearancePreset(selectedPresetId);
+        this.render();
+      }));
+    presetSetting.addButton((button) => button.setButtonText("Save current").setCta().onClick(() => {
+      new TextPromptModal(this.app, "Save appearance", "Preset name", "", async (name) => {
+        const saved = await this.plugin.saveAppearancePreset(name, this.plugin.getBoardAppearance(this.boardId));
+        if (saved) {
+          new Notice(`Appearance preset "${saved.name}" saved.`);
+          this.render();
+        }
+      }).open();
+    }));
+
+    const sourceBoards = this.plugin.data.boards.filter((item) => item.id !== this.boardId);
+    let sourceBoardId = sourceBoards[0] ? sourceBoards[0].id : "";
+    new Setting(this.contentEl)
+      .setName("Copy from another board")
+      .setDesc(sourceBoards.length ? "Replace this board's appearance with another board's settings." : "Create another board to use this option.")
+      .addDropdown((dropdown) => {
+        if (!sourceBoards.length) dropdown.addOption("", "No other boards");
+        sourceBoards.forEach((item) => dropdown.addOption(item.id, item.name));
+        dropdown.setValue(sourceBoardId).onChange((value) => { sourceBoardId = value; });
+      })
+      .addButton((button) => button.setButtonText("Copy appearance").setDisabled(!sourceBoards.length).onClick(async () => {
+        if (!sourceBoardId) return;
+        await this.plugin.copyBoardAppearance(this.boardId, sourceBoardId);
+        this.render();
+      }));
+
     new Setting(this.contentEl).setName("Background").setHeading();
     new Setting(this.contentEl)
       .setName("Background type")
@@ -1743,16 +1794,28 @@ class BoardAppearanceModal extends Modal {
     new Setting(this.contentEl).setName("Hover color").setDesc("Card color while the pointer is over it.")
       .addColorPicker((picker) => picker.setValue(appearance.cards.hoverBackground)
         .onChange((value) => this.update({ cards: { hoverBackground: value } })));
-    new Setting(this.contentEl).setName("Vertical spacing").setDesc("Space between cards inside each column.")
+    new Setting(this.contentEl).setName("Vertical spacing").setDesc("Space between cards inside each list.")
       .addSlider((slider) => slider.setLimits(0, 28, 1).setValue(appearance.cards.verticalGap).setDynamicTooltip()
         .onChange((value) => this.update({ cards: { verticalGap: value } })));
     new Setting(this.contentEl).setName("Title size").addSlider((slider) => slider
       .setLimits(12, 30, 1).setValue(appearance.cards.titleSize).setDynamicTooltip()
       .onChange((value) => this.update({ cards: { titleSize: value } })));
 
+    new Setting(this.contentEl).setName("Labels").setHeading();
+    new Setting(this.contentEl)
+      .setName("Label display")
+      .setDesc("Choose when card labels reveal their names.")
+      .addDropdown((dropdown) => dropdown
+        .addOption("compact", "Always compact")
+        .addOption("expanded", "Always expanded")
+        .addOption("hover", "Expand hovered label")
+        .addOption("card-hover", "Expand when card is hovered")
+        .setValue(appearance.labels.displayMode)
+        .onChange((value) => this.update({ labels: { displayMode: value } })));
+
     new Setting(this.contentEl).setName("Columns").setHeading();
     let columnColor = null;
-    new Setting(this.contentEl).setName("Use theme column color").addToggle((toggle) => toggle
+    new Setting(this.contentEl).setName("Use theme list color").addToggle((toggle) => toggle
       .setValue(appearance.lists.useTheme).onChange(async (value) => {
         await this.update({ lists: { useTheme: value } });
         if (columnColor) columnColor.setDisabled(value);
@@ -1997,7 +2060,7 @@ class AboutModal extends Modal {
     this.contentEl.addClass("ot-about-modal");
     this.contentEl.append(
       createElement("h2", "", "Task Deck"),
-      createElement("p", "", "A Trello-style task board for Obsidian with Markdown-backed cards, labels, dates, and checklists.")
+      createElement("p", "", "A Trello-style board for Obsidian with Markdown-backed cards, labels, dates, and checklist tasks.")
     );
 
     const actions = createElement("div", "ot-modal-actions");
@@ -2276,6 +2339,8 @@ class CardModal extends Modal {
 
   render() {
     const card = this.card;
+    const previousBody = this.contentEl.querySelector(".ot-card-modal-body");
+    const bodyScrollTop = previousBody ? previousBody.scrollTop : 0;
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-card-modal");
     const collaborationEnabled = this.plugin.isSyncDeckEnabled();
@@ -2289,6 +2354,18 @@ class CardModal extends Modal {
       this.localTitle = title.value;
       this.queueSave();
     });
+
+    const board = this.plugin.findBoardForCard(card);
+    const list = board && board.lists.find((item) => item.id === card.listId);
+    const header = createElement("header", "ot-card-modal-header");
+    const headerIcon = createElement("span", "ot-card-modal-header-icon");
+    try { setIcon(headerIcon, "check-square"); } catch (error) { headerIcon.textContent = ""; }
+    const headerCopy = createElement("div", "ot-card-modal-header-copy");
+    const location = createElement("div", "ot-card-modal-location");
+    location.append(createElement("span", "", list ? `In ${list.title}` : "Task Deck card"));
+    if (board) location.append(createElement("span", "ot-card-modal-board-name", board.name));
+    headerCopy.append(title, location);
+    header.append(headerIcon, headerCopy);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
     const assigneesField = this.notesOnly || !collaborationEnabled ? null : this.renderAssigneesField();
@@ -2334,13 +2411,26 @@ class CardModal extends Modal {
     const editableFields = (this.notesOnly
       ? [detailsField, checklistField]
       : [labelsField, assigneesField, detailsField, checklistField]).filter(Boolean);
-    const children = [title, ...editableFields, actions];
+    const mainColumn = createElement("main", "ot-card-modal-main");
+    mainColumn.append(detailsField, checklistField);
+    const body = createElement("div", "ot-card-modal-body");
+    body.append(mainColumn);
+    if (!this.notesOnly) {
+      const sidebar = createElement("aside", "ot-card-modal-sidebar");
+      if (labelsField) sidebar.append(labelsField);
+      if (assigneesField) sidebar.append(assigneesField);
+      body.append(sidebar);
+    } else {
+      body.classList.add("is-notes-only");
+    }
+    const children = [header, body, actions];
     if (this.readOnly) {
       this.contentEl.addClass("ot-card-readonly");
       const holderName = (this.lockHolder && this.lockHolder.name) || "Someone";
       children.unshift(createElement("div", "ot-card-lock-banner", `🔒 ${holderName} is editing this card — read only`));
     }
     this.contentEl.append(...children);
+    if (bodyScrollTop) requestAnimationFrame(() => { body.scrollTop = bodyScrollTop; });
 
     if (this.readOnly) {
       title.disabled = true;
@@ -4262,7 +4352,6 @@ const { ItemView, Menu, Notice, setIcon } = require("obsidian");
 
 // Renders the kanban board and handles inline card/list interactions.
 const {
-  DONATION_URL,
   LIST_DRAG_TYPE,
   TASK_DECK_ICON,
   VIEW_TYPE,
@@ -4274,6 +4363,7 @@ const {
   initials,
   hasDragType,
   iconButton,
+  labelKey,
   textButton,
   textLine,
 } = __require("src/helpers.js");
@@ -4305,6 +4395,7 @@ class BoardView extends ItemView {
     this.addingCardListId = null;
     this.editingCardId = null;
     this.showingBoardHome = false;
+    this.tableStates = new Map();
   }
 
   getViewType() {
@@ -4333,7 +4424,7 @@ class BoardView extends ItemView {
     this.stopPresence();
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-board-root");
-    const labelDisplayMode = this.plugin.getLabelDisplayMode();
+    const labelDisplayMode = this.plugin.getAppearance().labels.displayMode;
     this.contentEl.classList.toggle("is-compact-labels", labelDisplayMode === "compact");
     this.contentEl.classList.toggle("is-hover-labels", labelDisplayMode === "hover");
     this.contentEl.classList.toggle("is-card-hover-labels", labelDisplayMode === "card-hover");
@@ -4444,12 +4535,12 @@ class BoardView extends ItemView {
     return wrap;
   }
 
-  // The optional (Status = list), reorderable/resizable/hideable columns. "Task"
-  // is always the fixed first column. Definitions live here; per-board layout
+  // The optional (List = card location), reorderable/resizable/hideable fields. "Card"
+  // is always the fixed first field. Definitions live here; per-board layout
   // (order / hidden / widths) is a per-device preference in data.json.
   tableColumnDefs() {
     const defs = [
-      { key: "status", label: "Status" },
+      { key: "status", label: "List" },
       { key: "assignee", label: "Assignee" },
       { key: "dates", label: "Dates" },
       { key: "labels", label: "Labels" },
@@ -4505,7 +4596,7 @@ class BoardView extends ItemView {
     this.render();
   }
 
-  // Notion-style table: one row per card across every list, Status = the card's
+  // Table view: one row per card across every list, List = the card's location.
   // list. Row click opens a Description + Checklist card view; every other field
   // (status, members, dates, labels) is edited inline from its cell.
   renderTable(board) {
@@ -4513,6 +4604,79 @@ class BoardView extends ItemView {
     const defs = this.tableColumnDefs();
     const labelOf = (key) => (defs.find((def) => def.key === key) || {}).label || key;
     const visible = cfg.order.filter((key) => !cfg.hidden.has(key));
+    const state = this.tableStates.get(board.id) || { query: "", listId: "all", completion: "all", sort: "board", labelKeys: [] };
+    if (state.listId !== "all" && !board.lists.some((list) => list.id === state.listId)) state.listId = "all";
+    if (!Array.isArray(state.labelKeys)) state.labelKeys = [];
+    this.tableStates.set(board.id, state);
+
+    const rows = [];
+    const labelsByKey = new Map();
+    board.lists.forEach((list) => {
+      (list.cardIds || []).forEach((cardId) => {
+        const card = this.plugin.data.cards[cardId];
+        if (!card) return;
+        rows.push({ card, list, boardOrder: rows.length });
+        (card.labels || []).forEach((label) => labelsByKey.set(labelKey(label), label));
+      });
+    });
+    const availableLabels = Array.from(labelsByKey.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }));
+    const availableLabelKeys = new Set(labelsByKey.keys());
+    state.labelKeys = state.labelKeys.filter((key) => availableLabelKeys.has(key));
+
+    const view = createElement("div", "ot-table-view");
+    const controls = createElement("div", "ot-table-controls");
+    const searchWrap = createElement("label", "ot-table-search");
+    const searchIcon = createElement("span", "ot-table-search-icon");
+    try { setIcon(searchIcon, "search"); } catch (error) { searchIcon.textContent = ""; }
+    const search = createElement("input", "ot-table-search-input");
+    search.type = "search";
+    search.placeholder = "Search cards, lists, labels, descriptions or checklist tasks...";
+    search.value = state.query;
+    searchWrap.append(searchIcon, search);
+
+    const listFilter = createElement("select", "ot-table-filter");
+    listFilter.setAttribute("aria-label", "Filter cards by list");
+    listFilter.append(new Option("All lists", "all"));
+    board.lists.forEach((list) => listFilter.append(new Option(list.title, list.id)));
+    listFilter.value = state.listId;
+
+    const completionFilter = createElement("select", "ot-table-filter");
+    completionFilter.setAttribute("aria-label", "Filter by completion");
+    completionFilter.append(new Option("All cards", "all"), new Option("Open cards", "open"), new Option("Completed cards", "completed"));
+    completionFilter.value = state.completion;
+
+    const sort = createElement("select", "ot-table-filter");
+    sort.setAttribute("aria-label", "Sort cards");
+    sort.append(
+      new Option("Board order", "board"),
+      new Option("Title A–Z", "title"),
+      new Option("Due soon", "due"),
+      new Option("Recently updated", "updated")
+    );
+    sort.value = state.sort;
+
+    const labelFilter = createElement("button", "ot-text-button ot-button-with-icon ot-table-label-filter");
+    labelFilter.type = "button";
+    labelFilter.title = "Filter cards by label";
+    labelFilter.disabled = !availableLabels.length;
+    addButtonIcon(labelFilter, "tags");
+    const labelFilterText = createElement("span", "", "Labels");
+    const labelFilterCount = createElement("span", "ot-table-label-filter-count");
+    labelFilter.append(labelFilterText, labelFilterCount);
+    const syncLabelFilterButton = () => {
+      const count = state.labelKeys.length;
+      labelFilter.classList.toggle("is-active", count > 0);
+      labelFilterCount.textContent = count ? String(count) : "";
+      labelFilterCount.hidden = !count;
+      labelFilter.setAttribute("aria-expanded", this._tablePopoverAnchor === labelFilter ? "true" : "false");
+    };
+    syncLabelFilterButton();
+
+    const summary = createElement("span", "ot-table-summary");
+    const clear = createElement("button", "ot-text-button ot-button-with-icon ot-table-clear", "Clear filters");
+    clear.type = "button";
+    addButtonIcon(clear, "x");
+    controls.append(searchWrap, listFilter, completionFilter, sort, labelFilter, summary, clear);
 
     const wrap = createElement("div", "ot-table-wrap");
     const table = createElement("table", "ot-table");
@@ -4538,7 +4702,7 @@ class BoardView extends ItemView {
     const headRow = createElement("tr");
     const nameTh = createElement("th", "ot-th ot-th-name");
     const nameThInner = createElement("div", "ot-th-inner");
-    nameThInner.append(createElement("span", "ot-th-label", "Task"));
+    nameThInner.append(createElement("span", "ot-th-label", "Card"));
     nameTh.append(nameThInner);
     nameTh.append(this.buildColResize(nameCol, () => {
       cfg.nameWidth = parseInt(nameCol.style.width, 10) || cfg.nameWidth;
@@ -4551,21 +4715,126 @@ class BoardView extends ItemView {
     table.append(thead);
 
     const tbody = createElement("tbody");
-    let count = 0;
-    board.lists.forEach((list) => {
-      (list.cardIds || []).forEach((cardId) => {
-        const card = this.plugin.data.cards[cardId];
-        if (!card) return;
-        tbody.append(this.renderTableRow(card, list, board, visible));
-        count += 1;
-      });
-    });
     table.append(tbody);
-
     wrap.append(table);
-    if (!count) wrap.append(createElement("div", "ot-table-empty", "No tasks yet."));
-    wrap.append(this.renderTableComposer(board));
-    return wrap;
+    const empty = createElement("div", "ot-table-empty");
+
+    const paint = () => {
+      const normalizeSearch = (value) => String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLocaleLowerCase();
+      const queryTerms = normalizeSearch(state.query).split(/\s+/).filter(Boolean);
+      let filtered = rows.filter(({ card, list }) => {
+        if (state.listId !== "all" && list.id !== state.listId) return false;
+        if (state.completion === "open" && card.completed) return false;
+        if (state.completion === "completed" && !card.completed) return false;
+        if (state.labelKeys.length && !(card.labels || []).some((label) => state.labelKeys.includes(labelKey(label)))) return false;
+        if (!queryTerms.length) return true;
+        const searchable = [
+          card.title,
+          card.details,
+          list.title,
+          ...(card.labels || []).map((label) => label.name),
+          ...(card.assignees || []).map((assignee) => `${assignee.name || ""} ${assignee.email || ""}`),
+          ...checklistItems(card.checklists).map((item) => item.text),
+        ].join(" ");
+        const normalizedSearchable = normalizeSearch(searchable);
+        return queryTerms.every((term) => normalizedSearchable.includes(term));
+      });
+      if (state.sort === "title") {
+        filtered.sort((a, b) => a.card.title.localeCompare(b.card.title, undefined, { sensitivity: "base" }));
+      } else if (state.sort === "due") {
+        filtered.sort((a, b) => (a.card.dueDate || "9999-12-31").localeCompare(b.card.dueDate || "9999-12-31") || a.boardOrder - b.boardOrder);
+      } else if (state.sort === "updated") {
+        filtered.sort((a, b) => String(b.card.updatedAt || "").localeCompare(String(a.card.updatedAt || "")) || a.boardOrder - b.boardOrder);
+      }
+      tbody.replaceChildren(...filtered.map(({ card, list }) => this.renderTableRow(card, list, board, visible)));
+      const activeFilters = !!state.query || state.listId !== "all" || state.completion !== "all" || state.sort !== "board" || state.labelKeys.length > 0;
+      syncLabelFilterButton();
+      summary.textContent = `${filtered.length} of ${rows.length} ${rows.length === 1 ? "card" : "cards"}`;
+      clear.disabled = !activeFilters;
+      empty.textContent = rows.length ? "No cards match the current filters." : "No cards yet. Add one below.";
+      empty.hidden = filtered.length > 0;
+    };
+
+    search.addEventListener("input", () => { state.query = search.value; paint(); });
+    listFilter.addEventListener("change", () => { state.listId = listFilter.value; paint(); });
+    completionFilter.addEventListener("change", () => { state.completion = completionFilter.value; paint(); });
+    sort.addEventListener("change", () => { state.sort = sort.value; paint(); });
+    labelFilter.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.openTablePopover(labelFilter, (pop) => {
+        pop.classList.add("ot-label-filter-popover");
+        const header = createElement("div", "ot-label-filter-header");
+        const filterSearch = createElement("input", "ot-label-filter-search");
+        filterSearch.type = "search";
+        filterSearch.placeholder = "Search labels...";
+        filterSearch.setAttribute("aria-label", "Search labels");
+        const meta = createElement("div", "ot-label-filter-meta");
+        const resultCount = createElement("span");
+        const clearLabels = createElement("button", "ot-text-button", "Clear");
+        clearLabels.type = "button";
+        meta.append(resultCount, clearLabels);
+        header.append(filterSearch, meta);
+        const options = createElement("div", "ot-label-filter-options");
+        const limitNote = createElement("div", "ot-label-filter-limit");
+        pop.append(header, options, limitNote);
+
+        const normalize = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
+        const renderOptions = () => {
+          const query = normalize(filterSearch.value).trim();
+          const matches = availableLabels.filter((label) => !query || normalize(label.name).includes(query));
+          const visibleLabels = matches.slice(0, 80);
+          options.replaceChildren();
+          visibleLabels.forEach((label) => {
+            const key = labelKey(label);
+            const dot = createElement("span", "ot-label-filter-dot");
+            dot.style.backgroundColor = label.color;
+            const row = this.popoverRow(dot, label.name, state.labelKeys.includes(key));
+            row.addEventListener("click", () => {
+              state.labelKeys = state.labelKeys.includes(key)
+                ? state.labelKeys.filter((item) => item !== key)
+                : [...state.labelKeys, key];
+              paint();
+              renderOptions();
+            });
+            options.append(row);
+          });
+          if (!matches.length) options.append(createElement("div", "ot-popover-empty", "No matching labels"));
+          resultCount.textContent = `${matches.length} ${matches.length === 1 ? "label" : "labels"}`;
+          limitNote.textContent = matches.length > 80 ? `Showing 80 of ${matches.length}. Refine the search to see more.` : "";
+          limitNote.hidden = matches.length <= 80;
+          clearLabels.disabled = !state.labelKeys.length;
+        };
+        filterSearch.addEventListener("input", renderOptions);
+        clearLabels.addEventListener("click", () => {
+          state.labelKeys = [];
+          paint();
+          renderOptions();
+        });
+        renderOptions();
+        window.setTimeout(() => filterSearch.focus(), 0);
+      });
+      syncLabelFilterButton();
+    });
+    clear.addEventListener("click", () => {
+      state.query = "";
+      state.listId = "all";
+      state.completion = "all";
+      state.sort = "board";
+      state.labelKeys = [];
+      search.value = "";
+      listFilter.value = "all";
+      completionFilter.value = "all";
+      sort.value = "board";
+      paint();
+      search.focus();
+    });
+
+    paint();
+    view.append(controls, wrap, empty, this.renderTableComposer(board));
+    return view;
   }
 
   // A drag handle on a column's right edge. Resizes the <col> live, persists on
@@ -4604,7 +4873,7 @@ class BoardView extends ItemView {
 
     const menuButton = createElement("button", "ot-th-menu");
     menuButton.type = "button";
-    menuButton.title = "Column options";
+    menuButton.title = "Field options";
     try { setIcon(menuButton, "chevron-down"); } catch (error) { menuButton.textContent = "▾"; }
     menuButton.draggable = false;
     menuButton.addEventListener("click", (event) => {
@@ -4612,7 +4881,7 @@ class BoardView extends ItemView {
       const menu = new Menu();
       menu.addItem((item) => item.setTitle("Move left").setIcon("arrow-left").onClick(() => this.moveColumn(board, cfg, key, -1)));
       menu.addItem((item) => item.setTitle("Move right").setIcon("arrow-right").onClick(() => this.moveColumn(board, cfg, key, 1)));
-      menu.addItem((item) => item.setTitle("Hide column").setIcon("eye-off").onClick(() => {
+      menu.addItem((item) => item.setTitle("Hide field").setIcon("eye-off").onClick(() => {
         cfg.hidden.add(key);
         this.persistTableConfig(board, cfg);
         this.render();
@@ -4659,14 +4928,14 @@ class BoardView extends ItemView {
     const th = createElement("th", "ot-th ot-th-add");
     const button = createElement("button", "ot-th-add-btn");
     button.type = "button";
-    button.title = "Add a column";
+    button.title = "Show a field";
     try { setIcon(button, "plus"); } catch (error) { button.textContent = "+"; }
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       const hidden = cfg.order.filter((key) => cfg.hidden.has(key));
       const menu = new Menu();
       if (!hidden.length) {
-        menu.addItem((item) => item.setTitle("All columns shown").setDisabled(true));
+        menu.addItem((item) => item.setTitle("All fields shown").setDisabled(true));
       } else {
         hidden.forEach((key) => {
           const label = (defs.find((def) => def.key === key) || {}).label || key;
@@ -4688,6 +4957,9 @@ class BoardView extends ItemView {
     const lockedByOther = !!lockHolder;
     const row = createElement("tr", "ot-table-row");
     row.dataset.cardId = card.id;
+    row.style.setProperty("--ot-row-list-color", list.color || "var(--interactive-accent)");
+    row.tabIndex = 0;
+    row.setAttribute("aria-label", `Open ${card.title}`);
     if (card.completed) row.classList.add("is-completed");
     if (card.completed && this.plugin.completedAnimationCardId === card.id) {
       row.classList.add("is-just-completed");
@@ -4695,9 +4967,14 @@ class BoardView extends ItemView {
       window.setTimeout(() => row.classList.remove("is-just-completed"), 650);
     }
     if (lockedByOther) row.classList.add("is-locked");
-    // Opening a task from the table shows ONLY Description + Checklist — every
+    // Opening a card from the table shows ONLY Description + Checklist — every
     // other field is edited inline from its cell, so no full editor is needed.
     row.addEventListener("click", () => new CardModal(this.app, this.plugin, card.id, { notesOnly: true }).open());
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      new CardModal(this.app, this.plugin, card.id, { notesOnly: true }).open();
+    });
 
     const nameCell = createElement("td", "ot-td ot-td-name");
     const nameInner = createElement("div", "ot-td-name-inner");
@@ -4717,9 +4994,19 @@ class BoardView extends ItemView {
     const checklist = checklistItems(card.checklists);
     if (checklist.length) {
       const stats = checklistStats(checklist);
-      hints.append(createElement("span", "ot-td-hint", `☑ ${stats.done}/${stats.total}`));
+      const checklistHint = createElement("span", "ot-td-hint ot-td-checklist-hint");
+      const checklistIcon = createElement("span", "ot-td-hint-icon");
+      try { setIcon(checklistIcon, "list-checks"); } catch (error) { checklistIcon.textContent = "✓"; }
+      checklistHint.append(checklistIcon, createElement("span", "", `${stats.done}/${stats.total}`));
+      hints.append(checklistHint);
     }
-    if (card.details) hints.append(createElement("span", "ot-td-hint", "☰"));
+    if (card.details) {
+      const detailsHint = createElement("span", "ot-td-hint");
+      const detailsIcon = createElement("span", "ot-td-hint-icon");
+      try { setIcon(detailsIcon, "align-left"); } catch (error) { detailsIcon.textContent = "≡"; }
+      detailsHint.append(detailsIcon);
+      hints.append(detailsHint);
+    }
     if (hints.childElementCount) nameInner.append(hints);
     if (lockedByOther) nameInner.append(this.buildLockBadge(lockHolder));
     nameCell.append(nameInner);
@@ -4757,7 +5044,7 @@ class BoardView extends ItemView {
     const cell = createElement("td", "ot-td ot-td-status");
     const pill = this.buildStatusPill(list);
     pill.classList.add("is-clickable");
-    pill.title = "Change status";
+    pill.title = "Move to another list";
     pill.addEventListener("click", (event) => {
       event.stopPropagation();
       if (lockHolder) return this.notifyCardLocked(lockHolder);
@@ -4788,7 +5075,16 @@ class BoardView extends ItemView {
     const dates = dateRangeLabel(card.startDate, card.dueDate);
     const trigger = createElement("div", "ot-cell-edit");
     trigger.title = "Edit dates";
-    if (dates) trigger.append(createElement("span", "", dates));
+    if (dates) {
+      const dateLabel = createElement("span", "ot-table-date", dates);
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      if (card.dueDate && card.dueDate < today && !card.completed) {
+        dateLabel.classList.add("is-overdue");
+        dateLabel.title = "Overdue";
+      }
+      trigger.append(dateLabel);
+    }
     else trigger.append(createElement("span", "ot-td-empty", "＋"));
     trigger.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -4832,8 +5128,17 @@ class BoardView extends ItemView {
     pop.style.left = `${Math.round(rect.left)}px`;
     pop.style.minWidth = `${Math.max(190, Math.round(rect.width))}px`;
     document.body.append(pop);
+    this._tablePopoverAnchor = anchor;
+    anchor.setAttribute("aria-expanded", "true");
     const close = () => this.closeTablePopover();
     build(pop, close);
+    const popRect = pop.getBoundingClientRect();
+    const maxLeft = Math.max(8, window.innerWidth - popRect.width - 8);
+    pop.style.left = `${Math.min(Math.max(8, Math.round(rect.left)), maxLeft)}px`;
+    if (popRect.bottom > window.innerHeight - 8) {
+      const maxTop = Math.max(8, window.innerHeight - popRect.height - 8);
+      pop.style.top = `${Math.max(8, Math.min(Math.round(rect.top - popRect.height - 4), maxTop))}px`;
+    }
     const onDown = (event) => { if (!pop.contains(event.target)) close(); };
     const onKey = (event) => { if (event.key === "Escape") close(); };
     // Attach synchronously: the picker opens on a `click`, so THIS gesture's
@@ -4853,6 +5158,8 @@ class BoardView extends ItemView {
     if (this._tablePopover._cleanup) this._tablePopover._cleanup();
     this._tablePopover.remove();
     this._tablePopover = null;
+    if (this._tablePopoverAnchor) this._tablePopoverAnchor.setAttribute("aria-expanded", "false");
+    this._tablePopoverAnchor = null;
   }
 
   popoverRow(leading, label, checked) {
@@ -4991,25 +5298,54 @@ class BoardView extends ItemView {
   }
 
   renderTableComposer(board) {
-    const form = createElement("form", "ot-table-composer");
-    const list = board.lists[0];
-    if (!list) {
-      form.append(createElement("span", "ot-td-empty", "Add a list first to create tasks."));
-      return form;
+    const creator = createElement("section", "ot-table-creator");
+    if (!board.lists.length) {
+      const empty = createElement("div", "ot-table-creator-empty");
+      empty.append(
+        createElement("span", "", "Add a list before creating cards."),
+        textButton("plus", "Add list", () => this.plugin.addList())
+      );
+      creator.append(empty);
+      return creator;
     }
-    form.append(createElement("span", "ot-table-composer-plus", "+"));
+
+    const form = createElement("form", "ot-table-composer");
+    const inputWrap = createElement("label", "ot-table-composer-field ot-table-composer-title");
+    inputWrap.append(createElement("span", "", "Card title"));
     const input = createElement("input", "ot-table-composer-input");
     input.type = "text";
-    input.placeholder = "New task";
-    form.append(input);
+    input.placeholder = "What should this card be called?";
+    input.autocomplete = "off";
+    inputWrap.append(input);
+
+    const statusWrap = createElement("label", "ot-table-composer-field ot-table-composer-status");
+    statusWrap.append(createElement("span", "", "List"));
+    const status = createElement("select", "ot-table-composer-select");
+    board.lists.forEach((list) => status.append(new Option(list.title, list.id)));
+    const tableState = this.tableStates.get(board.id);
+    if (tableState && board.lists.some((list) => list.id === tableState.listId)) status.value = tableState.listId;
+    statusWrap.append(status);
+
+    const add = createElement("button", "mod-cta ot-table-composer-submit", "Add card");
+    add.type = "submit";
+    addButtonIcon(add, "plus");
+    form.append(inputWrap, statusWrap, add);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const title = textLine(input.value);
       if (!title) { input.focus(); return; }
+      const list = board.lists.find((item) => item.id === status.value) || board.lists[0];
+      if (!list) return;
+      add.disabled = true;
       input.value = "";
-      await this.plugin.createCard(list.id, title);
+      try {
+        await this.plugin.createCard(list.id, title);
+      } finally {
+        add.disabled = false;
+      }
     });
-    return form;
+    creator.append(form);
+    return creator;
   }
 
   startPresence(board) {
@@ -5360,8 +5696,7 @@ class BoardView extends ItemView {
     }
     welcomeActions.append(
       textButton("refresh-cw", "Re-import notes", () => this.syncNotes()),
-      textButton("info", "About", () => new AboutModal(this.app, this.plugin).open()),
-      textButton("heart", "Support developer", () => window.open(DONATION_URL, "_blank"))
+      textButton("info", "About", () => new AboutModal(this.app, this.plugin).open())
     );
     welcome.append(welcomeCopy, welcomeActions);
 
@@ -5835,8 +6170,8 @@ module.exports = { COMPLETION_SOUND_URL };
   "src/settings-tab.js": function(module, exports, __require) {
 const { FuzzySuggestModal, Notice, PluginSettingTab, Setting } = require("obsidian");
 
-// Settings tab for board access, sync, preferences, support, and version info.
-const { DONATION_URL, isImagePath } = __require("src/helpers.js");
+// Settings tab for board access, sync, preferences, and version info.
+const { isImagePath } = __require("src/helpers.js");
 
 class VaultImageSuggestModal extends FuzzySuggestModal {
   constructor(app, onChoose) {
@@ -5927,19 +6262,6 @@ class TaskDeckSettingTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.data.seedDefaultLists = value;
           await this.plugin.savePluginData();
-        }));
-
-    new Setting(containerEl)
-      .setName("Label display")
-      .setDesc("Choose whether card labels show their names or remain compact.")
-      .addDropdown((dropdown) => dropdown
-        .addOption("compact", "Always compact")
-        .addOption("expanded", "Always expanded")
-        .addOption("hover", "Expand when label is hovered")
-        .addOption("card-hover", "Expand when card is hovered")
-        .setValue(this.plugin.getLabelDisplayMode())
-        .onChange(async (value) => {
-          await this.plugin.setLabelDisplayMode(value);
         }));
 
     new Setting(containerEl)
@@ -6105,7 +6427,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
           .onChange((value) => update({ background: { overlayOpacity: value } })));
     }
 
-    new Setting(containerEl).setName("Cards and columns").setHeading();
+    new Setting(containerEl).setName("Cards and lists").setHeading();
 
     let cardColorPicker = null;
     new Setting(containerEl)
@@ -6130,8 +6452,8 @@ class TaskDeckSettingTab extends PluginSettingTab {
 
     let columnColorPicker = null;
     new Setting(containerEl)
-      .setName("Use theme column color")
-      .setDesc("Derive column surfaces from the active Obsidian theme.")
+      .setName("Use theme list color")
+      .setDesc("Derive list surfaces from the active Obsidian theme.")
       .addToggle((toggle) => toggle
         .setValue(appearance.lists.useTheme)
         .onChange(async (value) => {
@@ -6140,7 +6462,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
         }));
     new Setting(containerEl)
       .setName("Column color")
-      .setDesc(appearance.lists.useTheme ? "Disable theme column color to customize this value." : "Global column surface color.")
+      .setDesc(appearance.lists.useTheme ? "Disable theme list color to customize this value." : "Global list surface color.")
       .addColorPicker((picker) => {
         columnColorPicker = picker;
         picker
@@ -6153,7 +6475,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Density")
-      .setDesc("Controls column width, card padding, and spacing between cards.")
+      .setDesc("Controls list width, card padding, and spacing between cards.")
       .addDropdown((dropdown) => dropdown
         .addOption("compact", "Compact")
         .addOption("normal", "Normal")
@@ -6219,11 +6541,6 @@ class TaskDeckSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("About").setHeading();
 
     new Setting(containerEl)
-      .setName("Support development")
-      .setDesc("If Task Deck is useful, you can support it here.")
-      .addButton((button) => button.setButtonText("Donate").onClick(() => window.open(DONATION_URL, "_blank")));
-
-    new Setting(containerEl)
       .setName("Version")
       .setDesc(this.plugin.manifest.version || "");
   }
@@ -6233,7 +6550,7 @@ module.exports = { TaskDeckSettingTab };
 
   },
   "src/plugin.js": function(module, exports, __require) {
-const { Notice, Plugin, addIcon, requestUrl } = require("obsidian");
+const { Notice, Plugin, addIcon } = require("obsidian");
 
 // Owns the Obsidian plugin lifecycle, saved board data, and Markdown card sync.
 const {
@@ -6335,8 +6652,6 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     }, 30000));
 
     this.addRibbonIcon(TASK_DECK_ICON, "Open Task Deck", () => this.activateView());
-    // Fire-and-forget update check (manual installs get no store prompt).
-    this.checkForUpdate();
     this.addCommand({
       id: "open-board",
       name: "Open board",
@@ -6459,12 +6774,25 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       ? (this.data.compactLabels ? "compact" : "expanded")
       : savedLabelDisplayMode;
     this.data.compactLabels = this.data.labelDisplayMode === "compact";
+    if (!this.data.appearance || typeof this.data.appearance !== "object") this.data.appearance = {};
+    if (!this.data.appearance.labels) this.data.appearance.labels = { displayMode: this.data.labelDisplayMode };
+    this.data.appearancePresets = Array.isArray(this.data.appearancePresets)
+      ? this.data.appearancePresets.map((preset) => ({
+        id: textLine(preset && preset.id) || uid("appearance-preset"),
+        name: textLine(preset && preset.name) || "Untitled preset",
+        appearance: this.normalizeAppearance(preset && preset.appearance),
+        createdAt: textLine(preset && preset.createdAt) || new Date().toISOString(),
+      }))
+      : [];
     if (needsImageFitMigration) this.data.appearance.background.imageFit = "original";
     this.data.appearance = this.normalizeAppearance(this.data.appearance);
     this.data.labels = this.normalizeGlobalLabels(this.data.labels);
     const needsBoardAppearanceMigration = this.data.boards.some((board) => {
       const background = board && board.appearance && board.appearance.background;
-      return !board || !board.appearance || (background && background.type === "image" && background.imageFitVersion !== 3);
+      return !board
+        || !board.appearance
+        || !board.appearance.labels
+        || (background && background.type === "image" && background.imageFitVersion !== 3);
     });
     this.data.boards = this.data.boards.map((board) => this.normalizeBoard(board, this.data.appearance));
     this.loadNeedsSave = this.ensureListColors()
@@ -6568,6 +6896,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
   normalizeBoard(board, fallbackAppearance = DEFAULT_APPEARANCE) {
     const appearance = clone((board && board.appearance) || fallbackAppearance);
+    if (!appearance.labels) {
+      appearance.labels = { displayMode: (this.data && this.data.labelDisplayMode) || "expanded" };
+    }
     if (appearance.background
       && appearance.background.type === "image"
       && appearance.background.imageFitVersion !== 3) {
@@ -6792,6 +7123,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     const background = source.background && typeof source.background === "object" ? source.background : {};
     const cards = source.cards && typeof source.cards === "object" ? source.cards : {};
     const lists = source.lists && typeof source.lists === "object" ? source.lists : {};
+    const labels = source.labels && typeof source.labels === "object" ? source.labels : {};
     const motion = source.motion && typeof source.motion === "object" ? source.motion : {};
     const inferredSurfaceScheme = source.preset === "trello-light"
       ? "light"
@@ -6810,6 +7142,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       surfaceScheme: choice(source.surfaceScheme, ["theme", "dark", "light"], inferredSurfaceScheme),
       density: choice(source.density, ["compact", "normal", "comfortable"], DEFAULT_APPEARANCE.density),
       fontScale: number(source.fontScale, DEFAULT_APPEARANCE.fontScale, 0.85, 1.4),
+      labels: {
+        displayMode: choice(labels.displayMode, ["compact", "expanded", "hover", "card-hover"], DEFAULT_APPEARANCE.labels.displayMode),
+      },
       background: {
         type: choice(background.type, ["theme", "solid", "gradient", "image"], DEFAULT_APPEARANCE.background.type),
         color: cleanColor(background.color) || DEFAULT_APPEARANCE.background.color,
@@ -7017,6 +7352,63 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     this.refreshViews();
   }
 
+  getAppearancePresets() {
+    return Array.isArray(this.data.appearancePresets) ? this.data.appearancePresets : [];
+  }
+
+  async saveAppearancePreset(name, appearance) {
+    const cleanName = textLine(name);
+    if (!cleanName) return null;
+    this.data.appearancePresets = this.getAppearancePresets();
+    const existing = this.data.appearancePresets.find((preset) => preset.name.toLowerCase() === cleanName.toLowerCase());
+    if (existing) {
+      existing.name = cleanName;
+      existing.appearance = this.normalizeAppearance(clone(appearance));
+      existing.createdAt = new Date().toISOString();
+      await this.saveData(this.data);
+      return existing;
+    }
+    const preset = {
+      id: uid("appearance-preset"),
+      name: cleanName,
+      appearance: this.normalizeAppearance(clone(appearance)),
+      createdAt: new Date().toISOString(),
+    };
+    this.data.appearancePresets.push(preset);
+    await this.saveData(this.data);
+    return preset;
+  }
+
+  async deleteAppearancePreset(presetId) {
+    const before = this.getAppearancePresets().length;
+    this.data.appearancePresets = this.getAppearancePresets().filter((preset) => preset.id !== presetId);
+    if (this.data.appearancePresets.length === before) return false;
+    await this.saveData(this.data);
+    return true;
+  }
+
+  async applyCustomAppearancePreset(boardId, presetId) {
+    const board = this.findBoard(boardId);
+    const preset = this.getAppearancePresets().find((item) => item.id === presetId);
+    if (!board || !preset) return false;
+    board.appearance = this.normalizeAppearance(clone(preset.appearance));
+    board.appearance.preset = "custom";
+    await this.saveData(this.data);
+    this.refreshViews();
+    return true;
+  }
+
+  async copyBoardAppearance(targetBoardId, sourceBoardId) {
+    const target = this.findBoard(targetBoardId);
+    const source = this.findBoard(sourceBoardId);
+    if (!target || !source || target.id === source.id) return false;
+    target.appearance = this.normalizeAppearance(clone(this.getBoardAppearance(source.id)));
+    target.appearance.preset = "custom";
+    await this.saveData(this.data);
+    this.refreshViews();
+    return true;
+  }
+
   /**
    * Deletes a global label and removes it from every card and Markdown note.
    * The full label state is captured so the operation remains undoable.
@@ -7112,39 +7504,12 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     const syncDeck = this.getSyncDeckPlugin();
     if (!syncDeck || typeof syncDeck.activateView !== "function") {
       new Notice("Install the Sync Deck plugin to sync your boards and vaults across devices.");
-      window.open("https://github.com/ismailivanov/SyncDeck");
       return;
     }
     try {
       await syncDeck.activateView();
     } catch (error) {
       new Notice("Could not open Sync Deck.");
-    }
-  }
-
-  // Task Deck is installed manually (not from the community store), so it can't
-  // get store update prompts. Check the GitHub releases once per session; if a
-  // newer version is out, the board view shows an "Update" banner. Fails silent
-  // (offline / rate-limited) — never blocks or nags.
-  async checkForUpdate() {
-    if (this._updateChecked) return;
-    this._updateChecked = true;
-    try {
-      const res = await requestUrl({
-        url: "https://api.github.com/repos/ismailivanov/task-deck/releases/latest",
-        headers: { Accept: "application/vnd.github+json" },
-        throw: false,
-      });
-      const body = res && res.json;
-      const latest = body && body.tag_name;
-      if (!latest || !this.isNewerVersion(latest, this.manifest.version)) return;
-      this.updateAvailable = {
-        version: String(latest).replace(/^v/, ""),
-        url: (body && body.html_url) || "https://github.com/ismailivanov/task-deck/releases/latest",
-      };
-      this.refreshViews();
-    } catch (error) {
-      // offline or GitHub rate-limited — just don't show a banner
     }
   }
 
@@ -7400,18 +7765,14 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
   }
 
   getLabelDisplayMode() {
-    const mode = this.data && this.data.labelDisplayMode;
-    return ["compact", "expanded", "hover", "card-hover"].includes(mode)
-      ? mode
-      : (this.data && this.data.compactLabels ? "compact" : "expanded");
+    return this.getAppearance().labels.displayMode;
   }
 
   async setLabelDisplayMode(mode) {
     const next = ["compact", "expanded", "hover", "card-hover"].includes(mode) ? mode : "expanded";
-    this.data.labelDisplayMode = next;
-    this.data.compactLabels = next === "compact";
-    await this.savePluginData();
-    this.refreshViews();
+    const board = this.getBoard();
+    if (!board) return;
+    await this.updateBoardAppearance(board.id, { labels: { displayMode: next } });
   }
 
   isCardFile(file) {

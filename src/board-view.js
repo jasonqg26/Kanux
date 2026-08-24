@@ -2,7 +2,6 @@ const { ItemView, Menu, Notice, setIcon } = require("obsidian");
 
 // Renders the kanban board and handles inline card/list interactions.
 const {
-  DONATION_URL,
   LIST_DRAG_TYPE,
   TASK_DECK_ICON,
   VIEW_TYPE,
@@ -14,6 +13,7 @@ const {
   initials,
   hasDragType,
   iconButton,
+  labelKey,
   textButton,
   textLine,
 } = require("./helpers");
@@ -45,6 +45,7 @@ class BoardView extends ItemView {
     this.addingCardListId = null;
     this.editingCardId = null;
     this.showingBoardHome = false;
+    this.tableStates = new Map();
   }
 
   getViewType() {
@@ -73,7 +74,7 @@ class BoardView extends ItemView {
     this.stopPresence();
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-board-root");
-    const labelDisplayMode = this.plugin.getLabelDisplayMode();
+    const labelDisplayMode = this.plugin.getAppearance().labels.displayMode;
     this.contentEl.classList.toggle("is-compact-labels", labelDisplayMode === "compact");
     this.contentEl.classList.toggle("is-hover-labels", labelDisplayMode === "hover");
     this.contentEl.classList.toggle("is-card-hover-labels", labelDisplayMode === "card-hover");
@@ -184,12 +185,12 @@ class BoardView extends ItemView {
     return wrap;
   }
 
-  // The optional (Status = list), reorderable/resizable/hideable columns. "Task"
-  // is always the fixed first column. Definitions live here; per-board layout
+  // The optional (List = card location), reorderable/resizable/hideable fields. "Card"
+  // is always the fixed first field. Definitions live here; per-board layout
   // (order / hidden / widths) is a per-device preference in data.json.
   tableColumnDefs() {
     const defs = [
-      { key: "status", label: "Status" },
+      { key: "status", label: "List" },
       { key: "assignee", label: "Assignee" },
       { key: "dates", label: "Dates" },
       { key: "labels", label: "Labels" },
@@ -245,7 +246,7 @@ class BoardView extends ItemView {
     this.render();
   }
 
-  // Notion-style table: one row per card across every list, Status = the card's
+  // Table view: one row per card across every list, List = the card's location.
   // list. Row click opens a Description + Checklist card view; every other field
   // (status, members, dates, labels) is edited inline from its cell.
   renderTable(board) {
@@ -253,6 +254,79 @@ class BoardView extends ItemView {
     const defs = this.tableColumnDefs();
     const labelOf = (key) => (defs.find((def) => def.key === key) || {}).label || key;
     const visible = cfg.order.filter((key) => !cfg.hidden.has(key));
+    const state = this.tableStates.get(board.id) || { query: "", listId: "all", completion: "all", sort: "board", labelKeys: [] };
+    if (state.listId !== "all" && !board.lists.some((list) => list.id === state.listId)) state.listId = "all";
+    if (!Array.isArray(state.labelKeys)) state.labelKeys = [];
+    this.tableStates.set(board.id, state);
+
+    const rows = [];
+    const labelsByKey = new Map();
+    board.lists.forEach((list) => {
+      (list.cardIds || []).forEach((cardId) => {
+        const card = this.plugin.data.cards[cardId];
+        if (!card) return;
+        rows.push({ card, list, boardOrder: rows.length });
+        (card.labels || []).forEach((label) => labelsByKey.set(labelKey(label), label));
+      });
+    });
+    const availableLabels = Array.from(labelsByKey.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }));
+    const availableLabelKeys = new Set(labelsByKey.keys());
+    state.labelKeys = state.labelKeys.filter((key) => availableLabelKeys.has(key));
+
+    const view = createElement("div", "ot-table-view");
+    const controls = createElement("div", "ot-table-controls");
+    const searchWrap = createElement("label", "ot-table-search");
+    const searchIcon = createElement("span", "ot-table-search-icon");
+    try { setIcon(searchIcon, "search"); } catch (error) { searchIcon.textContent = ""; }
+    const search = createElement("input", "ot-table-search-input");
+    search.type = "search";
+    search.placeholder = "Search cards, lists, labels, descriptions or checklist tasks...";
+    search.value = state.query;
+    searchWrap.append(searchIcon, search);
+
+    const listFilter = createElement("select", "ot-table-filter");
+    listFilter.setAttribute("aria-label", "Filter cards by list");
+    listFilter.append(new Option("All lists", "all"));
+    board.lists.forEach((list) => listFilter.append(new Option(list.title, list.id)));
+    listFilter.value = state.listId;
+
+    const completionFilter = createElement("select", "ot-table-filter");
+    completionFilter.setAttribute("aria-label", "Filter by completion");
+    completionFilter.append(new Option("All cards", "all"), new Option("Open cards", "open"), new Option("Completed cards", "completed"));
+    completionFilter.value = state.completion;
+
+    const sort = createElement("select", "ot-table-filter");
+    sort.setAttribute("aria-label", "Sort cards");
+    sort.append(
+      new Option("Board order", "board"),
+      new Option("Title A–Z", "title"),
+      new Option("Due soon", "due"),
+      new Option("Recently updated", "updated")
+    );
+    sort.value = state.sort;
+
+    const labelFilter = createElement("button", "ot-text-button ot-button-with-icon ot-table-label-filter");
+    labelFilter.type = "button";
+    labelFilter.title = "Filter cards by label";
+    labelFilter.disabled = !availableLabels.length;
+    addButtonIcon(labelFilter, "tags");
+    const labelFilterText = createElement("span", "", "Labels");
+    const labelFilterCount = createElement("span", "ot-table-label-filter-count");
+    labelFilter.append(labelFilterText, labelFilterCount);
+    const syncLabelFilterButton = () => {
+      const count = state.labelKeys.length;
+      labelFilter.classList.toggle("is-active", count > 0);
+      labelFilterCount.textContent = count ? String(count) : "";
+      labelFilterCount.hidden = !count;
+      labelFilter.setAttribute("aria-expanded", this._tablePopoverAnchor === labelFilter ? "true" : "false");
+    };
+    syncLabelFilterButton();
+
+    const summary = createElement("span", "ot-table-summary");
+    const clear = createElement("button", "ot-text-button ot-button-with-icon ot-table-clear", "Clear filters");
+    clear.type = "button";
+    addButtonIcon(clear, "x");
+    controls.append(searchWrap, listFilter, completionFilter, sort, labelFilter, summary, clear);
 
     const wrap = createElement("div", "ot-table-wrap");
     const table = createElement("table", "ot-table");
@@ -278,7 +352,7 @@ class BoardView extends ItemView {
     const headRow = createElement("tr");
     const nameTh = createElement("th", "ot-th ot-th-name");
     const nameThInner = createElement("div", "ot-th-inner");
-    nameThInner.append(createElement("span", "ot-th-label", "Task"));
+    nameThInner.append(createElement("span", "ot-th-label", "Card"));
     nameTh.append(nameThInner);
     nameTh.append(this.buildColResize(nameCol, () => {
       cfg.nameWidth = parseInt(nameCol.style.width, 10) || cfg.nameWidth;
@@ -291,21 +365,126 @@ class BoardView extends ItemView {
     table.append(thead);
 
     const tbody = createElement("tbody");
-    let count = 0;
-    board.lists.forEach((list) => {
-      (list.cardIds || []).forEach((cardId) => {
-        const card = this.plugin.data.cards[cardId];
-        if (!card) return;
-        tbody.append(this.renderTableRow(card, list, board, visible));
-        count += 1;
-      });
-    });
     table.append(tbody);
-
     wrap.append(table);
-    if (!count) wrap.append(createElement("div", "ot-table-empty", "No tasks yet."));
-    wrap.append(this.renderTableComposer(board));
-    return wrap;
+    const empty = createElement("div", "ot-table-empty");
+
+    const paint = () => {
+      const normalizeSearch = (value) => String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLocaleLowerCase();
+      const queryTerms = normalizeSearch(state.query).split(/\s+/).filter(Boolean);
+      let filtered = rows.filter(({ card, list }) => {
+        if (state.listId !== "all" && list.id !== state.listId) return false;
+        if (state.completion === "open" && card.completed) return false;
+        if (state.completion === "completed" && !card.completed) return false;
+        if (state.labelKeys.length && !(card.labels || []).some((label) => state.labelKeys.includes(labelKey(label)))) return false;
+        if (!queryTerms.length) return true;
+        const searchable = [
+          card.title,
+          card.details,
+          list.title,
+          ...(card.labels || []).map((label) => label.name),
+          ...(card.assignees || []).map((assignee) => `${assignee.name || ""} ${assignee.email || ""}`),
+          ...checklistItems(card.checklists).map((item) => item.text),
+        ].join(" ");
+        const normalizedSearchable = normalizeSearch(searchable);
+        return queryTerms.every((term) => normalizedSearchable.includes(term));
+      });
+      if (state.sort === "title") {
+        filtered.sort((a, b) => a.card.title.localeCompare(b.card.title, undefined, { sensitivity: "base" }));
+      } else if (state.sort === "due") {
+        filtered.sort((a, b) => (a.card.dueDate || "9999-12-31").localeCompare(b.card.dueDate || "9999-12-31") || a.boardOrder - b.boardOrder);
+      } else if (state.sort === "updated") {
+        filtered.sort((a, b) => String(b.card.updatedAt || "").localeCompare(String(a.card.updatedAt || "")) || a.boardOrder - b.boardOrder);
+      }
+      tbody.replaceChildren(...filtered.map(({ card, list }) => this.renderTableRow(card, list, board, visible)));
+      const activeFilters = !!state.query || state.listId !== "all" || state.completion !== "all" || state.sort !== "board" || state.labelKeys.length > 0;
+      syncLabelFilterButton();
+      summary.textContent = `${filtered.length} of ${rows.length} ${rows.length === 1 ? "card" : "cards"}`;
+      clear.disabled = !activeFilters;
+      empty.textContent = rows.length ? "No cards match the current filters." : "No cards yet. Add one below.";
+      empty.hidden = filtered.length > 0;
+    };
+
+    search.addEventListener("input", () => { state.query = search.value; paint(); });
+    listFilter.addEventListener("change", () => { state.listId = listFilter.value; paint(); });
+    completionFilter.addEventListener("change", () => { state.completion = completionFilter.value; paint(); });
+    sort.addEventListener("change", () => { state.sort = sort.value; paint(); });
+    labelFilter.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.openTablePopover(labelFilter, (pop) => {
+        pop.classList.add("ot-label-filter-popover");
+        const header = createElement("div", "ot-label-filter-header");
+        const filterSearch = createElement("input", "ot-label-filter-search");
+        filterSearch.type = "search";
+        filterSearch.placeholder = "Search labels...";
+        filterSearch.setAttribute("aria-label", "Search labels");
+        const meta = createElement("div", "ot-label-filter-meta");
+        const resultCount = createElement("span");
+        const clearLabels = createElement("button", "ot-text-button", "Clear");
+        clearLabels.type = "button";
+        meta.append(resultCount, clearLabels);
+        header.append(filterSearch, meta);
+        const options = createElement("div", "ot-label-filter-options");
+        const limitNote = createElement("div", "ot-label-filter-limit");
+        pop.append(header, options, limitNote);
+
+        const normalize = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
+        const renderOptions = () => {
+          const query = normalize(filterSearch.value).trim();
+          const matches = availableLabels.filter((label) => !query || normalize(label.name).includes(query));
+          const visibleLabels = matches.slice(0, 80);
+          options.replaceChildren();
+          visibleLabels.forEach((label) => {
+            const key = labelKey(label);
+            const dot = createElement("span", "ot-label-filter-dot");
+            dot.style.backgroundColor = label.color;
+            const row = this.popoverRow(dot, label.name, state.labelKeys.includes(key));
+            row.addEventListener("click", () => {
+              state.labelKeys = state.labelKeys.includes(key)
+                ? state.labelKeys.filter((item) => item !== key)
+                : [...state.labelKeys, key];
+              paint();
+              renderOptions();
+            });
+            options.append(row);
+          });
+          if (!matches.length) options.append(createElement("div", "ot-popover-empty", "No matching labels"));
+          resultCount.textContent = `${matches.length} ${matches.length === 1 ? "label" : "labels"}`;
+          limitNote.textContent = matches.length > 80 ? `Showing 80 of ${matches.length}. Refine the search to see more.` : "";
+          limitNote.hidden = matches.length <= 80;
+          clearLabels.disabled = !state.labelKeys.length;
+        };
+        filterSearch.addEventListener("input", renderOptions);
+        clearLabels.addEventListener("click", () => {
+          state.labelKeys = [];
+          paint();
+          renderOptions();
+        });
+        renderOptions();
+        window.setTimeout(() => filterSearch.focus(), 0);
+      });
+      syncLabelFilterButton();
+    });
+    clear.addEventListener("click", () => {
+      state.query = "";
+      state.listId = "all";
+      state.completion = "all";
+      state.sort = "board";
+      state.labelKeys = [];
+      search.value = "";
+      listFilter.value = "all";
+      completionFilter.value = "all";
+      sort.value = "board";
+      paint();
+      search.focus();
+    });
+
+    paint();
+    view.append(controls, wrap, empty, this.renderTableComposer(board));
+    return view;
   }
 
   // A drag handle on a column's right edge. Resizes the <col> live, persists on
@@ -344,7 +523,7 @@ class BoardView extends ItemView {
 
     const menuButton = createElement("button", "ot-th-menu");
     menuButton.type = "button";
-    menuButton.title = "Column options";
+    menuButton.title = "Field options";
     try { setIcon(menuButton, "chevron-down"); } catch (error) { menuButton.textContent = "▾"; }
     menuButton.draggable = false;
     menuButton.addEventListener("click", (event) => {
@@ -352,7 +531,7 @@ class BoardView extends ItemView {
       const menu = new Menu();
       menu.addItem((item) => item.setTitle("Move left").setIcon("arrow-left").onClick(() => this.moveColumn(board, cfg, key, -1)));
       menu.addItem((item) => item.setTitle("Move right").setIcon("arrow-right").onClick(() => this.moveColumn(board, cfg, key, 1)));
-      menu.addItem((item) => item.setTitle("Hide column").setIcon("eye-off").onClick(() => {
+      menu.addItem((item) => item.setTitle("Hide field").setIcon("eye-off").onClick(() => {
         cfg.hidden.add(key);
         this.persistTableConfig(board, cfg);
         this.render();
@@ -399,14 +578,14 @@ class BoardView extends ItemView {
     const th = createElement("th", "ot-th ot-th-add");
     const button = createElement("button", "ot-th-add-btn");
     button.type = "button";
-    button.title = "Add a column";
+    button.title = "Show a field";
     try { setIcon(button, "plus"); } catch (error) { button.textContent = "+"; }
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       const hidden = cfg.order.filter((key) => cfg.hidden.has(key));
       const menu = new Menu();
       if (!hidden.length) {
-        menu.addItem((item) => item.setTitle("All columns shown").setDisabled(true));
+        menu.addItem((item) => item.setTitle("All fields shown").setDisabled(true));
       } else {
         hidden.forEach((key) => {
           const label = (defs.find((def) => def.key === key) || {}).label || key;
@@ -428,6 +607,9 @@ class BoardView extends ItemView {
     const lockedByOther = !!lockHolder;
     const row = createElement("tr", "ot-table-row");
     row.dataset.cardId = card.id;
+    row.style.setProperty("--ot-row-list-color", list.color || "var(--interactive-accent)");
+    row.tabIndex = 0;
+    row.setAttribute("aria-label", `Open ${card.title}`);
     if (card.completed) row.classList.add("is-completed");
     if (card.completed && this.plugin.completedAnimationCardId === card.id) {
       row.classList.add("is-just-completed");
@@ -435,9 +617,14 @@ class BoardView extends ItemView {
       window.setTimeout(() => row.classList.remove("is-just-completed"), 650);
     }
     if (lockedByOther) row.classList.add("is-locked");
-    // Opening a task from the table shows ONLY Description + Checklist — every
+    // Opening a card from the table shows ONLY Description + Checklist — every
     // other field is edited inline from its cell, so no full editor is needed.
     row.addEventListener("click", () => new CardModal(this.app, this.plugin, card.id, { notesOnly: true }).open());
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      new CardModal(this.app, this.plugin, card.id, { notesOnly: true }).open();
+    });
 
     const nameCell = createElement("td", "ot-td ot-td-name");
     const nameInner = createElement("div", "ot-td-name-inner");
@@ -457,9 +644,19 @@ class BoardView extends ItemView {
     const checklist = checklistItems(card.checklists);
     if (checklist.length) {
       const stats = checklistStats(checklist);
-      hints.append(createElement("span", "ot-td-hint", `☑ ${stats.done}/${stats.total}`));
+      const checklistHint = createElement("span", "ot-td-hint ot-td-checklist-hint");
+      const checklistIcon = createElement("span", "ot-td-hint-icon");
+      try { setIcon(checklistIcon, "list-checks"); } catch (error) { checklistIcon.textContent = "✓"; }
+      checklistHint.append(checklistIcon, createElement("span", "", `${stats.done}/${stats.total}`));
+      hints.append(checklistHint);
     }
-    if (card.details) hints.append(createElement("span", "ot-td-hint", "☰"));
+    if (card.details) {
+      const detailsHint = createElement("span", "ot-td-hint");
+      const detailsIcon = createElement("span", "ot-td-hint-icon");
+      try { setIcon(detailsIcon, "align-left"); } catch (error) { detailsIcon.textContent = "≡"; }
+      detailsHint.append(detailsIcon);
+      hints.append(detailsHint);
+    }
     if (hints.childElementCount) nameInner.append(hints);
     if (lockedByOther) nameInner.append(this.buildLockBadge(lockHolder));
     nameCell.append(nameInner);
@@ -497,7 +694,7 @@ class BoardView extends ItemView {
     const cell = createElement("td", "ot-td ot-td-status");
     const pill = this.buildStatusPill(list);
     pill.classList.add("is-clickable");
-    pill.title = "Change status";
+    pill.title = "Move to another list";
     pill.addEventListener("click", (event) => {
       event.stopPropagation();
       if (lockHolder) return this.notifyCardLocked(lockHolder);
@@ -528,7 +725,16 @@ class BoardView extends ItemView {
     const dates = dateRangeLabel(card.startDate, card.dueDate);
     const trigger = createElement("div", "ot-cell-edit");
     trigger.title = "Edit dates";
-    if (dates) trigger.append(createElement("span", "", dates));
+    if (dates) {
+      const dateLabel = createElement("span", "ot-table-date", dates);
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      if (card.dueDate && card.dueDate < today && !card.completed) {
+        dateLabel.classList.add("is-overdue");
+        dateLabel.title = "Overdue";
+      }
+      trigger.append(dateLabel);
+    }
     else trigger.append(createElement("span", "ot-td-empty", "＋"));
     trigger.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -572,8 +778,17 @@ class BoardView extends ItemView {
     pop.style.left = `${Math.round(rect.left)}px`;
     pop.style.minWidth = `${Math.max(190, Math.round(rect.width))}px`;
     document.body.append(pop);
+    this._tablePopoverAnchor = anchor;
+    anchor.setAttribute("aria-expanded", "true");
     const close = () => this.closeTablePopover();
     build(pop, close);
+    const popRect = pop.getBoundingClientRect();
+    const maxLeft = Math.max(8, window.innerWidth - popRect.width - 8);
+    pop.style.left = `${Math.min(Math.max(8, Math.round(rect.left)), maxLeft)}px`;
+    if (popRect.bottom > window.innerHeight - 8) {
+      const maxTop = Math.max(8, window.innerHeight - popRect.height - 8);
+      pop.style.top = `${Math.max(8, Math.min(Math.round(rect.top - popRect.height - 4), maxTop))}px`;
+    }
     const onDown = (event) => { if (!pop.contains(event.target)) close(); };
     const onKey = (event) => { if (event.key === "Escape") close(); };
     // Attach synchronously: the picker opens on a `click`, so THIS gesture's
@@ -593,6 +808,8 @@ class BoardView extends ItemView {
     if (this._tablePopover._cleanup) this._tablePopover._cleanup();
     this._tablePopover.remove();
     this._tablePopover = null;
+    if (this._tablePopoverAnchor) this._tablePopoverAnchor.setAttribute("aria-expanded", "false");
+    this._tablePopoverAnchor = null;
   }
 
   popoverRow(leading, label, checked) {
@@ -731,25 +948,54 @@ class BoardView extends ItemView {
   }
 
   renderTableComposer(board) {
-    const form = createElement("form", "ot-table-composer");
-    const list = board.lists[0];
-    if (!list) {
-      form.append(createElement("span", "ot-td-empty", "Add a list first to create tasks."));
-      return form;
+    const creator = createElement("section", "ot-table-creator");
+    if (!board.lists.length) {
+      const empty = createElement("div", "ot-table-creator-empty");
+      empty.append(
+        createElement("span", "", "Add a list before creating cards."),
+        textButton("plus", "Add list", () => this.plugin.addList())
+      );
+      creator.append(empty);
+      return creator;
     }
-    form.append(createElement("span", "ot-table-composer-plus", "+"));
+
+    const form = createElement("form", "ot-table-composer");
+    const inputWrap = createElement("label", "ot-table-composer-field ot-table-composer-title");
+    inputWrap.append(createElement("span", "", "Card title"));
     const input = createElement("input", "ot-table-composer-input");
     input.type = "text";
-    input.placeholder = "New task";
-    form.append(input);
+    input.placeholder = "What should this card be called?";
+    input.autocomplete = "off";
+    inputWrap.append(input);
+
+    const statusWrap = createElement("label", "ot-table-composer-field ot-table-composer-status");
+    statusWrap.append(createElement("span", "", "List"));
+    const status = createElement("select", "ot-table-composer-select");
+    board.lists.forEach((list) => status.append(new Option(list.title, list.id)));
+    const tableState = this.tableStates.get(board.id);
+    if (tableState && board.lists.some((list) => list.id === tableState.listId)) status.value = tableState.listId;
+    statusWrap.append(status);
+
+    const add = createElement("button", "mod-cta ot-table-composer-submit", "Add card");
+    add.type = "submit";
+    addButtonIcon(add, "plus");
+    form.append(inputWrap, statusWrap, add);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const title = textLine(input.value);
       if (!title) { input.focus(); return; }
+      const list = board.lists.find((item) => item.id === status.value) || board.lists[0];
+      if (!list) return;
+      add.disabled = true;
       input.value = "";
-      await this.plugin.createCard(list.id, title);
+      try {
+        await this.plugin.createCard(list.id, title);
+      } finally {
+        add.disabled = false;
+      }
     });
-    return form;
+    creator.append(form);
+    return creator;
   }
 
   startPresence(board) {
@@ -1100,8 +1346,7 @@ class BoardView extends ItemView {
     }
     welcomeActions.append(
       textButton("refresh-cw", "Re-import notes", () => this.syncNotes()),
-      textButton("info", "About", () => new AboutModal(this.app, this.plugin).open()),
-      textButton("heart", "Support developer", () => window.open(DONATION_URL, "_blank"))
+      textButton("info", "About", () => new AboutModal(this.app, this.plugin).open())
     );
     welcome.append(welcomeCopy, welcomeActions);
 

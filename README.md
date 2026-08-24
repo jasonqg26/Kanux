@@ -1,14 +1,11 @@
 # Task Deck
 
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.5%2B-7c3aed?logo=obsidian&logoColor=white)](https://obsidian.md)
-[![Release](https://img.shields.io/github/v/release/ismailivanov/task-deck?label=release)](https://github.com/ismailivanov/task-deck/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f1c40f.svg)](LICENSE)
-[![Sync Deck](https://img.shields.io/badge/cloud%20sync-Sync%20Deck-7c3aed.svg)](https://github.com/ismailivanov/sync-deck)
-[![Support](https://img.shields.io/badge/support-Buy%20Me%20a%20Coffee-ffdd00.svg)](https://buymeacoffee.com/carbon06)
 
 Task Deck is a focused kanban and table view for Obsidian. Every card stays a real Markdown note in your vault, so your tasks remain searchable, linkable, portable, and editable outside the board.
 
-Use it locally with as many boards as you need, or pair it with [**Sync Deck**](https://github.com/ismailivanov/sync-deck) for cross-device sync, shared vaults, member assignment, and live presence.
+Use it locally with as many boards as you need, or pair it with **Sync Deck** for cross-device sync, shared vaults, member assignment, and live presence.
 
 ![Task Deck board view with To do, Doing, and Done lists](docs/images/task-deck-board.png)
 
@@ -31,7 +28,7 @@ Use it locally with as many boards as you need, or pair it with [**Sync Deck**](
 - **Multiple boards** with independent folders, lists, colors, and cards.
 - **Normal Obsidian notes** that remain searchable, linkable, visible in graph view, and editable from the file explorer.
 - **Automatic note discovery** for compatible Markdown cards created or edited outside Task Deck.
-- **Optional collaboration** through [Sync Deck](https://github.com/ismailivanov/sync-deck), including shared boards, member assignment, and live presence.
+- **Optional collaboration** through Sync Deck, including shared boards, member assignment, and live presence.
 
 ## Quick start
 
@@ -60,15 +57,15 @@ The board index keeps list order and graph links connected. Card metadata lives 
 
 ## Sync across devices and teams
 
-Task Deck works fully offline and does not require an account. To sync boards, install [**Sync Deck**](https://github.com/ismailivanov/sync-deck), sign in, and open or create a synced vault.
+Task Deck works fully offline and does not require an account. To sync boards, install **Sync Deck**, sign in, and open or create a synced vault.
 
-Sync Deck carries the board index, cards, and attachments across your devices. New and upgraded Sync Deck vaults end-to-end encrypt those files, their paths, and the board/card identifiers used for presence and locks; account and activity metadata still remain visible to the service. In shared vaults it also provides member assignment and live presence, so teammates can see who is viewing or editing a card. See Sync Deck's [E2EE threat model](https://github.com/ismailivanov/sync-deck/blob/main/docs/E2EE.md) for the exact boundary. The Free plan syncs one Task Deck board; Pro syncs unlimited boards. Local-only Task Deck usage remains unlimited.
+Sync Deck carries the board index, cards, and attachments across your devices. New and upgraded Sync Deck vaults end-to-end encrypt those files, their paths, and the board/card identifiers used for presence and locks; account and activity metadata still remain visible to the service. In shared vaults it also provides member assignment and live presence, so teammates can see who is viewing or editing a card. Local-only Task Deck usage remains unlimited.
 
 ## Install
 
 Until Task Deck is available in the Obsidian community plugin directory:
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/ismailivanov/task-deck/releases/latest).
+1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release of this repository.
 2. Put the files in:
 
 ```text
@@ -87,10 +84,12 @@ node build.js
 
 Obsidian loads the generated `main.js` file.
 
-## Support
+## Credits
 
-If Task Deck is useful for your workflow, you can support the project: [Buy me a coffee](https://buymeacoffee.com/carbon06).
+This project originally used [ismailivanov/task-deck](https://github.com/ismailivanov/task-deck) as its base. It has since evolved into a substantially expanded implementation with a broader product direction, independent customization, and new workflows beyond the original plugin.
+
+Credit and thanks to Ismail Ivanov for releasing the original project under the MIT License. You can support his work through [Buy Me a Coffee](https://buymeacoffee.com/carbon06).
 
 ## License
 
-[MIT](LICENSE) © Ismail Ivanov
+[MIT](LICENSE)

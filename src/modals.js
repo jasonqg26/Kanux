@@ -775,6 +775,55 @@ class BoardAppearanceModal extends Modal {
           }
         }));
 
+    new Setting(this.contentEl).setName("Saved appearances").setHeading();
+    const presets = this.plugin.getAppearancePresets();
+    let selectedPresetId = presets[0] ? presets[0].id : "";
+    const presetSetting = new Setting(this.contentEl)
+      .setName("Custom preset")
+      .setDesc(presets.length ? "Apply or delete a saved appearance." : "No custom appearances saved yet.")
+      .addDropdown((dropdown) => {
+        if (!presets.length) dropdown.addOption("", "No saved presets");
+        presets.forEach((preset) => dropdown.addOption(preset.id, preset.name));
+        dropdown.setValue(selectedPresetId).onChange((value) => { selectedPresetId = value; });
+      })
+      .addButton((button) => button.setButtonText("Apply").setDisabled(!presets.length).onClick(async () => {
+        if (!selectedPresetId) return;
+        await this.plugin.applyCustomAppearancePreset(this.boardId, selectedPresetId);
+        this.render();
+      }))
+      .addButton((button) => button.setButtonText("Delete").setWarning().setDisabled(!presets.length).onClick(async () => {
+        if (!selectedPresetId) return;
+        const selected = presets.find((preset) => preset.id === selectedPresetId);
+        if (!selected || !window.confirm(`Delete appearance preset "${selected.name}"?`)) return;
+        await this.plugin.deleteAppearancePreset(selectedPresetId);
+        this.render();
+      }));
+    presetSetting.addButton((button) => button.setButtonText("Save current").setCta().onClick(() => {
+      new TextPromptModal(this.app, "Save appearance", "Preset name", "", async (name) => {
+        const saved = await this.plugin.saveAppearancePreset(name, this.plugin.getBoardAppearance(this.boardId));
+        if (saved) {
+          new Notice(`Appearance preset "${saved.name}" saved.`);
+          this.render();
+        }
+      }).open();
+    }));
+
+    const sourceBoards = this.plugin.data.boards.filter((item) => item.id !== this.boardId);
+    let sourceBoardId = sourceBoards[0] ? sourceBoards[0].id : "";
+    new Setting(this.contentEl)
+      .setName("Copy from another board")
+      .setDesc(sourceBoards.length ? "Replace this board's appearance with another board's settings." : "Create another board to use this option.")
+      .addDropdown((dropdown) => {
+        if (!sourceBoards.length) dropdown.addOption("", "No other boards");
+        sourceBoards.forEach((item) => dropdown.addOption(item.id, item.name));
+        dropdown.setValue(sourceBoardId).onChange((value) => { sourceBoardId = value; });
+      })
+      .addButton((button) => button.setButtonText("Copy appearance").setDisabled(!sourceBoards.length).onClick(async () => {
+        if (!sourceBoardId) return;
+        await this.plugin.copyBoardAppearance(this.boardId, sourceBoardId);
+        this.render();
+      }));
+
     new Setting(this.contentEl).setName("Background").setHeading();
     new Setting(this.contentEl)
       .setName("Background type")
@@ -844,16 +893,28 @@ class BoardAppearanceModal extends Modal {
     new Setting(this.contentEl).setName("Hover color").setDesc("Card color while the pointer is over it.")
       .addColorPicker((picker) => picker.setValue(appearance.cards.hoverBackground)
         .onChange((value) => this.update({ cards: { hoverBackground: value } })));
-    new Setting(this.contentEl).setName("Vertical spacing").setDesc("Space between cards inside each column.")
+    new Setting(this.contentEl).setName("Vertical spacing").setDesc("Space between cards inside each list.")
       .addSlider((slider) => slider.setLimits(0, 28, 1).setValue(appearance.cards.verticalGap).setDynamicTooltip()
         .onChange((value) => this.update({ cards: { verticalGap: value } })));
     new Setting(this.contentEl).setName("Title size").addSlider((slider) => slider
       .setLimits(12, 30, 1).setValue(appearance.cards.titleSize).setDynamicTooltip()
       .onChange((value) => this.update({ cards: { titleSize: value } })));
 
+    new Setting(this.contentEl).setName("Labels").setHeading();
+    new Setting(this.contentEl)
+      .setName("Label display")
+      .setDesc("Choose when card labels reveal their names.")
+      .addDropdown((dropdown) => dropdown
+        .addOption("compact", "Always compact")
+        .addOption("expanded", "Always expanded")
+        .addOption("hover", "Expand hovered label")
+        .addOption("card-hover", "Expand when card is hovered")
+        .setValue(appearance.labels.displayMode)
+        .onChange((value) => this.update({ labels: { displayMode: value } })));
+
     new Setting(this.contentEl).setName("Columns").setHeading();
     let columnColor = null;
-    new Setting(this.contentEl).setName("Use theme column color").addToggle((toggle) => toggle
+    new Setting(this.contentEl).setName("Use theme list color").addToggle((toggle) => toggle
       .setValue(appearance.lists.useTheme).onChange(async (value) => {
         await this.update({ lists: { useTheme: value } });
         if (columnColor) columnColor.setDisabled(value);
@@ -1098,7 +1159,7 @@ class AboutModal extends Modal {
     this.contentEl.addClass("ot-about-modal");
     this.contentEl.append(
       createElement("h2", "", "Task Deck"),
-      createElement("p", "", "A Trello-style task board for Obsidian with Markdown-backed cards, labels, dates, and checklists.")
+      createElement("p", "", "A Trello-style board for Obsidian with Markdown-backed cards, labels, dates, and checklist tasks.")
     );
 
     const actions = createElement("div", "ot-modal-actions");
@@ -1377,6 +1438,8 @@ class CardModal extends Modal {
 
   render() {
     const card = this.card;
+    const previousBody = this.contentEl.querySelector(".ot-card-modal-body");
+    const bodyScrollTop = previousBody ? previousBody.scrollTop : 0;
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-card-modal");
     const collaborationEnabled = this.plugin.isSyncDeckEnabled();
@@ -1390,6 +1453,18 @@ class CardModal extends Modal {
       this.localTitle = title.value;
       this.queueSave();
     });
+
+    const board = this.plugin.findBoardForCard(card);
+    const list = board && board.lists.find((item) => item.id === card.listId);
+    const header = createElement("header", "ot-card-modal-header");
+    const headerIcon = createElement("span", "ot-card-modal-header-icon");
+    try { setIcon(headerIcon, "check-square"); } catch (error) { headerIcon.textContent = ""; }
+    const headerCopy = createElement("div", "ot-card-modal-header-copy");
+    const location = createElement("div", "ot-card-modal-location");
+    location.append(createElement("span", "", list ? `In ${list.title}` : "Task Deck card"));
+    if (board) location.append(createElement("span", "ot-card-modal-board-name", board.name));
+    headerCopy.append(title, location);
+    header.append(headerIcon, headerCopy);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
     const assigneesField = this.notesOnly || !collaborationEnabled ? null : this.renderAssigneesField();
@@ -1435,13 +1510,26 @@ class CardModal extends Modal {
     const editableFields = (this.notesOnly
       ? [detailsField, checklistField]
       : [labelsField, assigneesField, detailsField, checklistField]).filter(Boolean);
-    const children = [title, ...editableFields, actions];
+    const mainColumn = createElement("main", "ot-card-modal-main");
+    mainColumn.append(detailsField, checklistField);
+    const body = createElement("div", "ot-card-modal-body");
+    body.append(mainColumn);
+    if (!this.notesOnly) {
+      const sidebar = createElement("aside", "ot-card-modal-sidebar");
+      if (labelsField) sidebar.append(labelsField);
+      if (assigneesField) sidebar.append(assigneesField);
+      body.append(sidebar);
+    } else {
+      body.classList.add("is-notes-only");
+    }
+    const children = [header, body, actions];
     if (this.readOnly) {
       this.contentEl.addClass("ot-card-readonly");
       const holderName = (this.lockHolder && this.lockHolder.name) || "Someone";
       children.unshift(createElement("div", "ot-card-lock-banner", `🔒 ${holderName} is editing this card — read only`));
     }
     this.contentEl.append(...children);
+    if (bodyScrollTop) requestAnimationFrame(() => { body.scrollTop = bodyScrollTop; });
 
     if (this.readOnly) {
       title.disabled = true;

@@ -1,7 +1,7 @@
 const { FuzzySuggestModal, Notice, PluginSettingTab, Setting } = require("obsidian");
 
-// Settings tab for board access, sync, preferences, support, and version info.
-const { DONATION_URL, isImagePath } = require("./helpers");
+// Settings tab for board access, sync, preferences, and version info.
+const { isImagePath } = require("./helpers");
 
 class VaultImageSuggestModal extends FuzzySuggestModal {
   constructor(app, onChoose) {
@@ -92,19 +92,6 @@ class TaskDeckSettingTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.data.seedDefaultLists = value;
           await this.plugin.savePluginData();
-        }));
-
-    new Setting(containerEl)
-      .setName("Label display")
-      .setDesc("Choose whether card labels show their names or remain compact.")
-      .addDropdown((dropdown) => dropdown
-        .addOption("compact", "Always compact")
-        .addOption("expanded", "Always expanded")
-        .addOption("hover", "Expand when label is hovered")
-        .addOption("card-hover", "Expand when card is hovered")
-        .setValue(this.plugin.getLabelDisplayMode())
-        .onChange(async (value) => {
-          await this.plugin.setLabelDisplayMode(value);
         }));
 
     new Setting(containerEl)
@@ -270,7 +257,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
           .onChange((value) => update({ background: { overlayOpacity: value } })));
     }
 
-    new Setting(containerEl).setName("Cards and columns").setHeading();
+    new Setting(containerEl).setName("Cards and lists").setHeading();
 
     let cardColorPicker = null;
     new Setting(containerEl)
@@ -295,8 +282,8 @@ class TaskDeckSettingTab extends PluginSettingTab {
 
     let columnColorPicker = null;
     new Setting(containerEl)
-      .setName("Use theme column color")
-      .setDesc("Derive column surfaces from the active Obsidian theme.")
+      .setName("Use theme list color")
+      .setDesc("Derive list surfaces from the active Obsidian theme.")
       .addToggle((toggle) => toggle
         .setValue(appearance.lists.useTheme)
         .onChange(async (value) => {
@@ -305,7 +292,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
         }));
     new Setting(containerEl)
       .setName("Column color")
-      .setDesc(appearance.lists.useTheme ? "Disable theme column color to customize this value." : "Global column surface color.")
+      .setDesc(appearance.lists.useTheme ? "Disable theme list color to customize this value." : "Global list surface color.")
       .addColorPicker((picker) => {
         columnColorPicker = picker;
         picker
@@ -318,7 +305,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Density")
-      .setDesc("Controls column width, card padding, and spacing between cards.")
+      .setDesc("Controls list width, card padding, and spacing between cards.")
       .addDropdown((dropdown) => dropdown
         .addOption("compact", "Compact")
         .addOption("normal", "Normal")
@@ -382,11 +369,6 @@ class TaskDeckSettingTab extends PluginSettingTab {
   renderAbout(containerEl) {
     // ---- About ----
     new Setting(containerEl).setName("About").setHeading();
-
-    new Setting(containerEl)
-      .setName("Support development")
-      .setDesc("If Task Deck is useful, you can support it here.")
-      .addButton((button) => button.setButtonText("Donate").onClick(() => window.open(DONATION_URL, "_blank")));
 
     new Setting(containerEl)
       .setName("Version")

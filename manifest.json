@@ -4,7 +4,6 @@
   "version": "0.3.8",
   "minAppVersion": "1.5.0",
   "description": "Trello-style task boards with Markdown-backed cards, labels, dates, and checklists.",
-  "author": "Ismail Ivanov",
-  "fundingUrl": "https://buymeacoffee.com/carbon06",
+  "author": "Task Deck contributors",
   "isDesktopOnly": false
 }
