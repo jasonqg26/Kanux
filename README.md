@@ -97,158 +97,18 @@ Sync Deck adds shared vaults, member assignment, card locks, and live presence w
 
 ## Features
 
-### Boards and lists
-
-- Create and manage multiple independent boards from a dedicated board home.
-- Switch boards without leaving the Task Deck view.
-- Start new boards empty or with ready-made **To do**, **Doing**, and **Done** lists.
-- Add, rename, recolor, reorder, and delete lists.
-- See each list's card count and identifying color directly in its header.
-- Drag lists horizontally and place them before or after another list.
-- Give every board its own folder, cards, attachments, lists, colors, and appearance.
-
-### Board view
-
-- Trello-style cards with wrapped titles, colored labels, dates, checklist progress, description indicators, member avatars, and completion state.
-- Create cards inline inside any list.
-- Rename cards directly from the Board.
-- Drag cards within a list or between lists with exact insertion placement.
-- Mark cards complete or incomplete from the closed card.
-- Optional completion sound and animated completion feedback.
-- Quick access to dates, deletion, and the complete card editor.
-- Undo recent Board and Table changes with the command palette or `Ctrl/Cmd + Z` while Task Deck is active.
-
-### Table view
-
-- View every card from every list as a structured, card-styled table row.
-- Open the same complete card editor used by the Board view.
-- Create a card directly in a selected list from the centered Table composer.
-- Mark cards complete or incomplete without leaving the table.
-- Edit a card's list, members, dates, and labels directly from its row.
-- Search across card titles, descriptions, list names, labels, assigned members, and checklist tasks.
-- Accent-insensitive, multi-term search: every entered term can match a different part of the card.
-- Filter by list and by open or completed state.
-- Searchable multi-label filtering that only indexes labels used by the current board and limits rendered results for large label collections.
-- Sort by Board order, title, nearest due date, or most recently updated.
-- Display filtered and total card counts and clear all active filters in one action.
-- Show, hide, resize, and reorder the optional **List**, **Assignee**, **Dates**, and **Labels** fields.
-- Preserve each board's Table field order and widths as local interface preferences.
-
-### Complete card editor
-
-- Edit the card title with automatic saving.
-- See the card's current board and list in the modal header.
-- Open the underlying Markdown note at any time.
-- Export a complete card to a print-styled A4 PDF on Obsidian Desktop, including metadata, labels, dates, members, description, images, and checklists.
-- Delete a card together with its linked Markdown note after confirmation.
-- Respect collaborative edit locks by opening cards read-only when another member is editing them.
-
-### Labels
-
-- Create reusable global labels with a large color palette.
-- Search, select, edit, and delete labels from the label manager.
-- Assign multiple labels to each card.
-- Remove labels directly from the card editor.
-- Choose how labels appear on each board: always compact, always expanded, expand only the hovered label, or expand all labels when the card is hovered.
-- Smooth label expansion animations with reduced-motion support.
-
-### Dates
-
-- Set independent start and due dates from a visual calendar.
-- Display single dates or date ranges on closed cards and in Table.
-- Highlight overdue dates in Table.
-- Clear or update dates without editing the Markdown file manually.
-
-### Markdown descriptions
-
-- Render card descriptions as normal Obsidian Markdown.
-- Edit descriptions through a visual block editor instead of working directly with raw Markdown markers.
-- Format headings, bold text, italics, quotes, bulleted lists, inline code, links, dividers, and links to other vault notes.
-- Preserve paragraphs and list continuation while typing.
-- Keep pasted text free from foreign HTML styling.
-- Collapse long descriptions behind **Show more / Show less** controls.
-- Fall back to readable source text if Markdown rendering fails.
-
-### Images and attachments
-
-- Add multiple images from the file picker, clipboard paste, or drag and drop.
-- Save card media inside the board's organized `attachments/` folder.
-- Insert images at the current description position and keep them inline with surrounding Markdown.
-- Preview real images while editing instead of raw embed syntax.
-- Resize images by dragging and persist their width in Obsidian-compatible embed markup.
-- Arrange consecutive images at full width or in two-, three-, and four-column layouts.
-- Reorder images by drag and drop.
-- Copy a rendered image directly to the system clipboard.
-- Remove images from the description while preserving the surrounding text structure.
-- Resolve vault image embeds and migrate older loose board media into the organized attachments folder.
-
-### Checklists and tasks
-
-- Add multiple named checklists to a card.
-- Give every checklist its own color and independent progress bar.
-- Rename or delete entire checklists.
-- Add, edit, complete, and remove checklist tasks.
-- Wrap long task titles across multiple lines.
-- Reorder tasks within a checklist or drag them between different checklists.
-- Create a dedicated Markdown note for any checklist task.
-- Expand and render a task's linked Markdown description directly inside the card.
-- Open the linked task note in Obsidian for full editing.
-- Move linked task notes to the vault trash when their task or checklist is deleted.
-- Assign an individual Sync Deck member to a checklist task when collaboration is enabled.
-
-### Per-board customization
-
-- Define global appearance defaults in plugin settings, then override them independently for each board.
-- Customize each board independently without modifying the active Obsidian theme.
-- Start from **Obsidian theme**, **Trello dark**, **Trello light**, **Transparent**, or **High contrast** visual presets.
-- Save the current appearance as a reusable custom preset.
-- Apply or delete saved presets and copy the complete appearance from another board.
-- Reset one board to the Obsidian-theme defaults.
-- Use the Obsidian theme, a solid color, a two-color gradient, or an image as the board background.
-- Select background images from the vault or import them from the computer into Task Deck's private plugin data folder.
-- Fit images with **Original**, **Cover**, **Contain**, or **Repeat** behavior.
-- Adjust image darkening to keep cards and controls readable.
-- Use theme-derived or custom card and list surface colors.
-- Customize card hover color, vertical card spacing, card title size, list spacing, top-border thickness, and list color-dot visibility.
-- Control text contrast independently from surface colors.
-- Choose compact, normal, or comfortable layout density.
-- Adjust global text scale, card corners, list corners, card shadow strength, and interface animations.
-- Share the same appearance variables across Board and Table views for visual consistency.
-
-### Markdown-native Obsidian integration
-
-- Keep every card as a normal Markdown note that remains searchable, linkable, portable, and editable outside Task Deck.
-- Store card metadata in frontmatter while descriptions and checklists remain readable Markdown.
-- Maintain a readable generated board index containing list order and links to every card.
-- Keep cards connected in Obsidian Graph view.
-- Add board/list tags and matching Graph color groups automatically.
-- Mark each card note in Obsidian's File Explorer with a left border matching its current list color.
-- Rename card files when card titles change while preserving unique paths.
-- Detect compatible Markdown cards created, modified, renamed, or deleted outside Task Deck.
-- Re-import external changes automatically through vault events and a periodic reconciliation pass, with a manual re-import action available from settings and the board home.
-- Repair duplicate card files and migrate legacy board layouts and media without discarding the current board data.
-- Keep plugin interface state separate from the Markdown content stored in the vault.
-
-### Commands and accessibility
-
-- Open Task Deck from the ribbon, settings, or command palette.
-- Add a card to the first list from the command palette.
-- Undo the latest supported Board or Table change from the command palette.
-- Use keyboard-focused flows such as Enter to open Table cards and Escape to cancel inline creation or editing.
-- Preserve visible focus states, semantic labels, responsive layouts, and reduced-motion behavior.
-- Run local boards without an account or network connection.
-
-### Optional Sync Deck collaboration
-
-- Enable or disable cloud collaboration features independently from local Task Deck usage.
-- Sync board indexes, Markdown cards, and attachments across devices.
-- Work in shared vaults with multiple members.
-- Assign multiple members to a card and display their avatars on Board and Table views.
-- Assign one member to an individual checklist task.
-- See live member presence and smooth collaborative cursors on the board.
-- Use card-level edit locks, heartbeats, and read-only fallback to prevent simultaneous edits from overwriting each other.
-- Protect new and upgraded Sync Deck vault content with end-to-end encryption for files, paths, and the board/card identifiers used by presence and locks.
-
+- **Flexible boards and lists:** Create multiple independent boards, organize colored lists, and reorder cards or complete lists with drag and drop.
+- **Board and Table views:** Manage the same cards visually or through a searchable, sortable, and configurable table.
+- **Complete card management:** Create, edit, complete, move, export, or delete cards with titles, dates, labels, members, descriptions, images, and progress information.
+- **Labels and dates:** Use reusable colored labels, flexible display modes, start dates, due dates, ranges, and overdue indicators.
+- **Rich Markdown descriptions:** Write and render formatted descriptions with links, lists, quotes, code, Obsidian note references, and collapsible long content.
+- **Images and attachments:** Add, paste, resize, arrange, reorder, copy, and manage images while keeping attachments organized inside the vault.
+- **Checklists and tasks:** Build multiple colored checklists, reorder tasks, track independent progress, assign members, and associate individual tasks with their own Markdown notes.
+- **Per-board appearance:** Customize backgrounds, colors, spacing, typography, density, borders, shadows, animations, labels, and image fitting; save presets or copy an appearance from another board.
+- **Native Obsidian storage:** Keep cards as normal Markdown notes with frontmatter, graph connections, automatic file discovery, external-change synchronization, and migration support.
+- **Productivity and accessibility:** Use commands, undo supported changes, keyboard navigation, responsive layouts, visible focus states, and reduced-motion support.
+- **Offline-first operation:** Use local boards without an account, permanent connection, or dependency on Sync Deck.
+- **Optional Sync Deck collaboration:** Synchronize encrypted board content across devices, share vaults, assign members, display live presence, and prevent conflicting edits with card locks.
 ## Quick start
 
 1. Open **Task Deck** from the ribbon or run `Task Deck: Open board` from the command palette.
