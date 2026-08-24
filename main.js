@@ -1341,6 +1341,7 @@ class LabelPickerModal extends Modal {
 
   render() {
     this.contentEl.replaceChildren();
+    this.modalEl.addClass("ot-label-modal-shell");
     this.contentEl.addClass("ot-label-modal");
 
     if (this.creating) {
@@ -1518,6 +1519,7 @@ class ListColorModal extends Modal {
 
   onOpen() {
     this.contentEl.replaceChildren();
+    this.modalEl.addClass("ot-label-modal-shell");
     this.contentEl.addClass("ot-label-modal", "ot-list-color-modal");
 
     const header = createElement("div", "ot-label-modal-header");
@@ -1654,6 +1656,7 @@ class BoardAppearanceModal extends Modal {
     const appearance = this.plugin.getBoardAppearance(this.boardId);
     const scrollTop = preserveScroll ? this.contentEl.scrollTop : 0;
     this.contentEl.replaceChildren();
+    this.modalEl.addClass("ot-appearance-modal-shell");
     this.contentEl.addClass("ot-appearance-modal");
     this.contentEl.append(createElement("h2", "", `${board.name} appearance`));
     this.contentEl.append(createElement("p", "ot-appearance-modal-intro", "These settings apply only to this board."));
@@ -1905,6 +1908,7 @@ class CardDatesModal extends Modal {
 
   render() {
     this.contentEl.replaceChildren();
+    this.modalEl.addClass("ot-date-modal-shell");
     this.contentEl.addClass("ot-date-modal");
     this.contentEl.append(createElement("h2", "", "Dates"));
 
@@ -2057,6 +2061,7 @@ class AboutModal extends Modal {
 
   onOpen() {
     this.contentEl.replaceChildren();
+    this.modalEl.addClass("ot-about-modal-shell");
     this.contentEl.addClass("ot-about-modal");
     this.contentEl.append(
       createElement("h2", "", "Kanux"),
@@ -2342,6 +2347,7 @@ class CardModal extends Modal {
     const previousBody = this.contentEl.querySelector(".ot-card-modal-body");
     const bodyScrollTop = previousBody ? previousBody.scrollTop : 0;
     this.contentEl.replaceChildren();
+    this.modalEl.addClass("ot-card-modal-shell");
     this.contentEl.addClass("ot-card-modal");
     const collaborationEnabled = this.plugin.isSyncDeckEnabled();
     this.contentEl.classList.toggle("is-sync-disabled", !collaborationEnabled);
@@ -3523,15 +3529,15 @@ class CardModal extends Modal {
 
   // Export this card as a clean, print-styled PDF (title, board/list, labels,
   // members, dates, description with embedded images, checklist). Desktop only:
-  // renders self-contained HTML in a hidden BrowserWindow and uses Electron's
-  // printToPDF — no dependence on the current window or Obsidian's note export.
+  // renders self-contained HTML in a hidden BrowserWindow, then saves the PDF
+  // through Obsidian's vault API without direct filesystem access.
   async exportCardPdf() {
     let remote = null;
     try { remote = window.require && window.require("@electron/remote"); } catch (error) { remote = null; }
     if (!remote) {
       try { remote = window.require && window.require("electron").remote; } catch (error) { remote = null; }
     }
-    if (!remote || !remote.BrowserWindow || !remote.dialog) {
+    if (!remote || !remote.BrowserWindow) {
       new Notice("PDF export needs the Obsidian desktop app.");
       return;
     }
@@ -3645,29 +3651,27 @@ class CardModal extends Modal {
         ${checklistHtml ? `<div class="section"><h2>Checklist</h2>${checklistHtml}</div>` : ""}
       </body></html>`;
 
-      const chosen = await remote.dialog.showSaveDialog({
-        defaultPath: `${String(this.localTitle || "card").replace(/[\\/:*?"<>|]/g, "-").trim() || "card"}.pdf`,
-        filters: [{ name: "PDF", extensions: ["pdf"] }],
-      });
-      if (!chosen || chosen.canceled || !chosen.filePath) return;
+      const baseName = String(this.localTitle || "card").replace(/[\\/:*?"<>|]/g, "-").trim() || "card";
+      let pdfPath = `${baseName}.pdf`;
+      let suffix = 2;
+      while (this.app.vault.getAbstractFileByPath(pdfPath)) {
+        pdfPath = `${baseName} ${suffix}.pdf`;
+        suffix += 1;
+      }
 
-      const fs = window.require("fs");
-      const os = window.require("os");
-      const pathMod = window.require("path");
-      const tmpPath = pathMod.join(os.tmpdir(), `kanux-card-${Date.now()}.html`);
-      fs.writeFileSync(tmpPath, html, "utf8");
       const win = new remote.BrowserWindow({ show: false, webPreferences: { sandbox: true } });
       try {
-        await win.loadFile(tmpPath);
+        const htmlBytes = new TextEncoder().encode(html);
+        await win.loadURL(`data:text/html;charset=utf-8;base64,${arrayBufferToBase64(htmlBytes.buffer)}`);
         // Give layout a beat to settle (data-URI images decode synchronously,
         // but pagination measures after first paint).
         await new Promise((resolve) => setTimeout(resolve, 150));
         const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: "A4" });
-        fs.writeFileSync(chosen.filePath, pdf);
-        new Notice("PDF saved.");
+        const bytes = pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength);
+        await this.app.vault.createBinary(pdfPath, bytes);
+        new Notice(`PDF saved to ${pdfPath}.`);
       } finally {
         win.destroy();
-        try { fs.unlinkSync(tmpPath); } catch (error) { /* temp cleanup is best-effort */ }
       }
     } catch (error) {
       console.error(error);

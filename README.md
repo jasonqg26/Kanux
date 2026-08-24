@@ -146,6 +146,12 @@ Sync Deck carries the board index, cards, and attachments across your devices. N
 - Network access occurs only through the optional Sync Deck integration when Sync Deck is installed, enabled, and signed in. It is used for file synchronization, member assignment, live presence, and edit locks.
 - A Sync Deck account is required for those optional online features. Its free plan may limit the number of synchronized boards; its paid plan removes that limit. Disabling cloud synchronization leaves local Kanux boards unlimited.
 
+### Local data access
+
+- Kanux enumerates vault file paths to discover its board and card notes and to populate note and image pickers. It reads or changes file contents only when required by a board operation or an explicit user action.
+- Clipboard access occurs only when the user pastes content into a card or explicitly copies an image from a card.
+- PDF exports are created through Obsidian's vault API and saved inside the vault. Kanux does not use Node.js filesystem APIs to write outside the vault.
+
 ## Install
 
 Until Kanux is available in the Obsidian community plugin directory:
