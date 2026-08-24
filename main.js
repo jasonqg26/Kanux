@@ -1763,12 +1763,12 @@ class BoardAppearanceModal extends Modal {
         imageSetting.addButton((button) => button.setButtonText("Clear").onClick(() => this.update({ background: { imagePath: "" } }, true)));
       }
       new Setting(this.contentEl)
-        .setName("Image size")
-        .setDesc("Original size prevents enlargement and preserves source sharpness.")
+        .setName("Image fit")
+        .setDesc("Cover fills the board without stretching the image; edges may be cropped.")
         .addDropdown((dropdown) => dropdown
           .addOption("original", "Original size — no enlargement")
-          .addOption("contain", "Fit complete image")
-          .addOption("cover", "Fill and crop edges")
+          .addOption("cover", "Cover — fill board and crop edges")
+          .addOption("contain", "Contain — show complete image")
           .addOption("repeat", "Repeat at original size")
           .setValue(appearance.background.imageFit)
           .onChange((value) => this.update({ background: { imageFit: value } })));
@@ -4967,13 +4967,12 @@ class BoardView extends ItemView {
       window.setTimeout(() => row.classList.remove("is-just-completed"), 650);
     }
     if (lockedByOther) row.classList.add("is-locked");
-    // Opening a card from the table shows ONLY Description + Checklist — every
-    // other field is edited inline from its cell, so no full editor is needed.
-    row.addEventListener("click", () => new CardModal(this.app, this.plugin, card.id, { notesOnly: true }).open());
+    // Table and Board deliberately share the same complete card editor.
+    row.addEventListener("click", () => new CardModal(this.app, this.plugin, card.id).open());
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
-      new CardModal(this.app, this.plugin, card.id, { notesOnly: true }).open();
+      new CardModal(this.app, this.plugin, card.id).open();
     });
 
     const nameCell = createElement("td", "ot-td ot-td-name");
@@ -6409,11 +6408,12 @@ class TaskDeckSettingTab extends PluginSettingTab {
 
       new Setting(containerEl)
         .setName("Image fit")
-        .setDesc("Fit shows the complete image without stretching or cropping it.")
+        .setDesc("Cover fills the board without stretching the image; edges may be cropped.")
         .addDropdown((dropdown) => dropdown
-          .addOption("contain", "Fit — no cropping")
-          .addOption("cover", "Fill — crop edges")
-          .addOption("repeat", "Repeat")
+          .addOption("original", "Original size — no enlargement")
+          .addOption("cover", "Cover — fill board and crop edges")
+          .addOption("contain", "Contain — show complete image")
+          .addOption("repeat", "Repeat at original size")
           .setValue(appearance.background.imageFit)
           .onChange((value) => update({ background: { imageFit: value } })));
 

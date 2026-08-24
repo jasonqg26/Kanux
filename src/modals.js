@@ -862,12 +862,12 @@ class BoardAppearanceModal extends Modal {
         imageSetting.addButton((button) => button.setButtonText("Clear").onClick(() => this.update({ background: { imagePath: "" } }, true)));
       }
       new Setting(this.contentEl)
-        .setName("Image size")
-        .setDesc("Original size prevents enlargement and preserves source sharpness.")
+        .setName("Image fit")
+        .setDesc("Cover fills the board without stretching the image; edges may be cropped.")
         .addDropdown((dropdown) => dropdown
           .addOption("original", "Original size — no enlargement")
-          .addOption("contain", "Fit complete image")
-          .addOption("cover", "Fill and crop edges")
+          .addOption("cover", "Cover — fill board and crop edges")
+          .addOption("contain", "Contain — show complete image")
           .addOption("repeat", "Repeat at original size")
           .setValue(appearance.background.imageFit)
           .onChange((value) => this.update({ background: { imageFit: value } })));

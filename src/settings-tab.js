@@ -239,11 +239,12 @@ class TaskDeckSettingTab extends PluginSettingTab {
 
       new Setting(containerEl)
         .setName("Image fit")
-        .setDesc("Fit shows the complete image without stretching or cropping it.")
+        .setDesc("Cover fills the board without stretching the image; edges may be cropped.")
         .addDropdown((dropdown) => dropdown
-          .addOption("contain", "Fit — no cropping")
-          .addOption("cover", "Fill — crop edges")
-          .addOption("repeat", "Repeat")
+          .addOption("original", "Original size — no enlargement")
+          .addOption("cover", "Cover — fill board and crop edges")
+          .addOption("contain", "Contain — show complete image")
+          .addOption("repeat", "Repeat at original size")
           .setValue(appearance.background.imageFit)
           .onChange((value) => update({ background: { imageFit: value } })));
 

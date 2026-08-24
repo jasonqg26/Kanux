@@ -617,13 +617,12 @@ class BoardView extends ItemView {
       window.setTimeout(() => row.classList.remove("is-just-completed"), 650);
     }
     if (lockedByOther) row.classList.add("is-locked");
-    // Opening a card from the table shows ONLY Description + Checklist — every
-    // other field is edited inline from its cell, so no full editor is needed.
-    row.addEventListener("click", () => new CardModal(this.app, this.plugin, card.id, { notesOnly: true }).open());
+    // Table and Board deliberately share the same complete card editor.
+    row.addEventListener("click", () => new CardModal(this.app, this.plugin, card.id).open());
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
-      new CardModal(this.app, this.plugin, card.id, { notesOnly: true }).open();
+      new CardModal(this.app, this.plugin, card.id).open();
     });
 
     const nameCell = createElement("td", "ot-td ot-td-name");

@@ -7,17 +7,93 @@ Task Deck is a focused kanban and table view for Obsidian. Every card stays a re
 
 Use it locally with as many boards as you need, or pair it with **Sync Deck** for cross-device sync, shared vaults, member assignment, and live presence.
 
-![Task Deck board view with To do, Doing, and Done lists](docs/images/task-deck-board.png)
+![Task Deck running in a full Obsidian workspace](<docs/images/Full window.png>)
 
-### Card details
+## Screenshots
 
-![Task Deck card editor with labels, Markdown description, and checklist progress](docs/images/task-deck-card.png)
+### Board and Table views
 
-### Table view
+Organize Markdown-backed cards visually on the Board, then switch to Table for searching, filtering, sorting, and editing the same data in a structured overview.
 
-![Task Deck table view with status, dates, and labels](docs/images/task-deck-table.png)
+![Task Deck Board view with colored lists and cards](<docs/images/Task Desk Board.png>)
 
-<sub>Screenshots were captured from a clean demo vault using Task Deck 0.3.7.</sub>
+![Task Deck Table view with filters, lists, dates, and labels](<docs/images/Task Desk Table.png>)
+
+### Cards and Markdown workflow
+
+Open a card to manage its labels, dates, Markdown description, checklists, and progress without losing access to the underlying notes.
+
+![Complete Task Deck card editor](<docs/images/View of the card.png>)
+
+<details>
+<summary>More card details</summary>
+
+#### Dates
+
+![Start and due dates displayed on a card](<docs/images/View of the date on a card.png>)
+
+#### Labels
+
+![Colored labels displayed on cards](<docs/images/View of the tags on the cards.png>)
+
+#### Markdown linked to a checklist task
+
+![Expanded Markdown document linked to a checklist task](<docs/images/View of the document linked to a check-list-item.png>)
+
+</details>
+
+### Filters and multiple boards
+
+Use searchable label filters on large boards and move between independent boards directly from the Task Deck interface.
+
+![Filtering cards by labels](<docs/images/Filters by tags.png>)
+
+<details>
+<summary>Board navigation</summary>
+
+![Overview containing multiple Task Deck boards](<docs/images/View of multiple boards.png>)
+
+![Quick access to other Task Deck boards](<docs/images/Easy access to your other boards.png>)
+
+</details>
+
+### Per-board customization
+
+Customize each board independently without changing the active Obsidian theme. Backgrounds support solid colors, gradients, and local images with adjustable fitting and darkening.
+
+![Task Deck per-board customization window](<docs/images/Customization window.png>)
+
+![Customized Task Deck appearance without modifying the Obsidian theme](<docs/images/Customization without touching the theme.png>)
+
+<details>
+<summary>Background customization examples</summary>
+
+![Task Deck background customization controls](<docs/images/Full customization of the task deck background.png>)
+
+![Task Deck board with a customized image background](<docs/images/Customized background with an image.png>)
+
+![Alternative Task Deck board with a customized image background](<docs/images/Customized background with an image 2.png>)
+
+</details>
+
+### Team collaboration with Sync Deck
+
+Sync Deck adds shared vaults, member assignment, card locks, and live presence while keeping local-only Task Deck usage independent.
+
+![Task Deck card with Sync Deck collaboration enabled](<docs/images/View of a card with the sync functionality enabled.png>)
+
+<details>
+<summary>Member assignment and live collaboration</summary>
+
+![Assigning specific checklist tasks to team members](<docs/images/Assign specific tasks to members of your team.png>)
+
+![Card displaying an assigned member](<docs/images/View with a member assigned to a card.png>)
+
+![Multiple people collaborating through Sync Deck](<docs/images/Ability to work with multiple people tacks to Sync Deck.png>)
+
+</details>
+
+<sub>Screenshots were captured from a clean demo vault using Task Deck 0.3.8.</sub>
 
 ## Features
 
