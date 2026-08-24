@@ -3,11 +3,11 @@
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.5%2B-7c3aed?logo=obsidian&logoColor=white)](https://obsidian.md)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-663399.svg)](LICENSE)
 
-Task Deck is a focused kanban and table view for Obsidian. Every card stays a real Markdown note in your vault, so your tasks remain searchable, linkable, portable, and editable outside the board.
+Kanux is a focused kanban and table view for Obsidian. Every card stays a real Markdown note in your vault, so your tasks remain searchable, linkable, portable, and editable outside the board.
 
 Use it locally with as many boards as you need, or pair it with **Sync Deck** for cross-device sync, shared vaults, member assignment, and live presence.
 
-![Task Deck running in a full Obsidian workspace](<docs/images/Full window.png>)
+![Kanux running in a full Obsidian workspace](<docs/images/Full window.png>)
 
 ## Screenshots
 
@@ -15,15 +15,15 @@ Use it locally with as many boards as you need, or pair it with **Sync Deck** fo
 
 Organize Markdown-backed cards visually on the Board, then switch to Table for searching, filtering, sorting, and editing the same data in a structured overview.
 
-![Task Deck Board view with colored lists and cards](<docs/images/Task Desk Board.png>)
+![Kanux Board view with colored lists and cards](<docs/images/Kanux Board.png>)
 
-![Task Deck Table view with filters, lists, dates, and labels](<docs/images/Task Desk Table.png>)
+![Kanux Table view with filters, lists, dates, and labels](<docs/images/Kanux Table.png>)
 
 ### Cards and Markdown workflow
 
 Open a card to manage its labels, dates, Markdown description, checklists, and progress without losing access to the underlying notes.
 
-![Complete Task Deck card editor](<docs/images/View of the card.png>)
+![Complete Kanux card editor](<docs/images/View of the card.png>)
 
 <details>
 <summary>More card details</summary>
@@ -44,16 +44,16 @@ Open a card to manage its labels, dates, Markdown description, checklists, and p
 
 ### Filters and multiple boards
 
-Use searchable label filters on large boards and move between independent boards directly from the Task Deck interface.
+Use searchable label filters on large boards and move between independent boards directly from the Kanux interface.
 
 ![Filtering cards by labels](<docs/images/Filters by tags.png>)
 
 <details>
 <summary>Board navigation</summary>
 
-![Overview containing multiple Task Deck boards](<docs/images/View of multiple boards.png>)
+![Overview containing multiple Kanux boards](<docs/images/View of multiple boards.png>)
 
-![Quick access to other Task Deck boards](<docs/images/Easy access to your other boards.png>)
+![Quick access to other Kanux boards](<docs/images/Easy access to your other boards.png>)
 
 </details>
 
@@ -61,26 +61,26 @@ Use searchable label filters on large boards and move between independent boards
 
 Customize each board independently without changing the active Obsidian theme. Backgrounds support solid colors, gradients, and local images with adjustable fitting and darkening.
 
-![Task Deck per-board customization window](<docs/images/Customization window.png>)
+![Kanux per-board customization window](<docs/images/Customization window.png>)
 
-![Customized Task Deck appearance without modifying the Obsidian theme](<docs/images/Customization without touching the theme.png>)
+![Customized Kanux appearance without modifying the Obsidian theme](<docs/images/Customization without touching the theme.png>)
 
 <details>
 <summary>Background customization examples</summary>
 
-![Task Deck background customization controls](<docs/images/Full customization of the task deck background.png>)
+![Kanux background customization controls](<docs/images/Full customization of the Kanux background.png>)
 
-![Task Deck board with a customized image background](<docs/images/Customized background with an image.png>)
+![Kanux board with a customized image background](<docs/images/Customized background with an image.png>)
 
-![Alternative Task Deck board with a customized image background](<docs/images/Customized background with an image 2.png>)
+![Alternative Kanux board with a customized image background](<docs/images/Customized background with an image 2.png>)
 
 </details>
 
 ### Team collaboration with Sync Deck
 
-Sync Deck adds shared vaults, member assignment, card locks, and live presence while keeping local-only Task Deck usage independent.
+Sync Deck adds shared vaults, member assignment, card locks, and live presence while keeping local-only Kanux usage independent.
 
-![Task Deck card with Sync Deck collaboration enabled](<docs/images/View of a card with the sync functionality enabled.png>)
+![Kanux card with Sync Deck collaboration enabled](<docs/images/View of a card with the sync functionality enabled.png>)
 
 <details>
 <summary>Member assignment and live collaboration</summary>
@@ -93,7 +93,7 @@ Sync Deck adds shared vaults, member assignment, card locks, and live presence w
 
 </details>
 
-<sub>Screenshots were captured from a clean demo vault using Task Deck 0.3.8.</sub>
+<sub>Screenshots were captured from a clean demo vault.</sub>
 
 ## Features
 
@@ -111,7 +111,7 @@ Sync Deck adds shared vaults, member assignment, card locks, and live presence w
 - **Optional Sync Deck collaboration:** Synchronize encrypted board content across devices, share vaults, assign members, display live presence, and prevent conflicting edits with card locks.
 ## Quick start
 
-1. Open **Task Deck** from the ribbon or run `Task Deck: Open board` from the command palette.
+1. Open **Kanux** from the ribbon or run `Kanux: Open board` from the command palette.
 2. Create a board. New boards start with **To do**, **Doing**, and **Done** lists.
 3. Add cards inline, then drag them between lists as work moves forward.
 4. Open a card to add labels, dates, a Markdown description, images, and named checklists.
@@ -136,22 +136,28 @@ The board index keeps list order and graph links connected. Card metadata lives 
 
 ## Sync across devices and teams
 
-Task Deck works fully offline and does not require an account. To sync boards, install **Sync Deck**, sign in, and open or create a synced vault.
+Kanux works fully offline and does not require an account. To sync boards, install **Sync Deck**, sign in, and open or create a synced vault.
 
-Sync Deck carries the board index, cards, and attachments across your devices. New and upgraded Sync Deck vaults end-to-end encrypt those files, their paths, and the board/card identifiers used for presence and locks; account and activity metadata still remain visible to the service. In shared vaults it also provides member assignment and live presence, so teammates can see who is viewing or editing a card. Local-only Task Deck usage remains unlimited.
+Sync Deck carries the board index, cards, and attachments across your devices. New and upgraded Sync Deck vaults end-to-end encrypt those files, their paths, and the board/card identifiers used for presence and locks; account and activity metadata still remain visible to the service. In shared vaults it also provides member assignment and live presence, so teammates can see who is viewing or editing a card. Local-only Kanux usage remains unlimited.
+
+### Network, accounts, and payment
+
+- Kanux's local board features work offline, require no account, and contain no client-side telemetry or dynamically loaded advertising. Its interface includes a link to the optional Sync Deck companion.
+- Network access occurs only through the optional Sync Deck integration when Sync Deck is installed, enabled, and signed in. It is used for file synchronization, member assignment, live presence, and edit locks.
+- A Sync Deck account is required for those optional online features. Its free plan may limit the number of synchronized boards; its paid plan removes that limit. Disabling cloud synchronization leaves local Kanux boards unlimited.
 
 ## Install
 
-Until Task Deck is available in the Obsidian community plugin directory:
+Until Kanux is available in the Obsidian community plugin directory:
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release of this repository.
 2. Put the files in:
 
 ```text
-Your Vault/.obsidian/plugins/task-deck/
+Your Vault/.obsidian/plugins/kanux/
 ```
 
-3. Enable **Task Deck** in Obsidian under **Settings → Community plugins**.
+3. Enable **Kanux** in Obsidian under **Settings → Community plugins**.
 
 ## Development
 

@@ -11,7 +11,7 @@ const ROOT = __dirname;
 const ENTRY = "src/plugin.js";
 const OUTFILE = "main.js";
 const EXTERNALS = new Set(["obsidian"]);
-const COMPLETION_SOUND_TOKEN = "__TASK_DECK_COMPLETION_SOUND__";
+const COMPLETION_SOUND_TOKEN = "__KANUX_COMPLETION_SOUND__";
 
 const modules = new Map();
 

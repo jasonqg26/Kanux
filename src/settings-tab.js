@@ -24,9 +24,9 @@ class VaultImageSuggestModal extends FuzzySuggestModal {
 }
 
 /**
- * Obsidian settings tab for Task Deck.
+ * Obsidian settings tab for Kanux.
  */
-class TaskDeckSettingTab extends PluginSettingTab {
+class KanuxSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -56,7 +56,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
           background: { type: "image", imageSource: "plugin", imagePath, imageFit: "contain" },
         });
         this.redisplayPreservingScroll();
-        new Notice("Background image imported into Task Deck's private data folder.");
+        new Notice("Background image imported into Kanux's private data folder.");
       } catch (error) {
         new Notice(error && error.message ? error.message : "The background image could not be imported.");
       }
@@ -69,7 +69,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("ot-settings");
 
-    containerEl.createEl("h2", { text: "Task Deck" });
+    new Setting(containerEl).setName("Kanux").setHeading();
     containerEl.createEl("p", {
       text: this.plugin.isSyncDeckEnabled()
         ? "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, and optional collaboration."
@@ -80,7 +80,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Board").setHeading();
 
     new Setting(containerEl)
-      .setName("Open Task Deck")
+      .setName("Open Kanux")
       .setDesc("Open the board / table view.")
       .addButton((button) => button.setButtonText("Open").setCta().onClick(() => this.plugin.activateView()));
 
@@ -224,7 +224,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
       const imageSetting = new Setting(containerEl)
         .setName("Background image")
         .setDesc(appearance.background.imagePath
-          ? `${appearance.background.imageSource === "plugin" ? "Task Deck data" : "Vault"}: ${appearance.background.imagePath.split("/").pop()}`
+          ? `${appearance.background.imageSource === "plugin" ? "Kanux data" : "Vault"}: ${appearance.background.imagePath.split("/").pop()}`
           : "No image selected.")
         .addButton((button) => button.setButtonText("From vault").onClick(() => {
           new VaultImageSuggestModal(this.app, async (file) => {
@@ -360,7 +360,7 @@ class TaskDeckSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Reset appearance")
-      .setDesc("Restore Task Deck's Obsidian-theme appearance defaults.")
+      .setDesc("Restore Kanux's Obsidian-theme appearance defaults.")
       .addButton((button) => button.setButtonText("Reset").setWarning().onClick(async () => {
         await this.plugin.applyAppearancePreset("obsidian");
         this.redisplayPreservingScroll();
@@ -377,4 +377,4 @@ class TaskDeckSettingTab extends PluginSettingTab {
   }
 }
 
-module.exports = { TaskDeckSettingTab };
+module.exports = { KanuxSettingTab };

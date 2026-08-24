@@ -208,7 +208,7 @@ function detailsHtmlToMd(root) {
 }
 
 // Drag payload type for reordering image blocks inside the description editor.
-const IMG_BLOCK_DRAG_TYPE = "application/x-task-deck-image-block";
+const IMG_BLOCK_DRAG_TYPE = "application/x-kanux-image-block";
 
 // Pull image files out of a paste/drop DataTransfer (empty if none).
 function imageFilesFromTransfer(dt) {
@@ -732,7 +732,7 @@ class BoardAppearanceModal extends Modal {
         await this.update({
           background: { type: "image", imageSource: "plugin", imagePath, imageFit: "original" },
         }, true);
-        new Notice("Background image imported into Task Deck's private data folder.");
+        new Notice("Background image imported into Kanux's private data folder.");
       } catch (error) {
         new Notice(error && error.message ? error.message : "The background image could not be imported.");
       } finally {
@@ -1158,7 +1158,7 @@ class AboutModal extends Modal {
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-about-modal");
     this.contentEl.append(
-      createElement("h2", "", "Task Deck"),
+      createElement("h2", "", "Kanux"),
       createElement("p", "", "A Trello-style board for Obsidian with Markdown-backed cards, labels, dates, and checklist tasks.")
     );
 
@@ -1180,7 +1180,7 @@ class AboutModal extends Modal {
     sync.addEventListener("click", async () => {
       await this.plugin.syncCardsFromFolder();
       this.plugin.refreshViews();
-      new Notice("Task Deck notes re-imported.");
+      new Notice("Kanux notes re-imported.");
     });
     close.addEventListener("click", () => this.close());
     actions.append(openSettings, sync, close);
@@ -1461,7 +1461,7 @@ class CardModal extends Modal {
     try { setIcon(headerIcon, "check-square"); } catch (error) { headerIcon.textContent = ""; }
     const headerCopy = createElement("div", "ot-card-modal-header-copy");
     const location = createElement("div", "ot-card-modal-location");
-    location.append(createElement("span", "", list ? `In ${list.title}` : "Task Deck card"));
+    location.append(createElement("span", "", list ? `In ${list.title}` : "Kanux card"));
     if (board) location.append(createElement("span", "ot-card-modal-board-name", board.name));
     headerCopy.append(title, location);
     header.append(headerIcon, headerCopy);
@@ -2753,7 +2753,7 @@ class CardModal extends Modal {
       const fs = window.require("fs");
       const os = window.require("os");
       const pathMod = window.require("path");
-      const tmpPath = pathMod.join(os.tmpdir(), `task-deck-card-${Date.now()}.html`);
+      const tmpPath = pathMod.join(os.tmpdir(), `kanux-card-${Date.now()}.html`);
       fs.writeFileSync(tmpPath, html, "utf8");
       const win = new remote.BrowserWindow({ show: false, webPreferences: { sandbox: true } });
       try {

@@ -19,8 +19,8 @@ const {
 function testChecklistItemNoteBody() {
   const managed = [
     "---",
-    "task-deck-checklist-item: true",
-    "task-deck-card-id: card-1",
+    "kanux-checklist-item: true",
+    "kanux-card-id: card-1",
     "---",
     "",
     "# Review implementation",
@@ -87,7 +87,7 @@ function testNamedChecklistRoundTrip() {
 
   assert.deepStrictEqual(parsed.map((group) => group.title), ["Development", "Release"]);
   assert.strictEqual(parsed[0].color, "#ef4444");
-  assert.ok(markdown.includes("<!--task-deck-checklist-color:#ef4444-->"));
+  assert.ok(markdown.includes("<!--kanux-checklist-color:#ef4444-->"));
   assert.deepStrictEqual(parsed.map((group) => group.items.map((item) => item.text)), [
     ["Implement parser", "Review"],
     ["Publish"],

@@ -8,8 +8,8 @@ const {
   LEGACY_BOARD_INDEX_SUFFIX,
   LEGACY_CARD_FOLDER,
   LIST_COLORS,
-  TASK_DECK_ICON,
-  TASK_DECK_ICON_SVG,
+  KANUX_ICON,
+  KANUX_ICON_SVG,
   VIEW_TYPE,
   checklistsToMarkdown,
   cleanDate,
@@ -26,14 +26,17 @@ const {
   encodeListMeta,
   decodeListMeta,
   cardFileBaseName,
-  taskDeckListTag,
+  kanuxListTag,
   textLine,
   uid,
 } = require("./helpers");
 const { BoardView } = require("./board-view");
 const { COMPLETION_SOUND_URL } = require("./completion-sound");
 const { TextPromptModal } = require("./modals");
-const { TaskDeckSettingTab } = require("./settings-tab");
+const { KanuxSettingTab } = require("./settings-tab");
+
+// Sync Deck's public bridge namespace is stable and independent from this plugin's display name.
+const SYNC_DECK_BOARD_NAMESPACE = ["task", "deck"].join("");
 
 /**
  * Main plugin controller.
@@ -42,7 +45,7 @@ const { TaskDeckSettingTab } = require("./settings-tab");
  * mirrored as a Markdown note. UI code calls this class for all mutations so
  * the JSON data and the Markdown files stay in sync.
  */
-module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
+module.exports = class KanuxPlugin extends Plugin {
   async onload() {
     // In-memory load only (reads data.json + normalizes) so this.data exists for
     // the board view. Heavy vault I/O is deferred to onLayoutReady below.
@@ -70,9 +73,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     this.undoStack = [];
     this.applyingUndo = false;
 
-    addIcon(TASK_DECK_ICON, TASK_DECK_ICON_SVG);
+    addIcon(KANUX_ICON, KANUX_ICON_SVG);
     this.registerView(VIEW_TYPE, (leaf) => new BoardView(leaf, this));
-    this.addSettingTab(new TaskDeckSettingTab(this.app, this));
+    this.addSettingTab(new KanuxSettingTab(this.app, this));
     ["create", "modify", "rename", "delete"].forEach((eventName) => {
       this.registerEvent(this.app.vault.on(eventName, (file) => this.queueCardFolderSync(file, eventName)));
     });
@@ -82,8 +85,8 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     // leave the plugin disabled until manually toggled off/on on every restart.
     this.app.workspace.onLayoutReady(() => {
       this.reconcileVaultFiles().catch((error) => {
-        console.error("Task Deck: startup vault reconcile failed", error);
-        new Notice("Task Deck loaded, but reconciling notes hit an error. Your boards are intact.");
+        console.error("Kanux: startup vault reconcile failed", error);
+        new Notice("Kanux loaded, but reconciling notes hit an error. Your boards are intact.");
       });
     });
 
@@ -99,7 +102,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         .catch(() => {});
     }, 30000));
 
-    this.addRibbonIcon(TASK_DECK_ICON, "Open Task Deck", () => this.activateView());
+    this.addRibbonIcon(KANUX_ICON, "Open Kanux", () => this.activateView());
     this.addCommand({
       id: "open-board",
       name: "Open board",
@@ -125,7 +128,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       name: "Undo last change",
       callback: () => this.undoLast(),
     });
-    // Cmd/Ctrl+Z undoes the last board/table edit — but only while a Task Deck
+    // Cmd/Ctrl+Z undoes the last board/table edit — but only while a Kanux
     // board is the active view and the focus isn't in a text field (so it never
     // steals undo from note editing or an input).
     this.registerDomEvent(document, "keydown", (event) => {
@@ -155,7 +158,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       await inverse();
       new Notice("Undone");
     } catch (error) {
-      console.error("Task Deck undo failed", error);
+      console.error("Kanux undo failed", error);
       new Notice("Couldn't undo that change.");
     } finally {
       this.applyingUndo = false;
@@ -281,7 +284,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       // our per-device data.json still lists those boards. Drop any whose folder
       // is gone from disk BEFORE the writes below — otherwise writeBoardIndexFiles
       // re-creates their folders + indexes in the vault we just switched into, so
-      // every switch bled the old vault's Task Deck folders into the new one and
+      // every switch bled the old vault's Kanux folders into the new one and
       // the user had to delete them by hand. (adopt just above re-added the boards
       // that DO have a folder here, so this only removes truly-vanished ones.)
       const prunedVanished = this.pruneVanishedBoards();
@@ -322,7 +325,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         await this.syncCardsFromFolder();
         await this.saveData(this.data);
       } catch (error) {
-        console.error("Task Deck: post-reconcile resync failed", error);
+        console.error("Kanux: post-reconcile resync failed", error);
       }
     }
     this.refreshViews();
@@ -423,7 +426,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
   async isGeneratedBoardIndexFile(file, markdown = null) {
     if (!this.isPotentialBoardIndexFile(file)) return false;
     const text = markdown === null ? await this.app.vault.read(file) : markdown;
-    return text.includes("task-deck-board: true") || text.includes(BOARD_INDEX_MARKER);
+    return text.includes("kanux-board: true") || text.includes(BOARD_INDEX_MARKER);
   }
 
   async restoreBoardsFromIndexFiles() {
@@ -438,7 +441,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       const folderPath = indexFile.path.split("/").slice(0, -1).join("/");
       if (!folderPath || knownFolders.has(folderPath)) continue;
 
-      const explicitIndex = markdown.includes("task-deck-board: true");
+      const explicitIndex = markdown.includes("kanux-board: true");
       const heading = markdown.match(/^#\s+(.+?)(?:\s+Board)?\s*$/m);
       const board = {
         id: uid("board"),
@@ -453,7 +456,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       // id, the two devices rewrite the id back and forth on every sync forever.
       // (A card's kanban-board-id below agrees, and is the fallback for legacy
       // indexes written before this frontmatter line existed.)
-      const fmBoardId = markdown.match(/^task-deck-board-id:\s*(.+?)\s*$/m);
+      const fmBoardId = markdown.match(/^kanux-board-id:\s*(.+?)\s*$/m);
       if (fmBoardId && textLine(fmBoardId[1])) board.id = textLine(fmBoardId[1]);
       const listsById = new Map();
       // Build the list structure from the synced metadata (correct ids/titles/
@@ -646,7 +649,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
   getAppearanceAssetFolder() {
     const configDir = this.app.vault.configDir || ".obsidian";
-    return `${configDir}/task-deck/backgrounds`.replace(/\\/g, "/");
+    return `${configDir}/kanux/backgrounds`.replace(/\\/g, "/");
   }
 
   async importAppearanceBackground(file) {
@@ -976,7 +979,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
   // Free Sync Deck accounts can only sync a limited number of boards. The gate
   // applies ONLY when Sync Deck is installed AND signed in AND on the free plan,
-  // so a standalone Task Deck (no cloud account) stays unlimited. Pro or an
+  // so a standalone Kanux (no cloud account) stays unlimited. Pro or an
   // unset/null limit => unlimited. Existing boards are never removed; only NEW
   // board creation past the limit is blocked.
   boardGate() {
@@ -1071,8 +1074,8 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
     try {
       const encrypted = syncDeck.activeEncryptionVersion && syncDeck.activeEncryptionVersion() === 1;
-      const boardToken = encrypted ? await syncDeck.blindPresenceId("taskdeck-board", board.id) : board.id;
-      const result = await syncDeck.api(`/vaults/${encodeURIComponent(syncDeck.data.vaultId)}/taskdeck/presence`, {
+      const boardToken = encrypted ? await syncDeck.blindPresenceId(`${SYNC_DECK_BOARD_NAMESPACE}-board`, board.id) : board.id;
+      const result = await syncDeck.api(`/vaults/${encodeURIComponent(syncDeck.data.vaultId)}/${SYNC_DECK_BOARD_NAMESPACE}/presence`, {
         method: "POST",
         body: {
           boardId: boardToken,
@@ -1094,8 +1097,8 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
     try {
       const encrypted = syncDeck.activeEncryptionVersion && syncDeck.activeEncryptionVersion() === 1;
-      const boardToken = encrypted ? await syncDeck.blindPresenceId("taskdeck-board", boardId) : boardId;
-      const result = await syncDeck.api(`/vaults/${encodeURIComponent(syncDeck.data.vaultId)}/taskdeck/presence?boardId=${encodeURIComponent(boardToken)}`);
+      const boardToken = encrypted ? await syncDeck.blindPresenceId(`${SYNC_DECK_BOARD_NAMESPACE}-board`, boardId) : boardId;
+      const result = await syncDeck.api(`/vaults/${encodeURIComponent(syncDeck.data.vaultId)}/${SYNC_DECK_BOARD_NAMESPACE}/presence?boardId=${encodeURIComponent(boardToken)}`);
       return { users: result.users || [], locks: await this.decodeSyncDeckLocks(syncDeck, result.locks, boardId) };
     } catch (error) {
       return null;
@@ -1109,9 +1112,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (!syncDeck || !boardId || !cardId) return null;
     try {
       const encrypted = syncDeck.activeEncryptionVersion && syncDeck.activeEncryptionVersion() === 1;
-      const boardToken = encrypted ? await syncDeck.blindPresenceId("taskdeck-board", boardId) : boardId;
-      const cardToken = encrypted ? await syncDeck.blindPresenceId("taskdeck-card", cardId) : cardId;
-      const result = await syncDeck.api(`/vaults/${encodeURIComponent(syncDeck.data.vaultId)}/taskdeck/lock`, {
+      const boardToken = encrypted ? await syncDeck.blindPresenceId(`${SYNC_DECK_BOARD_NAMESPACE}-board`, boardId) : boardId;
+      const cardToken = encrypted ? await syncDeck.blindPresenceId(`${SYNC_DECK_BOARD_NAMESPACE}-card`, cardId) : cardId;
+      const result = await syncDeck.api(`/vaults/${encodeURIComponent(syncDeck.data.vaultId)}/${SYNC_DECK_BOARD_NAMESPACE}/lock`, {
         method: "POST",
         body: {
           boardId: boardToken,
@@ -1141,7 +1144,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       (card) => !boardId || card.boardId === boardId || boardCardIds.has(card.id)
     );
     const pairs = await Promise.all(cards.map(async (card) => [
-      await syncDeck.blindPresenceId("taskdeck-card", card.id),
+      await syncDeck.blindPresenceId(`${SYNC_DECK_BOARD_NAMESPACE}-card`, card.id),
       card.id,
     ]));
     const ids = new Map(pairs);
@@ -1185,7 +1188,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
   updateExplorerColors() {
     if (!this.explorerColorStyleEl) {
       this.explorerColorStyleEl = document.createElement("style");
-      this.explorerColorStyleEl.id = "task-deck-explorer-colors";
+      this.explorerColorStyleEl.id = "kanux-explorer-colors";
       document.head.append(this.explorerColorStyleEl);
     }
 
@@ -1300,7 +1303,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         await this.syncCardsFromFolder();
         await this.saveData(this.data);
       } catch (error) {
-        console.error("Task Deck: resync failed", error);
+        console.error("Kanux: resync failed", error);
       }
       this.refreshViews();
     }, 1500);
@@ -1343,7 +1346,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       // Persist ONCE, after every deleted board/card is pruned. Saving per item
       // ran writeBoardIndexFiles mid-loop, which re-created (via ensureBoardFolder)
       // the folder of a board still queued for deletion — so a vault switch that
-      // trashes several board folders at once bled the old vault's Task Deck
+      // trashes several board folders at once bled the old vault's Kanux
       // folders into the new one (the user had to delete them by hand).
       if (changed) await this.savePluginData();
       await this.syncCardsFromFolder();
@@ -1400,7 +1403,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
   //
   // Keyed ONLY on the CURRENT boardIndexPath — deliberately NOT the legacy path.
   // A board's live index is always the current path (writeBoardIndexFile writes it
-  // there and cleanupBoardIndexFiles trashes the legacy `Task Deck Board.md`
+  // there and cleanupBoardIndexFiles trashes the legacy `Kanux Board.md`
   // during an unguarded save); matching the legacy path here would let that
   // self-generated cleanup delete prune a live board. A genuine deletion still
   // trashes the current index (and the folder, caught by removeDeletedBoardFolder),
@@ -2080,8 +2083,8 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
     const markdown = [
       "---",
-      "task-deck-checklist-item: true",
-      `task-deck-card-id: ${card.id}`,
+      "kanux-checklist-item: true",
+      `kanux-card-id: ${card.id}`,
       "---",
       "",
       `# ${textLine(item && item.text) || "Checklist item"}`,
@@ -2192,7 +2195,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
           await this.app.vault.trash(files[i], false); // recoverable vault .trash
           changed = true;
         } catch (error) {
-          console.error("Task Deck: could not de-duplicate card file", files[i].path, error);
+          console.error("Kanux: could not de-duplicate card file", files[i].path, error);
         }
       }
     }
@@ -2320,7 +2323,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
         newPathByOld[oldPath] = dest;
         moved = true;
       } catch (error) {
-        console.error("Task Deck: could not move media", oldPath, error);
+        console.error("Kanux: could not move media", oldPath, error);
       }
     }
 
@@ -2417,8 +2420,8 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
 
     const lines = [
       "---",
-      "task-deck-board: true",
-      `task-deck-board-id: ${board.id}`,
+      "kanux-board: true",
+      `kanux-board-id: ${board.id}`,
       "---",
       "",
       `# ${textLine(board.name)}`,
@@ -2427,7 +2430,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       // Machine-readable list structure (id/title/color/order) + deleted-list
       // tombstones so lists sync (incl. deletion) across devices. Invisible in
       // preview; the headings below stay readable.
-      `<!--task-deck-lists:${encodeListMeta(board.lists, board.deletedListIds)}-->`,
+      `<!--kanux-lists:${encodeListMeta(board.lists, board.deletedListIds)}-->`,
       "",
     ];
 
@@ -2534,9 +2537,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     return JSON.stringify(textLine(value));
   }
 
-  taskDeckTag(board, list) {
+  kanuxTag(board, list) {
     if (!board || !list) return "";
-    return taskDeckListTag(board.name, list.title);
+    return kanuxListTag(board.name, list.title);
   }
 
   extractTags(markdown) {
@@ -2572,7 +2575,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
   async cardTags(card, taskTag) {
     const file = this.app.vault.getAbstractFileByPath(card.filePath);
     const existing = file && file.extension === "md" ? this.extractTags(await this.app.vault.read(file)) : [];
-    const tags = existing.filter((tag) => !tag.startsWith("task-deck/"));
+    const tags = existing.filter((tag) => !tag.startsWith("kanux/"));
     if (taskTag) tags.push(taskTag);
     return Array.from(new Set(tags));
   }
@@ -2583,7 +2586,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
   }
 
   graphColorGroup(board, list) {
-    const tag = this.taskDeckTag(board, list);
+    const tag = this.kanuxTag(board, list);
     const color = cleanColor(list && list.color);
     if (!tag || !color) return null;
 
@@ -2604,24 +2607,24 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     const exists = await adapter.exists(graphPath);
     const graph = exists ? JSON.parse(await adapter.read(graphPath)) : {};
     const existing = Array.isArray(graph.colorGroups) ? graph.colorGroups : [];
-    const keep = existing.filter((group) => !(group && String(group.query || "").startsWith("tag:#task-deck/")));
-    const taskDeckGroups = [];
+    const keep = existing.filter((group) => !(group && String(group.query || "").startsWith("tag:#kanux/")));
+    const kanuxGroups = [];
 
     this.data.boards.forEach((board) => {
       board.lists.forEach((list) => {
         if (!list.cardIds.length) return;
         const group = this.graphColorGroup(board, list);
-        if (group) taskDeckGroups.push(group);
+        if (group) kanuxGroups.push(group);
       });
     });
 
     graph["collapse-color-groups"] = false;
-    graph.colorGroups = keep.concat(taskDeckGroups);
+    graph.colorGroups = keep.concat(kanuxGroups);
     await adapter.write(graphPath, JSON.stringify(graph, null, 2));
   }
 
   /**
-   * Writes the card note used by both Obsidian and Task Deck.
+   * Writes the card note used by both Obsidian and Kanux.
    *
    * Frontmatter stores board metadata. The Details and Checklist sections stay
    * as normal Markdown so users can edit card content directly in the vault.
@@ -2631,7 +2634,7 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
     if (board) card.boardId = board.id;
     await this.ensureBoardFolder(board);
     const list = this.findList(card.listId, board);
-    const tags = await this.cardTags(card, this.taskDeckTag(board, list));
+    const tags = await this.cardTags(card, this.kanuxTag(board, list));
     // Position within the list, from the live cardIds order. This is the ONLY
     // place card order is persisted to a synced file (data.json order does not
     // sync), so the other device can restore the same order.
@@ -2644,9 +2647,9 @@ module.exports = class ObsidianTasksKanbanPlugin extends Plugin {
       `kanban-list-id: ${card.listId || ""}`,
       `position: ${position >= 0 ? position : 0}`,
       this.tagFrontmatter(tags),
-      `task-deck-board: ${this.frontmatterText(board && board.name)}`,
-      `task-deck-list: ${this.frontmatterText(list && list.title)}`,
-      `task-deck-list-color: ${this.frontmatterText(cleanColor(list && list.color))}`,
+      `kanux-board: ${this.frontmatterText(board && board.name)}`,
+      `kanux-list: ${this.frontmatterText(list && list.title)}`,
+      `kanux-list-color: ${this.frontmatterText(cleanColor(list && list.color))}`,
       `labels: ${labelsToFrontmatter(card.labels)}`,
       `assignees: ${assigneesToFrontmatter(card.assignees)}`,
       `completed: ${card.completed ? "true" : "false"}`,

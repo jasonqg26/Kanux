@@ -3,7 +3,7 @@ const { ItemView, Menu, Notice, setIcon } = require("obsidian");
 // Renders the kanban board and handles inline card/list interactions.
 const {
   LIST_DRAG_TYPE,
-  TASK_DECK_ICON,
+  KANUX_ICON,
   VIEW_TYPE,
   addButtonIcon,
   checklistItems,
@@ -30,7 +30,7 @@ const PRESENCE_SMOOTHING_TAU_MS = 70; // interpolation time constant; lower = sn
 const PRESENCE_SNAP_DISTANCE = 0.0006; // normalized distance under which we snap instead of easing
 
 // Drag payload type for reordering table columns (kept distinct from card/list drags).
-const TABLE_COL_DRAG_TYPE = "application/x-task-deck-column";
+const TABLE_COL_DRAG_TYPE = "application/x-kanux-column";
 
 /**
  * Obsidian view for the task board.
@@ -53,11 +53,11 @@ class BoardView extends ItemView {
   }
 
   getDisplayText() {
-    return "Task Deck";
+    return "Kanux";
   }
 
   getIcon() {
-    return TASK_DECK_ICON;
+    return KANUX_ICON;
   }
 
   async onOpen() {
@@ -135,7 +135,7 @@ class BoardView extends ItemView {
   }
 
   // "Update available" banner shown at the top when a newer GitHub release exists
-  // (Task Deck is installed manually, so it gets no community-store prompt).
+  // (Kanux is installed manually, so it gets no community-store prompt).
   renderUpdateBanner() {
     const info = this.plugin.updateAvailable;
     if (!info) return null;
@@ -143,7 +143,7 @@ class BoardView extends ItemView {
     const label = createElement("div", "ot-update-banner-text");
     const icon = createElement("span", "ot-update-banner-icon");
     try { setIcon(icon, "arrow-up-circle"); } catch (error) { icon.textContent = "⭑"; }
-    label.append(icon, createElement("span", "", `Task Deck ${info.version} is available.`));
+    label.append(icon, createElement("span", "", `Kanux ${info.version} is available.`));
     const button = createElement("button", "mod-cta", "Update");
     button.type = "button";
     button.addEventListener("click", () => window.open(info.url, "_blank"));
@@ -1322,10 +1322,10 @@ class BoardView extends ItemView {
     // Same action as the About modal's "Sync notes": re-import every card from
     // its Markdown note so changes synced by SyncDeck show up on the boards.
     try {
-      new Notice("Re-importing Task Deck notes...");
+      new Notice("Re-importing Kanux notes...");
       await this.plugin.syncCardsFromFolder();
       this.plugin.refreshViews();
-      new Notice("Task Deck notes re-imported.");
+      new Notice("Kanux notes re-imported.");
     } catch (error) {
       new Notice(`Re-import failed: ${error.message}`);
     }
