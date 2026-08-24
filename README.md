@@ -1,4 +1,4 @@
-# Task Deck
+# Kanux
 
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.5%2B-7c3aed?logo=obsidian&logoColor=white)](https://obsidian.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f1c40f.svg)](LICENSE)
