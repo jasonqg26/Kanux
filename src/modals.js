@@ -20,14 +20,12 @@ const {
   fieldDateLabel,
   hasDragType,
   iconButton,
-  imageRefsFromMarkdown,
   imageSizeFromMarkup,
   imageMarkupWithSize,
   isImagePath,
   isoFromDate,
   labelKey,
   normalizeChecklists,
-  stripImageEmbeds,
   textButton,
   textLine,
   initials,
@@ -210,6 +208,61 @@ function detailsHtmlToMd(root) {
 // Drag payload type for reordering image blocks inside the description editor.
 const IMG_BLOCK_DRAG_TYPE = "application/x-kanux-image-block";
 
+// Debounce for keystroke-driven card saves.
+const SAVE_DEBOUNCE_MS = 350;
+// Re-acquire the card lock well within its server TTL so it never lapses mid-edit.
+const LOCK_HEARTBEAT_MS = 5000;
+
+// setIcon throws when an icon name is unknown to the running Obsidian version;
+// fall back to plain text so the control still reads.
+function setIconSafe(el, icon, fallbackText = "") {
+  try {
+    setIcon(el, icon);
+  } catch (error) {
+    el.textContent = fallbackText;
+  }
+}
+
+// Grid of clickable color swatches; the selected color is marked with a check.
+function colorSwatchGrid(colors, selectedColor, onPick) {
+  const swatches = createElement("div", "ot-label-color-grid");
+  colors.forEach((color) => {
+    const swatch = createElement("button", "ot-label-color-swatch");
+    swatch.type = "button";
+    swatch.style.backgroundColor = color;
+    swatch.setAttribute("aria-label", color);
+    if (color === selectedColor) {
+      swatch.classList.add("is-selected");
+      setIconSafe(swatch, "check", "✓");
+    }
+    swatch.addEventListener("click", () => onPick(color));
+    swatches.append(swatch);
+  });
+  return swatches;
+}
+
+// The run of consecutive image entries around `index` (entries matching isGap
+// between images don't break the run) — the group a grid layout applies to.
+function imageRunAround(items, index, isGap) {
+  if (!items[index] || items[index].type !== "img") return [];
+  let start = index;
+  while (start - 1 >= 0) {
+    if (items[start - 1].type === "img") { start -= 1; continue; }
+    if (isGap(items[start - 1]) && start - 2 >= 0 && items[start - 2].type === "img") { start -= 2; continue; }
+    break;
+  }
+  const run = [];
+  for (let i = start; i < items.length; i += 1) {
+    if (items[i].type === "img") { run.push(items[i]); continue; }
+    if (isGap(items[i]) && items[i + 1] && items[i + 1].type === "img") continue;
+    break;
+  }
+  return run;
+}
+
+const isBlankMdSegment = (seg) => seg.type === "md" && !seg.text.trim();
+const isBlankTextBlock = (block) => block.type === "text" && !block.value.trim();
+
 // Pull image files out of a paste/drop DataTransfer (empty if none).
 function imageFilesFromTransfer(dt) {
   if (!dt) return [];
@@ -344,15 +397,19 @@ class LabelPickerModal extends Modal {
     this.selectedLabels = clone(selectedLabels || []);
     this.onChange = onChange;
     this.onDelete = onDelete;
+    this.resetCreateForm();
+  }
+
+  onOpen() {
+    this.render();
+  }
+
+  resetCreateForm() {
     this.creating = false;
     this.editingKey = null;
     this.query = "";
     this.createName = "";
     this.createColor = DEFAULT_LABEL_COLOR;
-  }
-
-  onOpen() {
-    this.render();
   }
 
   isSelected(label) {
@@ -404,11 +461,7 @@ class LabelPickerModal extends Modal {
       if (!this.isSelected(nextLabel)) this.selectedLabels.push(clone(nextLabel));
     }
 
-    this.creating = false;
-    this.editingKey = null;
-    this.query = "";
-    this.createName = "";
-    this.createColor = DEFAULT_LABEL_COLOR;
+    this.resetCreateForm();
     this.emitChange();
     this.render();
   }
@@ -428,11 +481,7 @@ class LabelPickerModal extends Modal {
     const key = labelKey(label);
     this.labels = this.labels.filter((item) => labelKey(item) !== key);
     this.selectedLabels = this.selectedLabels.filter((item) => labelKey(item) !== key);
-    this.creating = false;
-    this.editingKey = null;
-    this.query = "";
-    this.createName = "";
-    this.createColor = DEFAULT_LABEL_COLOR;
+    this.resetCreateForm();
     this.emitChange({ persist: false });
     this.render();
     return true;
@@ -478,7 +527,7 @@ class LabelPickerModal extends Modal {
 
           const labelButton = createElement("button", "ot-label-option", label.name);
           labelButton.type = "button";
-          labelButton.style.backgroundColor = label.color || "#2f6fd6";
+          labelButton.style.backgroundColor = label.color || DEFAULT_LABEL_COLOR;
 
           const edit = iconButton("pencil", "Edit label", (event) => {
             event.stopPropagation();
@@ -495,9 +544,9 @@ class LabelPickerModal extends Modal {
     const renderCreateArea = () => {
       createArea.replaceChildren();
 
-    const create = createElement("button", "ot-label-create-button", "Create new label");
-    addButtonIcon(create, "plus");
-    create.type = "button";
+      const create = createElement("button", "ot-label-create-button", "Create new label");
+      addButtonIcon(create, "plus");
+      create.type = "button";
       create.addEventListener("click", () => {
         this.creating = true;
         this.editingKey = null;
@@ -540,27 +589,10 @@ class LabelPickerModal extends Modal {
 
     const colorField = createElement("div", "ot-field");
     colorField.append(createElement("span", "", "Choose color"));
-    const swatches = createElement("div", "ot-label-color-grid");
-    LABEL_COLORS.forEach((color) => {
-      const swatch = createElement("button", "ot-label-color-swatch");
-      swatch.type = "button";
-      swatch.style.backgroundColor = color;
-      swatch.setAttribute("aria-label", color);
-      if (color === this.createColor) {
-        swatch.classList.add("is-selected");
-        try {
-          setIcon(swatch, "check");
-        } catch (error) {
-          swatch.textContent = "✓";
-        }
-      }
-      swatch.addEventListener("click", () => {
-        this.createColor = color;
-        this.render();
-      });
-      swatches.append(swatch);
-    });
-    colorField.append(swatches);
+    colorField.append(colorSwatchGrid(LABEL_COLORS, this.createColor, (color) => {
+      this.createColor = color;
+      this.render();
+    }));
 
     const removeColor = textButton("x", "Remove color", () => {
       this.createColor = "#6f737a";
@@ -631,27 +663,10 @@ class ListColorModal extends Modal {
 
     const field = createElement("div", "ot-field");
     field.append(createElement("span", "", "Choose color"));
-    const swatches = createElement("div", "ot-label-color-grid");
-    LIST_COLORS.forEach((color) => {
-      const swatch = createElement("button", "ot-label-color-swatch");
-      swatch.type = "button";
-      swatch.style.backgroundColor = color;
-      swatch.setAttribute("aria-label", color);
-      if (color === this.currentColor) {
-        swatch.classList.add("is-selected");
-        try {
-          setIcon(swatch, "check");
-        } catch (error) {
-          swatch.textContent = "✓";
-        }
-      }
-      swatch.addEventListener("click", async () => {
-        await this.onSelect(color);
-        this.close();
-      });
-      swatches.append(swatch);
-    });
-    field.append(swatches);
+    field.append(colorSwatchGrid(LIST_COLORS, this.currentColor, async (color) => {
+      await this.onSelect(color);
+      this.close();
+    }));
 
     const customField = createElement("label", "ot-field");
     customField.append(createElement("span", "", "Custom color"));
@@ -1291,14 +1306,13 @@ class CardModal extends Modal {
 
   startLockHeartbeat() {
     this.stopLockHeartbeat();
-    // Re-take the lock well within its server TTL so it never lapses mid-edit.
-    // If the server now reports someone else holds it (we opened while offline,
-    // or another editor took over), drop this modal to read-only.
+    // If the server now reports someone else holds the lock (we opened while
+    // offline, or another editor took over), drop this modal to read-only.
     this.lockHeartbeat = window.setInterval(async () => {
       if (!this.lockBoardId || this.readOnly) return;
       const result = await this.plugin.acquireCardLock(this.lockBoardId, this.cardId).catch(() => null);
       if (result && result.ok === false) this.enterReadOnly(result.lock);
-    }, 5000);
+    }, LOCK_HEARTBEAT_MS);
   }
 
   // Convert an open editable modal into a read-only view after losing the lock.
@@ -1347,6 +1361,23 @@ class CardModal extends Modal {
     return this.localLabels.some((item) => labelKey(item) === key);
   }
 
+  // Avatar chip for a member: profile picture when available, else initials.
+  memberAvatar(member) {
+    const avatar = createElement("span", "ot-card-avatar");
+    avatar.style.setProperty("--ot-avatar-color", member.color || "#8b5cf6");
+    const picture = this.plugin.getMemberPicture(member.email);
+    if (picture) {
+      const img = createElement("img", "");
+      img.src = picture;
+      img.alt = "";
+      avatar.append(img);
+    } else {
+      avatar.textContent = initials(member.name || member.email);
+      avatar.classList.add("is-initials");
+    }
+    return avatar;
+  }
+
   renderAssigneesField() {
     const field = createElement("div", "ot-field ot-assignee-editor");
     field.append(createElement("span", "", "Members"));
@@ -1356,18 +1387,7 @@ class CardModal extends Modal {
       row.replaceChildren();
       (this.localAssignees || []).forEach((assignee) => {
         const chip = createElement("span", "ot-assignee-chip");
-        const avatar = createElement("span", "ot-card-avatar");
-        avatar.style.setProperty("--ot-avatar-color", assignee.color || "#8b5cf6");
-        const picture = this.plugin.getMemberPicture(assignee.email);
-        if (picture) {
-          const img = createElement("img", "");
-          img.src = picture;
-          img.alt = "";
-          avatar.append(img);
-        } else {
-          avatar.textContent = initials(assignee.name || assignee.email);
-          avatar.classList.add("is-initials");
-        }
+        const avatar = this.memberAvatar(assignee);
         const remove = iconButton("x", "Remove member", () => {
           this.localAssignees = (this.localAssignees || []).filter((a) => a.email !== assignee.email);
           rebuild();
@@ -1464,7 +1484,7 @@ class CardModal extends Modal {
     const list = board && board.lists.find((item) => item.id === card.listId);
     const header = createElement("header", "ot-card-modal-header");
     const headerIcon = createElement("span", "ot-card-modal-header-icon");
-    try { setIcon(headerIcon, "check-square"); } catch (error) { headerIcon.textContent = ""; }
+    setIconSafe(headerIcon, "check-square");
     const headerCopy = createElement("div", "ot-card-modal-header-copy");
     const location = createElement("div", "ot-card-modal-location");
     location.append(createElement("span", "", list ? `In ${list.title}` : "Kanux card"));
@@ -1657,13 +1677,8 @@ class CardModal extends Modal {
     const header = createElement("div", "ot-details-heading");
     const heading = createElement("div", "ot-details-heading-title");
     const headingIcon = createElement("span", "ot-details-heading-icon");
-    try {
-      setIcon(headingIcon, "align-left");
-    } catch (error) {
-      headingIcon.textContent = "";
-    }
+    setIconSafe(headingIcon, "align-left");
     heading.append(headingIcon, createElement("span", "", "Description"));
-    const gallery = createElement("div", "ot-image-gallery");
     const preview = createElement("div", "ot-markdown-preview");
     const editor = createElement("textarea", "ot-textarea ot-details-editor is-hidden");
     const isEditing = !this.readOnly && (this.editingDetails || !this.localDetails.trim());
@@ -1696,19 +1711,6 @@ class CardModal extends Modal {
       if (files.length) insertImagesSequentially(files).catch(console.error);
     });
 
-    const renderGallery = () => {
-      this.renderImageGallery(gallery, () => {
-        renderGallery();
-        renderPreview();
-      });
-    };
-
-    const renderPreviewFallback = (markdown, error) => {
-      if (error) console.error(error);
-      preview.replaceChildren();
-      preview.append(createElement("pre", "ot-markdown-fallback", markdown || "Could not render details."));
-    };
-
     const COLLAPSED_MAX = 340;
     const renderPreview = () => {
       preview.replaceChildren();
@@ -1730,7 +1732,7 @@ class CardModal extends Modal {
       // width into every embed of the run (descending offsets, so earlier
       // splices can't shift later ones), saves, and re-renders.
       const applyGridToSegRun = async (segIndex, columns) => {
-        const run = this.imageSegRun(segs, segIndex);
+        const run = imageRunAround(segs, segIndex, isBlankMdSegment);
         if (!run.length) return;
         const width = columns ? this.gridColumnWidth(preview.clientWidth || 640, columns) : 0;
         let source = this.localDetails;
@@ -1867,9 +1869,6 @@ class CardModal extends Modal {
       this.detailsDraft = "";
       this.editingDetails = false;
       this.render();
-    };
-    this.showDetailsPreview = () => {
-      renderPreview();
     };
 
     // Toolbar buttons must not steal focus from the contenteditable on mousedown,
@@ -2051,28 +2050,8 @@ class CardModal extends Modal {
       }).open();
     };
 
-    // The run of consecutive image blocks around `index` (empty text slots
-    // between images don't break the run) — the group a grid layout applies to.
-    const imageRunAround = (index) => {
-      if (!blocks[index] || blocks[index].type !== "img") return [];
-      const isGap = (b) => b && b.type === "text" && !b.value.trim();
-      let start = index;
-      while (start - 1 >= 0) {
-        if (blocks[start - 1].type === "img") { start -= 1; continue; }
-        if (isGap(blocks[start - 1]) && start - 2 >= 0 && blocks[start - 2].type === "img") { start -= 2; continue; }
-        break;
-      }
-      const run = [];
-      for (let i = start; i < blocks.length; i += 1) {
-        if (blocks[i].type === "img") { run.push(blocks[i]); continue; }
-        if (isGap(blocks[i]) && blocks[i + 1] && blocks[i + 1].type === "img") continue;
-        break;
-      }
-      return run;
-    };
-
     const applyGridToBlockRun = (index, columns) => {
-      const run = imageRunAround(index);
+      const run = imageRunAround(blocks, index, isBlankTextBlock);
       if (!run.length) return;
       const width = columns ? this.gridColumnWidth(blocksHost.clientWidth || 640, columns) : 0;
       run.forEach((b) => { b.markup = imageMarkupWithSize(b.markup, width); });
@@ -2435,73 +2414,6 @@ class CardModal extends Modal {
     return field;
   }
 
-  renderImageGallery(container, onChange) {
-    const refs = imageRefsFromMarkdown(this.currentDetailsText());
-    container.replaceChildren();
-    container.classList.toggle("is-empty", !refs.length);
-    container.classList.toggle("is-editing", !!this.editingDetails);
-    container.classList.toggle("is-preview", !this.editingDetails);
-    if (!refs.length) return;
-
-    const grid = createElement("div", "ot-image-gallery-grid");
-    refs.forEach((ref) => {
-      const resolved = this.plugin.resolveCardImage(this.card, ref);
-      const item = createElement("div", "ot-image-item");
-      const tile = createElement("button", "ot-image-tile");
-      tile.type = "button";
-
-      if (resolved && resolved.src) {
-        const img = createElement("img", "");
-        img.src = resolved.src;
-        img.alt = resolved.name || "";
-        img.loading = "lazy";
-        tile.append(img);
-      } else {
-        tile.append(createElement("span", "ot-image-missing", ref.target.split("/").pop() || "Image"));
-      }
-
-      tile.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.openImageRef(ref);
-      });
-      item.append(tile);
-
-      if (this.editingDetails && !this.readOnly) {
-        const remove = iconButton("x", "Remove image", async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          this.removeImageRef(ref);
-          onChange();
-          if (this.editingDetails) return;
-          await this.saveNow();
-        });
-        remove.classList.add("ot-image-remove");
-        item.append(remove);
-      } else if (resolved && resolved.file) {
-        const info = iconButton("info", "Open image", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          this.openImageRef(ref);
-        });
-        info.classList.add("ot-image-info");
-        item.append(info);
-      }
-
-      grid.append(item);
-    });
-    container.append(grid);
-  }
-
-  openImageRef(ref) {
-    const resolved = this.plugin.resolveCardImage(this.card, ref);
-    if (resolved && resolved.file) {
-      this.app.workspace.getLeaf(false).openFile(resolved.file);
-    } else if (resolved && resolved.src) {
-      window.open(resolved.src, "_blank");
-    }
-  }
-
   // Copy a rendered <img> to the system clipboard as PNG. Draws through a canvas
   // because the source is a vault resource URL (same-origin in Obsidian, so the
   // canvas is not tainted). ClipboardItem exists on desktop (Electron); on a
@@ -2528,26 +2440,6 @@ class CardModal extends Modal {
       img.style.width = `${width}px`;
       img.style.maxHeight = "none";
     }
-  }
-
-  // The run of consecutive image segments around `index` (whitespace-only text
-  // between images doesn't break the run) — the group a grid layout applies to.
-  imageSegRun(segs, index) {
-    if (!segs[index] || segs[index].type !== "img") return [];
-    const isGap = (s) => s && s.type === "md" && !s.text.trim();
-    let start = index;
-    while (start - 1 >= 0) {
-      if (segs[start - 1].type === "img") { start -= 1; continue; }
-      if (isGap(segs[start - 1]) && start - 2 >= 0 && segs[start - 2].type === "img") { start -= 2; continue; }
-      break;
-    }
-    const run = [];
-    for (let i = start; i < segs.length; i += 1) {
-      if (segs[i].type === "img") { run.push(segs[i]); continue; }
-      if (isGap(segs[i]) && segs[i + 1] && segs[i + 1].type === "img") continue;
-      break;
-    }
-    return run;
   }
 
   // Even column width for a K-across image grid inside a container.
@@ -2696,7 +2588,7 @@ class CardModal extends Modal {
       flushImageRun();
 
       const labelsHtml = (this.localLabels || [])
-        .map((label) => `<span class="pill" style="background:${esc(label.color || "#2f6fd6")}">${esc(label.name)}</span>`)
+        .map((label) => `<span class="pill" style="background:${esc(label.color || DEFAULT_LABEL_COLOR)}">${esc(label.name)}</span>`)
         .join("");
       const collaborationEnabled = this.plugin.isSyncDeckEnabled();
       const membersText = collaborationEnabled
@@ -2776,21 +2668,6 @@ class CardModal extends Modal {
       console.error(error);
       new Notice("Could not export the PDF.");
     }
-  }
-
-  removeImageRef(ref) {
-    if (this.readOnly || !ref || !ref.markup) return;
-    const next = String(this.currentDetailsText() || "")
-      .replace(ref.markup, "")
-      .replace(/[ \t]+\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-    if (this.editingDetails) {
-      this.detailsDraft = next;
-    } else {
-      this.localDetails = next;
-    }
-    if (this.detailsTextarea) this.detailsTextarea.value = next;
   }
 
   /**
@@ -2898,31 +2775,6 @@ class CardModal extends Modal {
   }
 
   /**
-   * MarkdownRenderer inside a Modal doesn't auto-load ![[image]] embeds, so fill
-   * any unresolved image embed with a real <img> pointing at the vault resource.
-   */
-  hydrateImageEmbeds(container) {
-    const sourcePath = (this.card && this.card.filePath) || "";
-    container.querySelectorAll(".internal-embed").forEach((embed) => {
-      if (embed.querySelector("img")) return; // already loaded
-      const link = embed.getAttribute("src") || embed.getAttribute("data-src") || embed.getAttribute("alt");
-      if (!link) return;
-      let target = null;
-      try {
-        target = this.app.metadataCache.getFirstLinkpathDest(link.split("|")[0], sourcePath);
-      } catch (error) {
-        target = null;
-      }
-      if (!target || !this.plugin.resolveCardImage(this.card, target.path)) return;
-      const img = container.ownerDocument.createElement("img");
-      img.src = this.app.vault.getResourcePath(target);
-      img.alt = target.name;
-      embed.replaceChildren(img);
-      embed.classList.add("image-embed", "media-embed", "is-loaded");
-    });
-  }
-
-  /**
    * Renders every named checklist as an independent progress bar.
    */
   renderChecklistField() {
@@ -2969,11 +2821,7 @@ class CardModal extends Modal {
       const heading = createElement("div", "ot-checklist-heading");
       const headingIcon = createElement("span", "ot-checklist-heading-icon");
       headingIcon.style.setProperty("color", groupColor, "important");
-      try {
-        setIcon(headingIcon, "check-square");
-      } catch (error) {
-        headingIcon.textContent = "☑";
-      }
+      setIconSafe(headingIcon, "check-square", "☑");
       const name = createElement("input", "ot-checklist-name");
       name.type = "text";
       name.value = group.title || "Checklist";
@@ -3071,11 +2919,7 @@ class CardModal extends Modal {
           dragHandle.draggable = !this.readOnly;
           dragHandle.title = "Drag to reorder checklist item";
           dragHandle.setAttribute("aria-label", "Drag to reorder checklist item");
-          try {
-            setIcon(dragHandle, "grip-vertical");
-          } catch (error) {
-            dragHandle.textContent = "⋮⋮";
-          }
+          setIconSafe(dragHandle, "grip-vertical", "⋮⋮");
           dragHandle.addEventListener("dragstart", (event) => {
             if (this.readOnly) {
               event.preventDefault();
@@ -3262,19 +3106,7 @@ class CardModal extends Modal {
               if (a && a.email) {
                 assigneeBtn.classList.add("is-assigned");
                 assigneeBtn.title = a.name || a.email;
-                const avatar = createElement("span", "ot-card-avatar");
-                avatar.style.setProperty("--ot-avatar-color", a.color || "#8b5cf6");
-                const picture = this.plugin.getMemberPicture(a.email);
-                if (picture) {
-                  const img = createElement("img", "");
-                  img.src = picture;
-                  img.alt = "";
-                  avatar.append(img);
-                } else {
-                  avatar.textContent = initials(a.name || a.email);
-                  avatar.classList.add("is-initials");
-                }
-                assigneeBtn.append(avatar);
+                assigneeBtn.append(this.memberAvatar(a));
               } else {
                 assigneeBtn.classList.remove("is-assigned");
                 assigneeBtn.title = "Assign member";
@@ -3413,7 +3245,7 @@ class CardModal extends Modal {
     this.saveTimer = window.setTimeout(() => {
       this.saveTimer = null;
       this.saveNow().catch(console.error);
-    }, 350);
+    }, SAVE_DEBOUNCE_MS);
   }
 
   async saveNow() {

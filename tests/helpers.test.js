@@ -3,7 +3,13 @@ const Module = require("module");
 
 const originalLoad = Module._load;
 Module._load = function load(request, parent, isMain) {
-  if (request === "obsidian") return { setIcon() {} };
+  if (request === "obsidian") {
+    return {
+      getIcon(iconName) {
+        return ["trash-2", "circle-help"].includes(iconName) ? { iconName } : null;
+      },
+    };
+  }
   return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -12,9 +18,33 @@ const {
   checklistItemNoteBody,
   checklistStats,
   checklistsToMarkdown,
+  iconButton,
   parseCardMarkdown,
   parseChecklists,
 } = require("../src/helpers");
+
+function createFakeElement(tagName) {
+  return {
+    tagName,
+    attributes: {},
+    children: [],
+    classList: { add() {} },
+    addEventListener() {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+    replaceChildren(...children) { this.children = children; },
+  };
+}
+
+function testRegisteredIconAndGenericFallback() {
+  global.document = { createElement: createFakeElement };
+
+  const aliasedButton = iconButton("trash", "Delete", () => {});
+  assert.strictEqual(aliasedButton.children[0].iconName, "trash-2");
+  assert.strictEqual(aliasedButton.attributes["aria-label"], "Delete");
+
+  const fallbackButton = iconButton("not-registered", "Unknown", () => {});
+  assert.strictEqual(fallbackButton.children[0].iconName, "circle-help");
+}
 
 function testChecklistItemNoteBody() {
   const managed = [
@@ -129,8 +159,50 @@ function testCardParserAndAggregateStats() {
   assert.deepStrictEqual(checklistStats(card.checklists), { done: 2, total: 3, percent: 67 });
 }
 
+function testCardMetadataParsing() {
+  const markdown = [
+    "---",
+    "kanban-card-id: card-7",
+    "kanban-board-id: board-2",
+    "kanban-list-id: list-3",
+    "kanux-list: Doing: Today",
+    "position: 4",
+    "labels: Urgent|#ef4444, Docs|#3b82f6",
+    "assignees: dev@example.com|Dev User|#123456",
+    "completed: yes",
+    "start: 2026-08-25",
+    "due: invalid",
+    "---",
+    "",
+    "# Metadata card",
+    "",
+    "position: 99",
+  ].join("\n");
+
+  const card = parseCardMarkdown(markdown);
+  assert.strictEqual(card.id, "card-7");
+  assert.strictEqual(card.boardId, "board-2");
+  assert.strictEqual(card.listId, "list-3");
+  assert.strictEqual(card.listTitle, "Doing: Today");
+  assert.strictEqual(card.position, 4);
+  assert.deepStrictEqual(card.labels.map((label) => label.name), ["Urgent", "Docs"]);
+  assert.strictEqual(card.assignees[0].email, "dev@example.com");
+  assert.strictEqual(card.completed, true);
+  assert.strictEqual(card.startDate, "2026-08-25");
+  assert.strictEqual(card.dueDate, "");
+
+  const missing = parseCardMarkdown("# Card without metadata");
+  assert.strictEqual(missing.position, null);
+  assert.strictEqual(missing.assignees, null);
+  assert.strictEqual(missing.completed, null);
+  assert.strictEqual(missing.startDate, null);
+  assert.strictEqual(missing.dueDate, null);
+}
+
 testLegacyChecklistMigration();
+testRegisteredIconAndGenericFallback();
 testChecklistItemNoteBody();
 testNamedChecklistRoundTrip();
 testCardParserAndAggregateStats();
+testCardMetadataParsing();
 console.log("helpers tests passed");

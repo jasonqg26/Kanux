@@ -925,7 +925,9 @@ module.exports = class KanuxPlugin extends Plugin {
   refreshViews() {
     this.updateExplorerColors();
     this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => {
-      if (leaf.view && leaf.view.render) leaf.view.render();
+      if (!leaf.view || !leaf.view.render) return;
+      if (leaf.view.shouldDeferRefresh && leaf.view.shouldDeferRefresh()) return;
+      leaf.view.render();
     });
   }
 
@@ -1691,28 +1693,72 @@ module.exports = class KanuxPlugin extends Plugin {
   }
 
   async renameBoardTo(board, name) {
-    const nextFolder = await this.nextBoardFolder(name, board.folderPath);
-    if (nextFolder !== board.folderPath) {
-      const folder = this.app.vault.getAbstractFileByPath(board.folderPath);
-      if (folder) await this.app.vault.rename(folder, nextFolder);
-      Object.values(this.data.cards).forEach((card) => {
-        if (card.boardId === board.id && card.filePath && card.filePath.startsWith(`${board.folderPath}/`)) {
-          card.filePath = `${nextFolder}/${card.filePath.slice(board.folderPath.length + 1)}`;
-        }
-        if (card.boardId === board.id) {
-          (card.checklists || []).forEach((checklist) => {
-            (checklist.items || []).forEach((item) => {
-              if (item.filePath && item.filePath.startsWith(`${board.folderPath}/`)) {
-                item.filePath = `${nextFolder}/${item.filePath.slice(board.folderPath.length + 1)}`;
-              }
-            });
-          });
-        }
-      });
-      board.folderPath = nextFolder;
-    }
+    const previousName = board.name;
+    const previousFolder = board.folderPath;
+    const nextFolder = await this.nextBoardFolder(name, previousFolder);
+    const folder = this.app.vault.getAbstractFileByPath(previousFolder);
 
     board.name = name;
+    board.folderPath = nextFolder;
+    this.replaceBoardFolderPaths(board.id, previousFolder, nextFolder);
+
+    try {
+      if (nextFolder !== previousFolder) {
+        if (!folder) throw new Error("Board folder not found");
+        await this.app.vault.rename(folder, nextFolder);
+      }
+    } catch (error) {
+      board.name = previousName;
+      board.folderPath = previousFolder;
+      this.replaceBoardFolderPaths(board.id, nextFolder, previousFolder);
+      throw error;
+    }
+
+    await this.writeBoardCardFiles(board);
+    await this.savePluginData();
+    this.refreshViews();
+  }
+
+  replaceBoardFolderPaths(boardId, previousFolder, nextFolder) {
+    if (!previousFolder || previousFolder === nextFolder) return;
+    Object.values(this.data.cards).forEach((card) => {
+      if (card.boardId !== boardId) return;
+      card.filePath = this.replaceFolderPrefix(card.filePath, previousFolder, nextFolder);
+      (card.checklists || []).forEach((checklist) => {
+        (checklist.items || []).forEach((item) => {
+          item.filePath = this.replaceFolderPrefix(item.filePath, previousFolder, nextFolder);
+        });
+      });
+    });
+  }
+
+  replaceFolderPrefix(filePath, previousFolder, nextFolder) {
+    if (!filePath || !filePath.startsWith(`${previousFolder}/`)) return filePath;
+    return `${nextFolder}/${filePath.slice(previousFolder.length + 1)}`;
+  }
+
+  async writeBoardCardFiles(board) {
+    const cards = Object.values(this.data.cards).filter((card) => card.boardId === board.id);
+    for (const card of cards) await this.writeCardFile(card);
+  }
+
+  async deleteBoard(boardId) {
+    const board = this.findBoard(boardId);
+    if (!board) return;
+
+    const cards = Object.values(this.data.cards).filter((card) => card.boardId === board.id);
+    const cardSummary = cards.length === 1 ? "1 linked card" : `${cards.length} linked cards`;
+    const warning = `Delete "${board.name}" and its entire folder, including ${cardSummary}? The folder will be moved to the trash.`;
+    if (!window.confirm(warning)) return;
+
+    const folder = this.app.vault.getAbstractFileByPath(board.folderPath);
+    if (folder) await this.app.vault.trash(folder, true);
+
+    this.pruneBoardsMatching((item) => item.id === board.id);
+    cards.forEach((card) => this.diskSignatures.delete(card.id));
+    this.indexSignatures.delete(board.id);
+    if (this.data.viewModes) delete this.data.viewModes[board.id];
+    if (this.data.tableConfigs) delete this.data.tableConfigs[board.id];
     await this.savePluginData();
     this.refreshViews();
   }

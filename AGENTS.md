@@ -6,7 +6,8 @@ Este documento define el comportamiento, funcionalidades y reglas que cualquier 
 
 - **Uso Obligatorio de Clean Code**: Siempre que se escriba, revise o modifique código, la IA debe aplicar la skill `/clean-code`. El código debe ser auto-explicativo, limpio, con nombres intencionales y funciones con una sola responsabilidad.
 - **Flujo inicial obligatorio**: Al empezar cualquier tarea, lee este archivo y ejecuta `git status --short`, `git branch --show-current` y `git log -5 --oneline`. Revisa el estado antes de editar.
-- **Artefactos y Compilación**: **NUNCA edites `main.js` directamente**. Modifica únicamente los archivos dentro de la carpeta `src/`. Después de cualquier modificación, debes ejecutar `node build.js` para generar el nuevo `main.js`.
+- **Catálogo de utilidades obligatorio**: Antes de crear lógica auxiliar, consulta [`docs/HELPERS-CATALOG.md`](docs/HELPERS-CATALOG.md) y `src/helpers.js`. Reutiliza o extiende una utilidad existente cuando cubra la misma responsabilidad. Toda utilidad pública nueva o modificada debe actualizarse en el catálogo y contar con pruebas.
+- **Artefactos y Compilación**: **NUNCA edites `main.js` directamente**. El código fuente se modifica únicamente dentro de `src/`; la documentación y las reglas pueden actualizarse en `docs/` y `AGENTS.md` cuando la tarea lo requiera. Después de cualquier modificación de código, debes ejecutar `node build.js` para generar el nuevo `main.js`.
 
 ## 2. Implementación y APIs
 

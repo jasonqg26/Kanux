@@ -1,4 +1,4 @@
-const { setIcon } = require("obsidian");
+const { getIcon } = require("obsidian");
 
 // Shared constants plus small pure helpers for dates, labels, Markdown, and DOM controls.
 const VIEW_TYPE = "kanux-view";
@@ -30,6 +30,8 @@ const LABEL_COLORS = [
 // Default list-color sequence. Grey → blue → green first so a fresh board's
 // To do / Doing / Done reads the way most people expect.
 const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#ec4899"];
+const DEFAULT_CHECKLIST_TITLE = "Checklist";
+const DEFAULT_CHECKLIST_COLOR = LIST_COLORS[1];
 const DEFAULT_APPEARANCE = {
   preset: "obsidian",
   colorScheme: "theme",
@@ -306,103 +308,30 @@ function hasDragType(event, type) {
 }
 
 const ICON_ALIASES = {
-  ellipsis: ["more-horizontal", "ellipsis"],
+  ellipsis: ["ellipsis", "more-horizontal"],
   "check-square": ["square-check", "check-square"],
   "plus-square": ["square-plus", "plus-square"],
   "layout-dashboard": ["layout-dashboard", "panel-top", "grid-2x2"],
   "calendar-days": ["calendar-days", "calendar"],
   pencil: ["pencil", "edit-3", "edit"],
-  trash: ["trash", "trash-2"],
+  trash: ["trash-2", "trash"],
+  "help-circle": ["circle-help", "help-circle"],
 };
 
-const SVG_NS = "http://www.w3.org/2000/svg";
-const ICON_FALLBACKS = {
-  "arrow-left": { paths: ["M19 12H5", "M12 19l-7-7 7-7"] },
-  "chevron-left": { paths: ["M15 18l-6-6 6-6"] },
-  "chevron-right": { paths: ["M9 18l6-6-6-6"] },
-  "chevrons-left": { paths: ["M11 17l-5-5 5-5", "M18 17l-5-5 5-5"] },
-  "chevrons-right": { paths: ["M6 17l5-5-5-5", "M13 17l5-5-5-5"] },
-  circle: { circles: [{ cx: 12, cy: 12, r: 9 }] },
-  check: { paths: ["M20 6L9 17l-5-5"] },
-  "check-square": { rects: [{ x: 3, y: 3, width: 18, height: 18, rx: 3 }], paths: ["M8 12l3 3 5-6"] },
-  "square-check": { rects: [{ x: 3, y: 3, width: 18, height: 18, rx: 3 }], paths: ["M8 12l3 3 5-6"] },
-  "calendar-days": { rects: [{ x: 3, y: 4, width: 18, height: 17, rx: 2 }], paths: ["M8 2v4", "M16 2v4", "M3 10h18", "M8 14h.01", "M12 14h.01", "M16 14h.01", "M8 18h.01", "M12 18h.01"] },
-  clock: { circles: [{ cx: 12, cy: 12, r: 9 }], paths: ["M12 7v5l3 2"] },
-  bold: { paths: ["M7 5h6a4 4 0 0 1 0 8H7Z", "M7 13h7a4 4 0 0 1 0 8H7Z"] },
-  italic: { paths: ["M19 4h-9", "M14 20H5", "M15 4 9 20"] },
-  ellipsis: { circles: [{ cx: 6, cy: 12, r: 1.4, fill: "currentColor", stroke: "none" }, { cx: 12, cy: 12, r: 1.4, fill: "currentColor", stroke: "none" }, { cx: 18, cy: 12, r: 1.4, fill: "currentColor", stroke: "none" }] },
-  "more-horizontal": { circles: [{ cx: 6, cy: 12, r: 1.4, fill: "currentColor", stroke: "none" }, { cx: 12, cy: 12, r: 1.4, fill: "currentColor", stroke: "none" }, { cx: 18, cy: 12, r: 1.4, fill: "currentColor", stroke: "none" }] },
-  "grip-vertical": {
-    circles: [
-      { cx: 9, cy: 5, r: 1.2, fill: "currentColor", stroke: "none" }, { cx: 15, cy: 5, r: 1.2, fill: "currentColor", stroke: "none" },
-      { cx: 9, cy: 12, r: 1.2, fill: "currentColor", stroke: "none" }, { cx: 15, cy: 12, r: 1.2, fill: "currentColor", stroke: "none" },
-      { cx: 9, cy: 19, r: 1.2, fill: "currentColor", stroke: "none" }, { cx: 15, cy: 19, r: 1.2, fill: "currentColor", stroke: "none" },
-    ],
-  },
-  heart: { paths: ["M20.8 8.6c0 5.3-8.8 10.4-8.8 10.4S3.2 13.9 3.2 8.6A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 8.8 1.6Z"] },
-  info: { circles: [{ cx: 12, cy: 12, r: 9 }], paths: ["M12 10v6", "M12 7h.01"] },
-  "layout-dashboard": {
-    rects: [
-      { x: 4, y: 4, width: 6, height: 6, rx: 1 },
-      { x: 14, y: 4, width: 6, height: 6, rx: 1 },
-      { x: 4, y: 14, width: 6, height: 6, rx: 1 },
-      { x: 14, y: 14, width: 6, height: 6, rx: 1 },
-    ],
-  },
-  list: { paths: ["M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01"] },
-  link: { paths: ["M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1", "M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1"] },
-  image: { rects: [{ x: 3, y: 5, width: 18, height: 14, rx: 2 }], circles: [{ cx: 8.5, cy: 10, r: 1.5 }], paths: ["M21 15l-5-5L5 19"] },
-  paperclip: { paths: ["M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.9-9.9a4 4 0 1 1 5.7 5.7l-10 10a2 2 0 1 1-2.8-2.8l9.4-9.4"] },
-  "help-circle": { circles: [{ cx: 12, cy: 12, r: 9 }], paths: ["M9.1 9a3 3 0 1 1 5.8 1c-.9 1.2-2.4 1.5-2.8 3", "M12 17h.01"] },
-  type: { paths: ["M4 7V4h16v3", "M9 20h6", "M12 4v16"] },
-  "file-text": { paths: ["M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z", "M14 3v6h6", "M8 13h8", "M8 17h5"] },
-  "refresh-cw": { paths: ["M21 12a9 9 0 0 1-15 6.7", "M3 12A9 9 0 0 1 18 5.3", "M18 3v5h-5", "M6 21v-5h5"] },
-  settings: { circles: [{ cx: 12, cy: 12, r: 3 }], paths: ["M12 2v3", "M12 19v3", "M4.9 4.9 7 7", "M17 17l2.1 2.1", "M2 12h3", "M19 12h3", "M4.9 19.1 7 17", "M17 7l2.1-2.1"] },
-  pencil: { paths: ["M12 20h9", "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"] },
-  plus: { paths: ["M12 5v14", "M5 12h14"] },
-  "plus-square": { rects: [{ x: 3, y: 3, width: 18, height: 18, rx: 3 }], paths: ["M12 8v8", "M8 12h8"] },
-  "square-plus": { rects: [{ x: 3, y: 3, width: 18, height: 18, rx: 3 }], paths: ["M12 8v8", "M8 12h8"] },
-  trash: { paths: ["M3 6h18", "M8 6V4h8v2", "M6 6l1 15h10l1-15", "M10 11v6", "M14 11v6"] },
-  x: { paths: ["M18 6 6 18", "M6 6l12 12"] },
-};
+const DEFAULT_ICON_NAMES = ["circle-help", "help-circle", "circle"];
 
-function appendSvgChild(svg, tag, attrs) {
-  const child = document.createElementNS(SVG_NS, tag);
-  Object.entries(attrs).forEach(([key, value]) => child.setAttribute(key, String(value)));
-  svg.appendChild(child);
+function renderIcon(element, icon) {
+  const candidates = ICON_ALIASES[icon] || [icon];
+  const svg = firstAvailableIcon([...candidates, ...DEFAULT_ICON_NAMES]);
+  element.replaceChildren(...(svg ? [svg] : []));
 }
 
-function setSvgIconFallback(element, icon) {
-  const fallback = ICON_FALLBACKS[icon] || ICON_FALLBACKS.plus;
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("xmlns", SVG_NS);
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "2.2");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("aria-hidden", "true");
-
-  (fallback.paths || []).forEach((d) => appendSvgChild(svg, "path", { d }));
-  (fallback.circles || []).forEach((attrs) => appendSvgChild(svg, "circle", attrs));
-  (fallback.rects || []).forEach((attrs) => appendSvgChild(svg, "rect", attrs));
-  element.replaceChildren(svg);
-}
-
-function setIconWithFallback(element, icon, label) {
-  const names = ICON_ALIASES[icon] || [icon];
-  for (const name of names) {
-    element.replaceChildren();
-    try {
-      setIcon(element, name);
-      if (element.querySelector("svg")) return;
-    } catch (error) {
-      // Try the next compatible Lucide/Obsidian icon name.
-    }
+function firstAvailableIcon(iconNames) {
+  for (const iconName of iconNames) {
+    const svg = getIcon(iconName);
+    if (svg) return svg;
   }
-  element.setAttribute("aria-label", label || icon);
-  setSvgIconFallback(element, icon);
+  return null;
 }
 
 function iconButton(icon, label, onClick) {
@@ -410,7 +339,7 @@ function iconButton(icon, label, onClick) {
   button.type = "button";
   button.title = label;
   button.setAttribute("aria-label", label);
-  setIconWithFallback(button, icon, label);
+  renderIcon(button, icon);
   button.addEventListener("click", onClick);
   return button;
 }
@@ -420,16 +349,16 @@ function textButton(icon, label, onClick, className = "") {
   button.type = "button";
 
   const iconSlot = createElement("span", "ot-button-icon");
-  setIconWithFallback(iconSlot, icon, label);
+  renderIcon(iconSlot, icon);
 
   button.append(iconSlot, createElement("span", "", label));
   button.addEventListener("click", onClick);
   return button;
 }
 
-function addButtonIcon(button, icon, label) {
+function addButtonIcon(button, icon) {
   const iconSlot = createElement("span", "ot-button-icon");
-  setIconWithFallback(iconSlot, icon, label || button.textContent);
+  renderIcon(iconSlot, icon);
   button.prepend(iconSlot);
   button.classList.add("ot-button-with-icon");
   return button;
@@ -492,30 +421,30 @@ function parseChecklist(text) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => {
-      // Pull off the trailing "<!--@email|name|color-->" member assignment, if any.
-      let assignee = null;
-      let core = line;
-      const am = line.match(/\s*<!--@(.*?)-->\s*$/);
-      if (am) {
-        core = line.slice(0, am.index).trim();
-        const parts = String(am[1] || "").split("|");
-        const email = (parts[0] || "").trim();
-        if (email) assignee = { email, name: (parts[1] || "").trim(), color: (parts[2] || "").trim() };
-      }
-
-      const match = core.match(/^(?:-\s*)?\[([ xX])\]\s*(.*)$/);
-      if (!match) {
-        const value = core.replace(/^- /, "").trim();
-        return Object.assign({ done: false, assignee }, parseChecklistItemValue(value));
-      }
-
-      return Object.assign({
-        done: match[1].toLowerCase() === "x",
-        assignee,
-      }, parseChecklistItemValue(match[2].trim()));
-    })
+    .map(parseChecklistLine)
     .filter((item) => item.text);
+}
+
+function parseChecklistLine(line) {
+  const { content, assignee } = extractChecklistAssignee(line);
+  const checkbox = content.match(/^(?:-\s*)?\[([ xX])\]\s*(.*)$/);
+  const done = checkbox ? checkbox[1].toLowerCase() === "x" : false;
+  const value = checkbox ? checkbox[2].trim() : content.replace(/^- /, "").trim();
+  return { done, assignee, ...parseChecklistItemValue(value) };
+}
+
+function extractChecklistAssignee(line) {
+  const metadata = line.match(/\s*<!--@(.*?)-->\s*$/);
+  if (!metadata) return { content: line, assignee: null };
+
+  const [email = "", name = "", color = ""] = String(metadata[1] || "").split("|");
+  const cleanEmail = email.trim();
+  return {
+    content: line.slice(0, metadata.index).trim(),
+    assignee: cleanEmail
+      ? { email: cleanEmail, name: name.trim(), color: color.trim() }
+      : null,
+  };
 }
 
 // A checklist item can be a normal string or a wikilink to a Markdown note.
@@ -541,17 +470,21 @@ function parseChecklistItemValue(value) {
  * the note identifies itself as a managed checklist item.
  */
 function checklistItemNoteBody(markdown) {
-  let body = String(markdown || "").replace(/^\uFEFF/, "");
-  let frontmatter = "";
-  const match = body.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
-  if (match) {
-    frontmatter = match[1];
-    body = body.slice(match[0].length);
-  }
-
+  const { frontmatter, body } = splitFrontmatter(markdown);
   const managed = /(?:^|\r?\n)[ \t]*kanux-checklist-item[ \t]*:[ \t]*true[ \t]*(?:#.*)?(?:\r?\n|$)/i.test(frontmatter);
   if (!managed) return body.trim();
 
+  return stripManagedChecklistHeader(body);
+}
+
+function splitFrontmatter(markdown) {
+  const document = String(markdown || "").replace(/^\uFEFF/, "");
+  const match = document.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
+  if (!match) return { frontmatter: "", body: document };
+  return { frontmatter: match[1], body: document.slice(match[0].length) };
+}
+
+function stripManagedChecklistHeader(body) {
   const lines = body.split(/\r?\n/);
   while (lines.length && !lines[0].trim()) lines.shift();
   if (lines.length && /^#[ \t]+\S/.test(lines[0])) lines.shift();
@@ -571,29 +504,40 @@ function checklistItemNoteBody(markdown) {
 function normalizeChecklists(checklists, legacyItems) {
   const source = Array.isArray(checklists)
     ? checklists
-    : [{ title: "Checklist", items: Array.isArray(legacyItems) ? legacyItems : [] }];
+    : [{ title: DEFAULT_CHECKLIST_TITLE, items: Array.isArray(legacyItems) ? legacyItems : [] }];
 
   return source
     .filter((group) => group && typeof group === "object")
-    .map((group, index) => ({
-      id: group.id || uid("checklist"),
-      title: textLine(group.title) || `Checklist ${index + 1}`,
-      color: cleanColor(group.color) || LIST_COLORS[1],
-      items: (Array.isArray(group.items) ? group.items : [])
-        .map((item) => ({
-          done: !!(item && item.done),
-          text: textLine(item && item.text),
-          filePath: textLine(item && item.filePath),
-          assignee: item && item.assignee && item.assignee.email
-            ? {
-              email: textLine(item.assignee.email),
-              name: textLine(item.assignee.name),
-              color: textLine(item.assignee.color),
-            }
-            : null,
-        }))
-        .filter((item) => item.text),
-    }));
+    .map(normalizeChecklistGroup);
+}
+
+function normalizeChecklistGroup(group, index) {
+  return {
+    id: group.id || uid("checklist"),
+    title: textLine(group.title) || `${DEFAULT_CHECKLIST_TITLE} ${index + 1}`,
+    color: cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR,
+    items: (Array.isArray(group.items) ? group.items : [])
+      .map(normalizeChecklistItem)
+      .filter((item) => item.text),
+  };
+}
+
+function normalizeChecklistItem(item) {
+  return {
+    done: !!(item && item.done),
+    text: textLine(item && item.text),
+    filePath: textLine(item && item.filePath),
+    assignee: normalizeChecklistAssignee(item && item.assignee),
+  };
+}
+
+function normalizeChecklistAssignee(assignee) {
+  if (!assignee || !assignee.email) return null;
+  return {
+    email: textLine(assignee.email),
+    name: textLine(assignee.name),
+    color: textLine(assignee.color),
+  };
 }
 
 /**
@@ -604,34 +548,42 @@ function normalizeChecklists(checklists, legacyItems) {
  */
 function parseChecklists(text) {
   const groups = [];
-  let current = null;
-
-  const finish = () => {
-    if (!current) return;
-    groups.push({
-      id: uid("checklist"),
-      title: textLine(current.title) || `Checklist ${groups.length + 1}`,
-      color: cleanColor(current.color) || LIST_COLORS[1],
-      items: parseChecklist(current.lines.join("\n")),
-    });
-    current = null;
-  };
+  let pendingGroup = null;
 
   for (const line of String(text || "").split(/\r?\n/)) {
-    const heading = line.match(/^###\s+(.+?)\s*$/);
+    const heading = parseChecklistHeading(line);
     if (heading) {
-      finish();
-      const colorMeta = heading[1].match(/\s*<!--kanux-checklist-color:(#[0-9a-fA-F]{6})-->\s*$/);
-      const title = colorMeta ? heading[1].slice(0, colorMeta.index).trim() : heading[1];
-      current = { title, color: colorMeta ? colorMeta[1] : "", lines: [] };
+      appendParsedChecklist(groups, pendingGroup);
+      pendingGroup = { ...heading, lines: [] };
       continue;
     }
-    if (!current) current = { title: "Checklist", lines: [] };
-    current.lines.push(line);
+    if (!pendingGroup) pendingGroup = { title: DEFAULT_CHECKLIST_TITLE, color: "", lines: [] };
+    pendingGroup.lines.push(line);
   }
-  finish();
+  appendParsedChecklist(groups, pendingGroup);
 
   return groups.length ? groups : normalizeChecklists(undefined, []);
+}
+
+function parseChecklistHeading(line) {
+  const heading = line.match(/^###\s+(.+?)\s*$/);
+  if (!heading) return null;
+
+  const colorMetadata = heading[1].match(/\s*<!--kanux-checklist-color:(#[0-9a-fA-F]{6})-->\s*$/);
+  return {
+    title: colorMetadata ? heading[1].slice(0, colorMetadata.index).trim() : heading[1],
+    color: colorMetadata ? colorMetadata[1] : "",
+  };
+}
+
+function appendParsedChecklist(groups, group) {
+  if (!group) return;
+  groups.push({
+    id: uid("checklist"),
+    title: textLine(group.title) || `${DEFAULT_CHECKLIST_TITLE} ${groups.length + 1}`,
+    color: cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR,
+    items: parseChecklist(group.lines.join("\n")),
+  });
 }
 
 function checklistToText(items) {
@@ -653,24 +605,27 @@ function checklistToMarkdown(items) {
   return (items || [])
     .map((item) => {
       const base = `- [${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`;
-      const a = item.assignee;
-      if (a && a.email) {
+      const assignee = item.assignee;
+      if (assignee && assignee.email) {
         // Per-item member assignment, hidden in an HTML comment so it round-trips
         // and stays invisible in Markdown preview.
-        const safe = (v) => String(v || "").replace(/[|>]/g, " ").trim();
-        return `${base} <!--@${safe(a.email)}|${safe(a.name)}|${safe(a.color)}-->`;
+        return `${base} <!--@${safeCommentValue(assignee.email)}|${safeCommentValue(assignee.name)}|${safeCommentValue(assignee.color)}-->`;
       }
       return base;
     })
     .join("\n");
 }
 
+function safeCommentValue(value) {
+  return String(value || "").replace(/[|>]/g, " ").trim();
+}
+
 function checklistsToMarkdown(checklists) {
   return normalizeChecklists(checklists, [])
     .map((group) => {
       const items = checklistToMarkdown(group.items);
-      const color = cleanColor(group.color) || LIST_COLORS[1];
-      return `### ${textLine(group.title) || "Checklist"} <!--kanux-checklist-color:${color}-->${items ? `\n${items}` : ""}`;
+      const color = cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR;
+      return `### ${textLine(group.title) || DEFAULT_CHECKLIST_TITLE} <!--kanux-checklist-color:${color}-->${items ? `\n${items}` : ""}`;
     })
     .join("\n\n");
 }
@@ -752,9 +707,40 @@ function initials(nameOrEmail) {
   return namePart.slice(0, 2).toUpperCase();
 }
 
-function frontmatterValue(markdown, key) {
-  const match = markdown.match(new RegExp(`^${key}:[ \\t]*(.*)$`, "m"));
-  return match ? textLine(match[1]) : null;
+const CARD_METADATA_KEYS = new Set([
+  "kanban-card-id",
+  "kanban-board-id",
+  "kanban-list-id",
+  "kanux-list",
+  "position",
+  "labels",
+  "assignees",
+  "completed",
+  "start",
+  "due",
+]);
+
+function readCardMetadata(markdown) {
+  const metadata = {};
+  for (const line of String(markdown || "").split(/\r?\n/)) {
+    const separator = line.indexOf(":");
+    if (separator < 1) continue;
+
+    const key = line.slice(0, separator);
+    if (!CARD_METADATA_KEYS.has(key) || Object.prototype.hasOwnProperty.call(metadata, key)) continue;
+    metadata[key] = textLine(line.slice(separator + 1));
+  }
+  return metadata;
+}
+
+function optionalMetadata(metadata, key, parser) {
+  if (!Object.prototype.hasOwnProperty.call(metadata, key)) return null;
+  return parser(metadata[key]);
+}
+
+function numberOrNull(value) {
+  if (value === undefined || value === "" || Number.isNaN(Number(value))) return null;
+  return Number(value);
 }
 
 // The list structure (id/title/color/order) is embedded in the board index file
@@ -806,29 +792,24 @@ function decodeListMeta(markdown) {
  * keep existing saved values when appropriate.
  */
 function parseCardMarkdown(markdown) {
-  const titleMatch = markdown.match(/^#\s+(.+)$/m);
-  const labels = frontmatterValue(markdown, "labels");
-  const assignees = frontmatterValue(markdown, "assignees");
-  const completed = frontmatterValue(markdown, "completed");
-  const start = frontmatterValue(markdown, "start");
-  const due = frontmatterValue(markdown, "due");
-  const positionRaw = frontmatterValue(markdown, "position");
-  const position = positionRaw !== null && positionRaw !== "" && !Number.isNaN(Number(positionRaw)) ? Number(positionRaw) : null;
+  const document = String(markdown || "");
+  const metadata = readCardMetadata(document);
+  const titleMatch = document.match(/^#\s+(.+)$/m);
 
   return {
-    id: frontmatterValue(markdown, "kanban-card-id") || "",
-    boardId: frontmatterValue(markdown, "kanban-board-id") || "",
-    listId: frontmatterValue(markdown, "kanban-list-id") || "",
-    listTitle: frontmatterValue(markdown, "kanux-list") || "",
-    position,
+    id: metadata["kanban-card-id"] || "",
+    boardId: metadata["kanban-board-id"] || "",
+    listId: metadata["kanban-list-id"] || "",
+    listTitle: metadata["kanux-list"] || "",
+    position: numberOrNull(metadata.position),
     title: titleMatch ? titleMatch[1].trim() : "",
-    labels: labels !== null ? parseLabels(labels) : [],
-    assignees: assignees !== null ? parseAssignees(assignees) : null,
-    completed: completed !== null ? parseBoolean(completed) : null,
-    startDate: start !== null ? cleanDate(start) : null,
-    dueDate: due !== null ? cleanDate(due) : null,
-    details: getSectionAny(markdown, ["Details", "Detaylar"]),
-    checklists: parseChecklists(getSectionAny(markdown, ["Checklist", "Yapılacaklar", "Kontrol listesi"])),
+    labels: optionalMetadata(metadata, "labels", parseLabels) || [],
+    assignees: optionalMetadata(metadata, "assignees", parseAssignees),
+    completed: optionalMetadata(metadata, "completed", parseBoolean),
+    startDate: optionalMetadata(metadata, "start", cleanDate),
+    dueDate: optionalMetadata(metadata, "due", cleanDate),
+    details: getSectionAny(document, ["Details", "Detaylar"]),
+    checklists: parseChecklists(getSectionAny(document, ["Checklist", "Yapılacaklar", "Kontrol listesi"])),
   };
 }
 
