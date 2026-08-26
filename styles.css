@@ -10,30 +10,31 @@
   font-size: calc(16px * var(--ot-font-scale, 1));
 }
 
+/* Save actions follow the theme's green; override with --ot-save-color. */
 button.ot-save-button.mod-cta,
 button.ot-save-button {
-  border-color: #22c55e;
-  background-color: #22c55e;
-  color: #ffffff;
+  border-color: var(--ot-save-color, var(--color-green, #22c55e));
+  background-color: var(--ot-save-color, var(--color-green, #22c55e));
+  color: var(--text-on-accent, #ffffff);
 }
 
 button.ot-save-button.mod-cta:hover,
 button.ot-save-button:hover {
-  border-color: #16a34a;
-  background-color: #16a34a;
+  border-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 86%, black);
+  background-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 86%, black);
 }
 
 button.ot-save-button.mod-cta:active,
 button.ot-save-button:active {
-  border-color: #15803d;
-  background-color: #15803d;
+  border-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 74%, black);
+  background-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 74%, black);
 }
 
 button.ot-save-button.mod-cta:disabled,
 button.ot-save-button:disabled {
-  border-color: #86efac;
-  background-color: #86efac;
-  color: #166534;
+  border-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 35%, var(--background-primary));
+  background-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 35%, var(--background-primary));
+  color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 45%, var(--text-normal));
 }
 
 .ot-board-root.is-appearance-dark {
@@ -85,7 +86,7 @@ button.ot-save-button:disabled {
   color: #17130a;
   background: var(--ot-lock-color, #f59e0b);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.3;
   white-space: nowrap;
 }
@@ -149,7 +150,7 @@ button.ot-save-button:disabled {
   color: white;
   background: var(--ot-presence-color, var(--interactive-accent));
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -313,7 +314,7 @@ button.ot-save-button:disabled {
   max-width: calc(100% - 32px);
   overflow: hidden;
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -364,11 +365,11 @@ button.ot-save-button:disabled {
 }
 
 .ot-list.is-list-drop-before {
-  box-shadow: -4px 0 0 #8b5cf6;
+  box-shadow: -4px 0 0 var(--interactive-accent);
 }
 
 .ot-list.is-list-drop-after {
-  box-shadow: 4px 0 0 #8b5cf6;
+  box-shadow: 4px 0 0 var(--interactive-accent);
 }
 
 .ot-list-header,
@@ -440,7 +441,7 @@ button.ot-save-button:disabled {
   overflow: visible;
   color: var(--text-normal);
   font-size: calc(20px * var(--ot-font-scale, 1));
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.01em;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -455,6 +456,7 @@ button.ot-save-button:disabled {
   color: var(--text-muted);
   font-size: calc(14px * var(--ot-font-scale, 1));
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .ot-list-header > .ot-icon-button {
@@ -599,7 +601,7 @@ button.ot-save-button:disabled {
   color: white;
   background: rgb(0 0 0 / 48%);
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .ot-card.is-just-completed {
@@ -712,7 +714,7 @@ button.ot-save-button:disabled {
   padding: 0 12px;
   color: white;
   font-size: 15px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0;
   cursor: pointer;
 }
@@ -791,8 +793,8 @@ button.ot-save-button:disabled {
 }
 
 .ot-card.is-completed .ot-card-complete-toggle {
-  border-color: #8cc63f;
-  background: #8cc63f;
+  border-color: var(--ot-done-color, var(--color-green, #8cc63f));
+  background: var(--ot-done-color, var(--color-green, #8cc63f));
   color: #1f2328;
 }
 
@@ -807,7 +809,7 @@ button.ot-save-button:disabled {
   width: 100%;
   height: 100%;
   font-size: 15px;
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1;
 }
 
@@ -986,7 +988,7 @@ button.ot-save-button:disabled {
 
 .ot-card-checklist-badge.is-complete {
   color: #17210d;
-  background: #8cc63f;
+  background: var(--ot-done-color, var(--color-green, #8cc63f));
 }
 
 .ot-card-checklist-icon {
@@ -1005,6 +1007,7 @@ button.ot-save-button:disabled {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .ot-icon-button {
@@ -1093,6 +1096,122 @@ button.ot-save-button:disabled {
   width: min(1040px, 96vw);
   max-width: 96vw;
   max-height: 92vh;
+  transition: transform 280ms cubic-bezier(0.32, 0.72, 0.22, 1);
+}
+
+/* ---- Side editing sheet ---- */
+/* While the description is edited beside the card, the modal slides left by
+   half the sheet's footprint so the pair stays centered. */
+.modal.ot-card-modal-shell.ot-side-editing {
+  transform: translateX(-229px);
+  overflow: visible;
+}
+
+.ot-side-sheet {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 18px);
+  width: 440px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 28px rgb(0 0 0 / 22%), 0 32px 72px rgb(0 0 0 / 26%);
+  animation: ot-side-sheet-in 340ms cubic-bezier(0.32, 0.72, 0.22, 1) 60ms backwards;
+}
+
+.ot-side-sheet.is-closing {
+  animation: ot-side-sheet-out 240ms cubic-bezier(0.55, 0, 0.75, 0.4) forwards;
+  pointer-events: none;
+}
+
+/* The modal slides left first (60ms head start), then the sheet emerges from
+   behind it; on close the sheet tucks back under while the modal recenters. */
+@keyframes ot-side-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(-84px) scale(0.96);
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes ot-side-sheet-out {
+  to {
+    opacity: 0;
+    transform: translateX(-72px) scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal.ot-card-modal-shell {
+    transition: none;
+  }
+
+  .ot-side-sheet {
+    animation: none;
+  }
+
+  .ot-side-sheet.is-closing {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.ot-side-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ot-side-sheet-header .ot-details-heading-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.ot-side-sheet-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+}
+
+/* The editor fills the sheet's height; its content scrolls inside. */
+.ot-side-sheet-content .ot-side-sheet-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.ot-side-sheet-content .ot-embedded-editor {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+/* Inline stand-in shown where the description editor would normally sit: a
+   quiet recessed panel, not a call-to-action box. */
+.ot-side-editing-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
+  color: var(--text-faint);
+  font-size: 13px;
 }
 
 .ot-card-modal {
@@ -1104,45 +1223,30 @@ button.ot-save-button:disabled {
 }
 
 .ot-card-modal-header {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  align-items: start;
-  gap: 12px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  padding: 18px 48px 16px 20px;
-  background: color-mix(in srgb, var(--background-secondary) 78%, var(--background-primary));
-}
-
-.ot-card-modal-header-icon {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
-  border-radius: 10px;
-  color: var(--interactive-accent);
-  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+  gap: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 22px 48px 18px;
+  background: color-mix(in srgb, var(--background-secondary) 78%, var(--background-primary));
+  text-align: center;
 }
 
-.ot-card-modal-header-icon > svg {
-  width: 20px;
-  height: 20px;
-}
 
-.ot-card-modal-header-copy {
-  min-width: 0;
-}
-
+/* The title reads as a heading, not a form field: chrome only on interaction. */
 .ot-card-modal .ot-title-input {
-  width: 100%;
+  width: min(680px, 100%);
   min-height: 38px;
   border: 1px solid transparent;
   border-radius: 8px;
-  padding: 3px 8px;
+  padding: 3px 10px;
+  background: transparent;
+  box-shadow: none;
   font-size: 24px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.25;
+  text-align: center;
   transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
 }
 
@@ -1160,18 +1264,24 @@ button.ot-save-button:disabled {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 7px;
-  padding: 1px 8px 0;
   color: var(--text-muted);
   font-size: 12px;
+  font-weight: 600;
+}
+
+.ot-card-modal-location-pill {
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+  border-radius: 999px;
+  padding: 1px 9px;
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
   font-weight: 650;
 }
 
-.ot-card-modal-board-name {
-  border-radius: 999px;
-  padding: 2px 8px;
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
+.ot-card-modal-location-sep {
+  color: var(--text-faint);
 }
 
 .ot-card-modal-body {
@@ -1208,17 +1318,17 @@ button.ot-save-button:disabled {
 .ot-card-modal-sidebar > .ot-field {
   gap: 10px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 10px;
-  padding: 13px;
-  background: var(--background-secondary);
+  border-radius: 12px;
+  padding: 13px 14px;
+  background: color-mix(in srgb, var(--background-secondary) 62%, var(--background-primary));
 }
 
 .ot-card-modal-sidebar > .ot-field > span:first-child {
-  color: var(--text-normal);
-  font-size: 13px;
-  font-weight: 800;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.07em;
 }
 
 .ot-card-modal > .ot-modal-actions {
@@ -1251,13 +1361,7 @@ button.ot-save-button:disabled {
   }
 
   .ot-card-modal-header {
-    grid-template-columns: 32px minmax(0, 1fr);
-    padding: 14px 42px 14px 12px;
-  }
-
-  .ot-card-modal-header-icon {
-    width: 30px;
-    height: 30px;
+    padding: 16px 42px 14px 12px;
   }
 
   .ot-card-modal .ot-title-input {
@@ -1313,7 +1417,7 @@ button.ot-save-button:disabled {
 .ot-date-month-title {
   overflow: hidden;
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 700;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1329,7 +1433,7 @@ button.ot-save-button:disabled {
 .ot-date-weekdays span {
   color: var(--text-muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   text-align: center;
 }
 
@@ -1358,8 +1462,8 @@ button.ot-save-button:disabled {
 }
 
 .ot-date-day.is-selected {
-  background: #7c3aed;
-  color: white;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent, #fff);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
 }
 
@@ -1378,7 +1482,7 @@ button.ot-save-button:disabled {
 .ot-date-field-label {
   color: var(--text-muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ot-date-field-row {
@@ -1412,8 +1516,8 @@ button.ot-save-button:disabled {
 }
 
 .ot-date-field-button.is-active {
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 1px #8b5cf6;
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
 .ot-title-input,
@@ -1522,7 +1626,7 @@ button.ot-save-button:disabled {
   overflow: hidden;
   color: white;
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 700;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1540,7 +1644,7 @@ button.ot-save-button:disabled {
   border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ot-label-create-preview-band {
@@ -1556,7 +1660,7 @@ button.ot-save-button:disabled {
   overflow: hidden;
   color: white;
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 42px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1611,7 +1715,7 @@ button.ot-save-button:disabled {
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   justify-content: center;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ot-label-create-footer {
@@ -1685,7 +1789,7 @@ button.ot-save-button:disabled {
   gap: 10px;
   color: var(--text-normal);
   font-size: 17px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ot-details-heading-icon {
@@ -1701,7 +1805,7 @@ button.ot-save-button:disabled {
   border-radius: 8px;
   padding: 0 12px;
   background: transparent;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ot-details-edit-button:hover {
@@ -1709,37 +1813,59 @@ button.ot-save-button:disabled {
   background: var(--background-modifier-hover);
 }
 
+/* Quiet chrome: a hairline that only warms up to the accent while the editor
+   actually has focus — the content, not the frame, is the loud part. */
 .ot-trello-editor {
-  border: 2px solid var(--interactive-accent);
-  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+  border-radius: 10px;
   overflow: hidden;
   background: var(--background-primary);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%), 0 8px 24px rgb(0 0 0 / 10%);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.ot-trello-editor:focus-within {
+  border-color: color-mix(in srgb, var(--interactive-accent) 65%, var(--background-modifier-border));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%), 0 12px 32px rgb(0 0 0 / 14%);
 }
 
 .ot-details-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 52px;
+  gap: 6px;
+  min-height: 42px;
   border-bottom: 1px solid var(--background-modifier-border);
-  padding: 6px 10px;
-  background: var(--background-secondary);
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--background-secondary) 55%, transparent);
 }
 
 .ot-details-toolbar-group {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 4px;
+  flex: 0 1 auto;
+  gap: 2px;
 }
 
+/* Buttons shrink as a group so the full toolset always fits the row, even in
+   the narrower side sheet. */
 .ot-details-tool {
-  width: 34px;
-  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 34px;
+  min-width: 20px;
+  width: auto;
+  height: 32px;
+  padding: 0;
   border-radius: 6px;
   color: var(--text-muted);
+}
+
+.ot-details-tool svg {
+  width: 17px;
+  height: 17px;
 }
 
 .ot-details-tool:hover {
@@ -1750,8 +1876,8 @@ button.ot-save-button:disabled {
 .ot-details-text-tool {
   border: 0;
   background: transparent;
-  font-size: 18px;
-  font-weight: 850;
+  font-size: 16px;
+  font-weight: 750;
   line-height: 1;
   cursor: pointer;
 }
@@ -1831,7 +1957,7 @@ button.ot-save-button:disabled {
 .ot-details-actions button {
   min-height: 36px;
   border-radius: 8px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ot-image-gallery {
@@ -1950,8 +2076,8 @@ button.ot-save-button:disabled {
 .ot-markdown-preview {
   min-height: 120px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 10px;
+  padding: 12px 16px;
   background: var(--background-primary);
   color: var(--text-normal);
   /* Click-to-edit + copy-friendly: text caret signals both "select me" and
@@ -2032,7 +2158,7 @@ button.ot-save-button:disabled {
   background: transparent;
   color: var(--interactive-accent);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -2212,12 +2338,15 @@ button.ot-save-button:disabled {
   gap: 12px;
 }
 
+/* The group's color lives in a spine on the left (like the note panels), not
+   in a loud full outline — the content stays the focal point. */
 .ot-checklist-group {
   gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--ot-checklist-color, var(--interactive-accent));
-  border-radius: 10px;
-  background: var(--background-secondary);
+  padding: 14px 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--ot-checklist-color, var(--interactive-accent));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-secondary) 62%, var(--background-primary));
 }
 
 .ot-checklist {
@@ -2241,7 +2370,7 @@ button.ot-save-button:disabled {
   flex: 1;
   color: var(--text-normal);
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .ot-field .ot-checklist-name {
@@ -2255,7 +2384,7 @@ button.ot-save-button:disabled {
   background: transparent;
   color: var(--text-normal);
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 700;
   box-shadow: none;
 }
 
@@ -2314,14 +2443,16 @@ button.ot-save-button:disabled {
 
 .ot-checklist-percent {
   color: var(--text-muted);
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .ot-progress-track {
-  height: 6px;
+  height: 5px;
   overflow: hidden;
   border-radius: 999px;
-  background: var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
 }
 
 .ot-progress-fill {
@@ -2329,7 +2460,7 @@ button.ot-save-button:disabled {
   height: 100%;
   border-radius: inherit;
   background: var(--ot-checklist-color, var(--interactive-accent));
-  transition: width 120ms ease;
+  transition: width 260ms cubic-bezier(0.32, 0.72, 0.22, 1);
 }
 
 .ot-checklist-row {
@@ -2487,18 +2618,20 @@ button.ot-save-button:disabled {
   height: 14px;
 }
 
+/* One surface, not a box-in-a-box: the checklist's colored spine carries the
+   nesting and the note itself is the only bordered panel, aligned with the
+   item's text column. */
 .ot-checklist-note-panel {
-  width: min(660px, calc(100% - 32px));
-  margin: 8px auto 12px;
-  padding: 8px 10px;
+  width: auto;
+  margin: 6px 8px 14px 62px;
+  padding: 0 0 0 12px;
   box-sizing: border-box;
-  border-left: 3px solid var(--ot-checklist-color, var(--interactive-accent));
-  border-radius: 0 6px 6px 0;
-  background: var(--background-secondary);
+  border-left: 2px solid color-mix(in srgb, var(--ot-checklist-color, var(--interactive-accent)) 70%, transparent);
+  background: transparent;
 }
 
 .ot-card-modal.is-sync-disabled .ot-checklist-note-panel {
-  margin: 8px auto 12px;
+  margin-left: 40px;
 }
 
 .ot-checklist-note-panel[hidden] {
@@ -2517,12 +2650,25 @@ button.ot-save-button:disabled {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 6px;
+}
+
+.ot-checklist-note-actions button {
+  min-height: 28px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ot-checklist-note-actions button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
 }
 
 .ot-checklist-note-preview {
-  min-height: 72px;
-  padding: 10px 12px;
+  min-height: 56px;
+  padding: 12px 14px;
   background: var(--background-primary);
 }
 
@@ -2535,19 +2681,21 @@ button.ot-save-button:disabled {
   color: var(--text-error);
 }
 
+/* Items read as a task list, not a form: plain text at rest, the input frame
+   appears only while pointing at or editing the row. */
 .ot-checklist-title {
   display: block;
   width: 100%;
   min-width: 0;
   min-height: 30px;
   padding: 5px 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--input-radius, 5px);
+  border: 1px solid transparent;
+  border-radius: var(--input-radius, 6px);
   box-sizing: border-box;
   overflow: hidden;
   resize: none;
-  background: var(--background-modifier-form-field);
-  box-shadow: var(--input-shadow);
+  background: transparent;
+  box-shadow: none;
   color: var(--text-normal);
   font-family: inherit;
   font-size: inherit;
@@ -2558,15 +2706,16 @@ button.ot-save-button:disabled {
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 
+.ot-checklist-row:hover .ot-checklist-title:not(:focus) {
+  border-color: var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-modifier-form-field) 55%, transparent);
+}
+
 .ot-checklist-title:focus {
   outline: none;
   border-color: var(--interactive-accent);
+  background: var(--background-modifier-form-field);
   box-shadow: 0 0 0 1px var(--interactive-accent);
-}
-
-.ot-checklist-title:hover:not(:focus) {
-  border-color: var(--background-modifier-border-hover, var(--background-modifier-border));
-  box-shadow: var(--input-shadow-hover, var(--input-shadow));
 }
 
 .ot-checklist-add {
@@ -2665,14 +2814,14 @@ button.ot-save-button:disabled {
 }
 
 .ot-confirm-actions .mod-warning {
-  border-color: #dc2626;
-  background-color: #dc2626;
+  border-color: var(--ot-danger-color, var(--color-red, #dc2626));
+  background-color: var(--ot-danger-color, var(--color-red, #dc2626));
   color: #ffffff;
 }
 
 .ot-confirm-actions .mod-warning:hover {
-  border-color: #b91c1c;
-  background-color: #b91c1c;
+  border-color: color-mix(in srgb, var(--ot-danger-color, var(--color-red, #dc2626)) 85%, black);
+  background-color: color-mix(in srgb, var(--ot-danger-color, var(--color-red, #dc2626)) 85%, black);
 }
 
 .ot-modal-actions .mod-warning {
@@ -2772,10 +2921,10 @@ button.ot-save-button:disabled {
   overflow: hidden;
   flex: 0 0 auto;
   border: 1.5px solid var(--background-primary);
-  background: var(--ot-avatar-color, #8b5cf6);
+  background: var(--ot-avatar-color, var(--interactive-accent));
   color: #fff;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -2790,16 +2939,22 @@ button.ot-save-button:disabled {
   gap: 6px;
 }
 
+/* The chip never outgrows its card: the name shrinks with an ellipsis and the
+   remove button stays inside the pill. */
 .ot-assignee-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 6px 3px 3px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 4px 3px 3px;
   border-radius: 999px;
   background: var(--background-modifier-hover);
 }
 
 .ot-assignee-name {
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 160px;
   overflow: hidden;
   font-size: 12px;
@@ -2810,9 +2965,23 @@ button.ot-save-button:disabled {
 
 .ot-assignee-remove,
 .ot-assignee-add {
-  width: 24px;
-  height: 24px;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
   padding: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.ot-assignee-remove:hover,
+.ot-assignee-add:hover {
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--text-normal) 12%, transparent);
+}
+
+.ot-assignee-add {
+  border: 1px solid var(--background-modifier-border);
 }
 
 /* ---- View switch (Board / Table) ---- */
@@ -2962,7 +3131,8 @@ button.ot-save-button:disabled {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
   font-size: 11px;
-  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 .ot-table-label-filter-count[hidden] {
   display: none;
@@ -3204,7 +3374,7 @@ button.ot-save-button:disabled {
   border-radius: 5px;
   padding: 2px 6px;
   color: #fff;
-  background: #c9372c;
+  background: var(--ot-danger-color, var(--color-red, #c9372c));
   font-weight: 750;
 }
 
@@ -3397,8 +3567,8 @@ body.ot-col-resizing * {
   border-color: var(--text-muted);
 }
 .ot-table-row.is-completed .ot-table-check {
-  background: #8cc63f;
-  border-color: #8cc63f;
+  background: var(--ot-done-color, var(--color-green, #8cc63f));
+  border-color: var(--ot-done-color, var(--color-green, #8cc63f));
 }
 /* A clean scale pop — NOT the Kanban toggle keyframes, which carry a
    translateY(-50%) for their absolutely-positioned button and would jump the

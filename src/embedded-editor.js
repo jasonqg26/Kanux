@@ -64,9 +64,11 @@ function buildEditorClass(app) {
       });
       this.options = options;
       this.scope = new Scope(appInstance.scope);
-      // Mod+Enter is bound to "open link in new leaf"; the scope swallows the
-      // hotkey so the CM keymap below can treat it as "save".
+      // Mod+Enter is bound to "open link in new leaf" and Mod+S to Obsidian's
+      // "save file"; the scope swallows both hotkeys so the CM keymap below
+      // can treat them as "save this field" instead.
       this.scope.register(["Mod"], "Enter", () => true);
+      this.scope.register(["Mod"], "S", () => true);
       // Editor commands expect a MarkdownView with editMode/editor set.
       this.owner.editMode = this;
       this.owner.editor = this.editor;
@@ -98,6 +100,11 @@ function buildEditorClass(app) {
       return this.options || constructingOptions || {};
     }
 
+    get selectionText() {
+      const range = this.editor.cm.state.selection.main;
+      return this.editor.cm.state.sliceDoc(range.from, range.to);
+    }
+
     insertAtCursor(text) {
       const cm = this.editor.cm;
       const range = cm.state.selection.main;
@@ -105,6 +112,38 @@ function buildEditorClass(app) {
         changes: { from: range.from, to: range.to, insert: text },
         selection: EditorSelection.cursor(range.from + text.length),
       });
+      cm.focus();
+    }
+
+    // Wraps the selection in markers ("**", "*", "`", ...); with no selection
+    // the markers are inserted and the caret lands between them.
+    wrapSelection(before, after = before) {
+      const cm = this.editor.cm;
+      const range = cm.state.selection.main;
+      const selected = cm.state.sliceDoc(range.from, range.to);
+      cm.dispatch({
+        changes: { from: range.from, to: range.to, insert: `${before}${selected}${after}` },
+        selection: selected
+          ? EditorSelection.range(range.from + before.length, range.to + before.length)
+          : EditorSelection.cursor(range.from + before.length),
+      });
+      cm.focus();
+    }
+
+    // Rewrites every line touched by the selection through makeLine(text, index)
+    // — the primitive behind the heading/list/quote toolbar buttons.
+    setLinePrefix(makeLine) {
+      const cm = this.editor.cm;
+      const range = cm.state.selection.main;
+      const firstLine = cm.state.doc.lineAt(range.from).number;
+      const lastLine = cm.state.doc.lineAt(range.to).number;
+      const changes = [];
+      for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber += 1) {
+        const line = cm.state.doc.line(lineNumber);
+        const next = makeLine(line.text, lineNumber - firstLine);
+        if (next !== line.text) changes.push({ from: line.from, to: line.to, insert: next });
+      }
+      if (changes.length) cm.dispatch({ changes });
       cm.focus();
     }
 

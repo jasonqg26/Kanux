@@ -1573,6 +1573,7 @@ class CardModal extends Modal {
     const previousBody = this.contentEl.querySelector(".ot-card-modal-body");
     const bodyScrollTop = previousBody ? previousBody.scrollTop : 0;
     this.destroyEmbeddedEditors();
+    this.closeSideSheet();
     this.contentEl.replaceChildren();
     this.modalEl.addClass("ot-card-modal-shell");
     this.contentEl.addClass("ot-card-modal");
@@ -1590,15 +1591,14 @@ class CardModal extends Modal {
 
     const board = this.plugin.findBoardForCard(card);
     const list = board && board.lists.find((item) => item.id === card.listId);
+    // Centered document-style header: title, then where the card lives.
     const header = createElement("header", "ot-card-modal-header");
-    const headerIcon = createElement("span", "ot-card-modal-header-icon");
-    setIconSafe(headerIcon, "check-square");
-    const headerCopy = createElement("div", "ot-card-modal-header-copy");
     const location = createElement("div", "ot-card-modal-location");
-    location.append(createElement("span", "", list ? `In ${list.title}` : "Kanux card"));
-    if (board) location.append(createElement("span", "ot-card-modal-board-name", board.name));
-    headerCopy.append(title, location);
-    header.append(headerIcon, headerCopy);
+    if (list) location.append(createElement("span", "ot-card-modal-location-pill", list.title));
+    if (list && board) location.append(createElement("span", "ot-card-modal-location-sep", "·"));
+    if (board) location.append(createElement("span", "", board.name));
+    if (!list && !board) location.append(createElement("span", "", "Kanux card"));
+    header.append(title, location);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
     const assigneesField = this.notesOnly || !collaborationEnabled ? null : this.renderAssigneesField();
@@ -1649,7 +1649,9 @@ class CardModal extends Modal {
     mainColumn.append(detailsField, checklistField);
     const body = createElement("div", "ot-card-modal-body");
     body.append(mainColumn);
-    if (!this.notesOnly) {
+    // Labels and members live in captioned sidebar cards, so each has an
+    // unmistakable home; with nothing to show, content takes the full width.
+    if (!this.notesOnly && (labelsField || assigneesField)) {
       const sidebar = createElement("aside", "ot-card-modal-sidebar");
       if (labelsField) sidebar.append(labelsField);
       if (assigneesField) sidebar.append(assigneesField);
@@ -1694,6 +1696,7 @@ class CardModal extends Modal {
   onClose() {
     this.stopLockHeartbeat();
     this.destroyEmbeddedEditors();
+    this.closeSideSheet();
     this.discardPendingDetailAttachments().catch(console.error);
     if (!this.readOnly && this.lockBoardId && this.plugin.releaseCardLock) {
       this.plugin.releaseCardLock(this.lockBoardId, this.cardId).catch(() => {});
@@ -1763,6 +1766,49 @@ class CardModal extends Modal {
       try { tracked.destroy(); } catch (error) { console.error(error); }
     });
     this.embeddedEditors = [];
+  }
+
+  // ---- Side editing sheet ----
+  // Editing the description slides the modal left and opens a page-like panel
+  // beside it, so the card (labels, checklist, dates) stays visible while
+  // writing. Only used when the viewport has room for both.
+  openDetailsSideSheet(titleText, ownerKey) {
+    if (!this.modalEl) return null;
+    // One sheet at a time: whoever claimed it keeps it; a second editor
+    // (e.g. a checklist note while the description is open) edits inline.
+    if (this.sideSheet && this.sideSheet.isConnected && this.sideSheetOwner !== ownerKey) return null;
+    this.closeSideSheet();
+    const SHEET_WIDTH = 440;
+    const SHEET_GAP = 18;
+    const modalWidth = this.modalEl.getBoundingClientRect().width;
+    if (!modalWidth || window.innerWidth < modalWidth + SHEET_WIDTH + SHEET_GAP + 32) return null;
+    this.sideSheetOwner = ownerKey;
+    const sheet = createElement("aside", "ot-side-sheet");
+    const header = createElement("div", "ot-side-sheet-header");
+    const icon = createElement("span", "ot-details-heading-icon");
+    setIconSafe(icon, "align-left");
+    header.append(icon, createElement("span", "", titleText));
+    const content = createElement("div", "ot-side-sheet-content");
+    sheet.append(header, content);
+    this.modalEl.append(sheet);
+    this.modalEl.classList.add("ot-side-editing");
+    this.sideSheet = sheet;
+    return content;
+  }
+
+  closeSideSheet(ownerKey) {
+    if (ownerKey && this.sideSheetOwner && this.sideSheetOwner !== ownerKey) return;
+    const sheet = this.sideSheet;
+    this.sideSheet = null;
+    this.sideSheetOwner = null;
+    if (this.modalEl) this.modalEl.classList.remove("ot-side-editing");
+    if (!sheet) return;
+    // Let the sheet tuck back behind the modal before leaving the DOM; the
+    // timeout covers environments where animation events never fire.
+    sheet.classList.add("is-closing");
+    const removeSheet = () => sheet.remove();
+    sheet.addEventListener("animationend", removeSheet, { once: true });
+    window.setTimeout(removeSheet, 400);
   }
 
   currentDetailsText() {
@@ -1864,6 +1910,8 @@ class CardModal extends Modal {
    */
   renderDetailsField(options = {}) {
     const noteMode = !!options.noteMode;
+    // Identifies this editor as a side-sheet owner; empty means inline only.
+    const sheetKey = noteMode ? textLine(options.sheetKey || "") : "details";
     const fieldTitle = textLine(options.title) || "Description";
     const placeholder = textLine(options.placeholder) || "Write a description...";
     const initialMarkdown = noteMode ? String(options.markdown || "") : this.localDetails;
@@ -2066,6 +2114,7 @@ class CardModal extends Modal {
       try {
         if (noteMode) {
           await options.onSave(draftMarkdown);
+          this.closeSideSheet(sheetKey);
           return;
         }
         await this.persistDetailsDraft(draftMarkdown);
@@ -2080,6 +2129,7 @@ class CardModal extends Modal {
     const cancelDetails = async () => {
       if (noteMode) {
         options.onCancel();
+        this.closeSideSheet(sheetKey);
         return;
       }
       try {
@@ -2763,18 +2813,53 @@ class CardModal extends Modal {
         }
 
         const editorFrame = createElement("div", "ot-trello-editor");
-        if (!noteMode) {
-          const toolbar = createElement("div", "ot-details-toolbar");
-          toolbar.setAttribute("role", "toolbar");
-          toolbar.setAttribute("aria-label", `${fieldTitle} tools`);
-          const leftTools = createElement("div", "ot-details-toolbar-group");
-          leftTools.append(makeTool("image", "Add image", () => imageInput.click()));
-          const rightTools = createElement("div", "ot-details-toolbar-group");
-          rightTools.append(makeTool("help-circle", "Formatting help", () => new Notice("This is Obsidian's Live Preview editor: write plain Markdown (# headings, **bold**, - lists, [[links]]) and it renders as you type. Ctrl/⌘+S or Ctrl/⌘+Enter saves, Esc cancels.")));
-          toolbar.append(leftTools, rightTools);
-          editorFrame.append(toolbar);
-        }
-        editorFrame.append(embeddedHost);
+        const toolbar = createElement("div", "ot-details-toolbar");
+        toolbar.setAttribute("role", "toolbar");
+        toolbar.setAttribute("aria-label", `${fieldTitle} formatting`);
+        const stripLineMarkers = (text) => text.replace(/^\s*(#{1,6}\s+|[-*]\s+|\d+[.)]\s+|>\s+)/, "");
+        const setHeadingLevel = (level) => embeddedEditor.setLinePrefix((text) => `${level ? `${"#".repeat(level)} ` : ""}${stripLineMarkers(text)}`);
+        const openCmHeadingMenu = (event) => {
+          const menu = new Menu();
+          [1, 2, 3].forEach((level) => {
+            menu.addItem((item) => item.setTitle(`Heading ${level}`).onClick(() => setHeadingLevel(level)));
+          });
+          menu.addItem((item) => item.setTitle("Normal text").onClick(() => setHeadingLevel(0)));
+          menu.showAtMouseEvent(event);
+        };
+        const insertCmLink = () => {
+          new TextPromptModal(this.app, "Link", "https://...", "https://", (url) => {
+            const target = textLine(url);
+            if (!target || target === "https://") return;
+            const label = embeddedEditor.selectionText;
+            embeddedEditor.insertAtCursor(`[${label || target}](${target})`);
+          }).open();
+        };
+        const insertCmVaultNote = () => {
+          const label = embeddedEditor.selectionText;
+          new VaultNoteSuggestModal(this.app, (file) => {
+            const target = file.path.replace(/\.md$/i, "");
+            embeddedEditor.insertAtCursor(label ? `[[${target}|${label}]]` : `[[${target}]]`);
+          }).open();
+        };
+        const leftTools = createElement("div", "ot-details-toolbar-group");
+        leftTools.append(
+          makeTextTool("Tt", "Heading", openCmHeadingMenu),
+          makeTextTool("B", "Bold", () => embeddedEditor.wrapSelection("**")),
+          makeTextTool("I", "Italic", () => embeddedEditor.wrapSelection("*")),
+          makeTextTool("S", "Strikethrough", () => embeddedEditor.wrapSelection("~~")),
+          makeTool("quote", "Quote", () => embeddedEditor.setLinePrefix((text) => `> ${text}`)),
+          makeTool("list", "Bulleted list", () => embeddedEditor.setLinePrefix((text) => `- ${stripLineMarkers(text)}`)),
+          makeTool("list-ordered", "Numbered list", () => embeddedEditor.setLinePrefix((text, index) => `${index + 1}. ${stripLineMarkers(text)}`)),
+          makeTool("link", "Link", insertCmLink),
+          makeTool("file-text", "Link vault note", insertCmVaultNote),
+          ...(!noteMode ? [makeTool("image", "Add image", () => imageInput.click())] : []),
+          makeTool("minus", "Divider", () => embeddedEditor.insertAtCursor("\n---\n"))
+        );
+        const rightTools = createElement("div", "ot-details-toolbar-group");
+        rightTools.append(makeTool("code-2", "Inline code", () => embeddedEditor.wrapSelection("`")));
+        rightTools.append(makeTool("help-circle", "Formatting help", () => new Notice("Obsidian's Live Preview editor: write Markdown (# headings, **bold**, - lists, [[links]]) and it renders as you type. Ctrl/⌘+S or Ctrl/⌘+Enter saves, Esc cancels.")));
+        toolbar.append(leftTools, rightTools);
+        editorFrame.append(toolbar, embeddedHost);
 
         const actions = createElement("div", "ot-details-actions");
         const actionInfo = createElement("div", "ot-details-action-info");
@@ -2798,7 +2883,17 @@ class CardModal extends Modal {
         updateEditorState();
 
         header.append(heading);
-        field.append(header, editorFrame, actions, imageInput, editor);
+        // With room beside the modal, the editor opens as a page-like side
+        // sheet and the card stays fully visible; otherwise it edits inline.
+        const sheetContent = sheetKey ? this.openDetailsSideSheet(fieldTitle, sheetKey) : null;
+        if (sheetContent) {
+          editorFrame.classList.add("ot-side-sheet-editor");
+          sheetContent.append(editorFrame, actions);
+          const sideNote = createElement("div", "ot-side-editing-note", "Editing in the side panel");
+          field.append(header, sideNote, imageInput, editor);
+        } else {
+          field.append(header, editorFrame, actions, imageInput, editor);
+        }
         requestAnimationFrame(() => embeddedEditor.focusEditor());
         return field;
       }
@@ -3648,6 +3743,7 @@ class CardModal extends Modal {
 
               const noteEditor = this.renderDetailsField({
                 noteMode: true,
+                sheetKey: file.path,
                 title: "Checklist item note",
                 placeholder: "Write details for this checklist item...",
                 markdown: draft !== undefined ? draft : body,
