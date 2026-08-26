@@ -79,6 +79,7 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 
 - `parseChecklist(text)`: convierte líneas Markdown en elementos de checklist.
 - `checklistItemNoteBody(markdown)`: obtiene el contenido editable de una nota de elemento enlazado.
+- `checklistItemNoteWithBody(markdown, nextBody)`: reemplaza el contenido editable y conserva el frontmatter y encabezado administrado.
 - `parseChecklists(text)`: lee grupos de checklist actuales y el formato plano heredado.
 - `normalizeChecklists(checklists, legacyItems)`: normaliza grupos, elementos, colores y miembros.
 - `checklistToText(items)`: serializa elementos sin viñeta Markdown.

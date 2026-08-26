@@ -10,6 +10,32 @@
   font-size: calc(16px * var(--ot-font-scale, 1));
 }
 
+button.ot-save-button.mod-cta,
+button.ot-save-button {
+  border-color: #22c55e;
+  background-color: #22c55e;
+  color: #ffffff;
+}
+
+button.ot-save-button.mod-cta:hover,
+button.ot-save-button:hover {
+  border-color: #16a34a;
+  background-color: #16a34a;
+}
+
+button.ot-save-button.mod-cta:active,
+button.ot-save-button:active {
+  border-color: #15803d;
+  background-color: #15803d;
+}
+
+button.ot-save-button.mod-cta:disabled,
+button.ot-save-button:disabled {
+  border-color: #86efac;
+  background-color: #86efac;
+  color: #166534;
+}
+
 .ot-board-root.is-appearance-dark {
   --text-normal: #f1f2f4;
   --text-muted: #b6c2cf;
@@ -1730,8 +1756,12 @@
   cursor: pointer;
 }
 
-.ot-details-text-tool[aria-label="Italic"] {
+.ot-details-text-tool[aria-label^="Italic"] {
   font-style: italic;
+}
+
+.ot-details-text-tool[aria-label^="Strikethrough"] {
+  text-decoration: line-through;
 }
 
 .ot-trello-editor .ot-image-gallery.is-editing {
@@ -1760,8 +1790,42 @@
 .ot-details-actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 2px;
+}
+
+.ot-details-action-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ot-details-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: 700;
+}
+
+.ot-details-status.is-dirty {
+  color: var(--text-warning, #d97706);
+}
+
+.ot-details-status.is-error {
+  color: var(--text-error);
+}
+
+.ot-details-shortcut {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.ot-details-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .ot-details-actions button {
@@ -1930,6 +1994,8 @@
   border: none;
   border-top: 1px solid var(--background-modifier-border);
 }
+/* Compact heading margins only: size, weight, and color come from the active
+   Obsidian theme via the markdown-rendered class, same as the editor. */
 .ot-markdown-preview h1,
 .ot-markdown-preview h2,
 .ot-markdown-preview h3,
@@ -1937,10 +2003,6 @@
 .ot-markdown-preview h5,
 .ot-markdown-preview h6 {
   margin: 0.5em 0 0.25em;
-  font-weight: 700;
-}
-.ot-markdown-preview h3 {
-  font-size: 1.12em;
 }
 
 /* Inline images: fill the description width, keep aspect, sensible height —
@@ -2426,15 +2488,17 @@
 }
 
 .ot-checklist-note-panel {
-  margin: 4px 4px 8px 88px;
+  width: min(660px, calc(100% - 32px));
+  margin: 8px auto 12px;
   padding: 8px 10px;
+  box-sizing: border-box;
   border-left: 3px solid var(--ot-checklist-color, var(--interactive-accent));
   border-radius: 0 6px 6px 0;
   background: var(--background-secondary);
 }
 
 .ot-card-modal.is-sync-disabled .ot-checklist-note-panel {
-  margin-left: 54px;
+  margin: 8px auto 12px;
 }
 
 .ot-checklist-note-panel[hidden] {
@@ -2447,6 +2511,19 @@
 
 .ot-checklist-note-content > :last-child {
   margin-bottom: 0;
+}
+
+.ot-checklist-note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ot-checklist-note-preview {
+  min-height: 72px;
+  padding: 10px 12px;
+  background: var(--background-primary);
 }
 
 .ot-checklist-note-status {
@@ -2543,6 +2620,61 @@
   gap: 8px;
 }
 
+.modal.ot-confirm-modal-shell {
+  width: min(350px, calc(100vw - 32px));
+  max-width: 350px;
+}
+
+.ot-confirm-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  background: var(--background-primary);
+}
+
+.ot-confirm-heading {
+  display: block;
+}
+
+.ot-confirm-heading h2 {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 16px;
+}
+
+.ot-confirm-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.35;
+}
+
+.ot-confirm-warning {
+  margin: 0;
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  font-weight: 700;
+}
+
+.ot-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 5px;
+}
+
+.ot-confirm-actions .mod-warning {
+  border-color: #dc2626;
+  background-color: #dc2626;
+  color: #ffffff;
+}
+
+.ot-confirm-actions .mod-warning:hover {
+  border-color: #b91c1c;
+  background-color: #b91c1c;
+}
+
 .ot-modal-actions .mod-warning {
   margin-right: auto;
 }
@@ -2595,6 +2727,19 @@
 
   .ot-details-toolbar-group {
     flex-wrap: wrap;
+  }
+
+  .ot-details-actions,
+  .ot-details-action-buttons {
+    width: 100%;
+  }
+
+  .ot-details-action-buttons button {
+    flex: 1;
+  }
+
+  .ot-details-shortcut {
+    display: none;
   }
 }
 
@@ -3408,6 +3553,31 @@ body.ot-col-resizing * {
   flex: 0 0 auto;
 }
 
+/* ---- Embedded Obsidian Live Preview editor ---- */
+.ot-embedded-editor {
+  min-height: 170px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px 10px;
+  cursor: text;
+}
+
+.ot-embedded-editor .cm-editor {
+  background: transparent;
+}
+
+/* The description field is a note-sized surface: line numbers and fold
+   controls are workspace-editor furniture, not card furniture. */
+.ot-embedded-editor .cm-gutters {
+  display: none;
+}
+
+/* Match the read preview's body weight; per-line heading/bold styles from the
+   theme still apply on top. */
+.ot-embedded-editor .cm-content {
+  font-weight: var(--font-normal, 400);
+}
+
 /* ---- Description block editor (Notion/Trello-style) ---- */
 .ot-block-editor {
   /* Block flow (not flex): image blocks are inline-block, so consecutive
@@ -3426,8 +3596,10 @@ body.ot-col-resizing * {
   background: transparent;
   box-shadow: none;
   color: var(--text-normal);
+  /* Match the read preview's typography so editing IS the preview. */
   font-family: inherit;
-  font-size: 14px;
+  font-size: inherit;
+  font-weight: inherit;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -3443,6 +3615,12 @@ body.ot-col-resizing * {
 .ot-block-text:focus {
   outline: none;
   box-shadow: none;
+}
+/* Obsidian-style live-preview marker: the "#" shown while the caret is on a
+   heading line. Visual only — the serializer skips it. */
+.ot-block-text .ot-md-token {
+  color: var(--text-faint);
+  user-select: none;
 }
 .ot-block-text[data-empty="true"][data-placeholder]::before {
   content: attr(data-placeholder);
@@ -3465,6 +3643,8 @@ body.ot-col-resizing * {
 .ot-block-text li {
   margin: 0.1em 0;
 }
+/* Compact heading margins only: size, weight, and color come from the active
+   Obsidian theme via the markdown-rendered class on the editable surface. */
 .ot-block-text h1,
 .ot-block-text h2,
 .ot-block-text h3,
@@ -3472,10 +3652,6 @@ body.ot-col-resizing * {
 .ot-block-text h5,
 .ot-block-text h6 {
   margin: 0.5em 0 0.25em;
-  font-weight: 700;
-}
-.ot-block-text h3 {
-  font-size: 1.12em;
 }
 .ot-block-text blockquote {
   margin: 0.35em 0;

@@ -17,7 +17,7 @@ const {
   textButton,
   textLine,
 } = require("./helpers");
-const { AboutModal, BoardAppearanceModal, CardDatesModal, CardModal, LabelPickerModal, ListColorModal } = require("./modals");
+const { AboutModal, BoardAppearanceModal, CardDatesModal, CardModal, LabelPickerModal, ListColorModal, confirmAction } = require("./modals");
 
 // Live board presence (SyncDeck cursors) tuning.
 // The transport stays plain HTTP polling; smoothness comes from client-side
@@ -2112,7 +2112,8 @@ class BoardView extends ItemView {
         .setTitle("Delete card")
         .setIcon("trash")
         .onClick(async () => {
-          if (!window.confirm("Delete this card and its linked Markdown note?")) return;
+          const confirmed = await confirmAction(this.app, "Delete card", "Delete this card and its linked Markdown note?");
+          if (!confirmed) return;
           await this.plugin.deleteCard(card.id);
         });
     });

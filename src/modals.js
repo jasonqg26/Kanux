@@ -8,6 +8,7 @@ const {
   addMonths,
   addButtonIcon,
   checklistItemNoteBody,
+  checklistItemNoteWithBody,
   checklistStats,
   cardFileBaseName,
   cleanDate,
@@ -32,9 +33,11 @@ const {
   uid,
 } = require("./helpers");
 
+const { createEmbeddedMarkdownEditor } = require("./embedded-editor");
+
 // ---- Markdown <-> HTML for the WYSIWYG description blocks ----
 // A deliberately SMALL, symmetric subset (paragraphs, line breaks, #-headings,
-// -/1. lists, > quotes, ---, **bold**, *italic*, `code`, [link](url)) so that
+// -/1. lists, > quotes, ---, **bold**, *italic*, ~~strike~~, `code`, [link](url)) so that
 // md -> html -> md round-trips bytes for everything these converters produce.
 // Unrecognized markdown stays literal text and survives untouched.
 function escapeDetailsHtml(text) {
@@ -53,6 +56,7 @@ function inlineMdToHtml(text) {
     return `<a class="internal-link" data-wikilink="true" data-has-alias="${hasAlias ? "true" : "false"}" data-href="${target}" href="${target}">${label}</a>`;
   });
   out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  out = out.replace(/~~([^~]+)~~/g, "<s>$1</s>");
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
@@ -60,7 +64,7 @@ function inlineMdToHtml(text) {
 }
 
 function detailsMdToHtml(markdown) {
-  const lines = String(markdown || "").split("\n");
+  const lines = String(markdown || "").split(/\r?\n/);
   const html = [];
   let para = [];
   const flushPara = () => {
@@ -130,11 +134,15 @@ function detailsHtmlToMd(root) {
     node.childNodes.forEach((child) => {
       if (child.nodeType === 3) { out += child.textContent; return; }
       if (child.nodeType !== 1) return;
+      // Live-preview markers (the "#" shown while the caret is on a heading
+      // line) are visual only — the heading tag already encodes them.
+      if (child.classList && child.classList.contains("ot-md-token")) return;
       const tag = child.tagName;
       if (tag === "BR") { out += "\n"; return; }
       const inner = inline(child);
       if (tag === "B" || tag === "STRONG") out += inner.trim() ? `**${inner}**` : inner;
       else if (tag === "I" || tag === "EM") out += inner.trim() ? `*${inner}*` : inner;
+      else if (tag === "S" || tag === "DEL" || tag === "STRIKE") out += inner.trim() ? `~~${inner}~~` : inner;
       else if (tag === "CODE") out += inner.trim() ? `\`${inner}\`` : inner;
       else if (tag === "A" && child.dataset.wikilink === "true") {
         const target = child.dataset.href || child.getAttribute("href") || "";
@@ -203,6 +211,42 @@ function detailsHtmlToMd(root) {
   const parts = [];
   serializeChildren(root, parts);
   return parts.join("\n\n").replace(/\u00a0/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// Notion-style autoformat triggers for the description editor: typing one of
+// these at the start of a line and pressing Space converts the line into the
+// matching block instead of leaving raw markdown markers in the text.
+const DETAILS_AUTOFORMAT_COMMANDS = {
+  "-": { command: "insertUnorderedList" },
+  "*": { command: "insertUnorderedList" },
+  "1.": { command: "insertOrderedList" },
+  "1)": { command: "insertOrderedList" },
+  ">": { command: "formatBlock", value: "blockquote" },
+  "#": { command: "formatBlock", value: "h1" },
+  "##": { command: "formatBlock", value: "h2" },
+  "###": { command: "formatBlock", value: "h3" },
+};
+
+function autoformatCommandForPrefix(prefix) {
+  return DETAILS_AUTOFORMAT_COMMANDS[prefix] || null;
+}
+
+// Inline live-preview triggers: finishing "**bold**", "*italic*", "~~strike~~"
+// or "`code`" right before the caret formats the run in place, Obsidian-style.
+const INLINE_AUTOFORMAT_RULES = [
+  { pattern: /\*\*([^*\n]+)\*\*$/, tag: "strong" },
+  { pattern: /~~([^~\n]+)~~$/, tag: "s" },
+  { pattern: /`([^`\n]+)`$/, tag: "code" },
+  { pattern: /(?<!\*)\*([^*\n]+)\*$/, tag: "em" },
+];
+
+function inlineAutoformatMatch(textBeforeCaret) {
+  for (const rule of INLINE_AUTOFORMAT_RULES) {
+    const match = String(textBeforeCaret || "").match(rule.pattern);
+    if (!match || !match[1].trim()) continue;
+    return { tag: rule.tag, span: match[0], content: match[1] };
+  }
+  return null;
 }
 
 // Drag payload type for reordering image blocks inside the description editor.
@@ -325,7 +369,7 @@ class TextPromptModal extends Modal {
 
     const actions = createElement("div", "ot-modal-actions");
     const cancel = createElement("button", "", "Cancel");
-    const save = createElement("button", "mod-cta", "Save");
+    const save = createElement("button", "mod-cta ot-save-button", "Save");
     addButtonIcon(cancel, "x");
     addButtonIcon(save, "check");
     cancel.type = "button";
@@ -361,6 +405,57 @@ class TextPromptModal extends Modal {
       new Notice("Could not save.");
     });
   }
+}
+
+class ConfirmModal extends Modal {
+  constructor(app, title, message, resolve) {
+    super(app);
+    this.title = title;
+    this.message = message;
+    this.resolve = resolve;
+    this.settled = false;
+  }
+
+  onOpen() {
+    this.modalEl.addClass("ot-confirm-modal-shell");
+    this.contentEl.addClass("ot-confirm-modal");
+    const heading = createElement("div", "ot-confirm-heading");
+    heading.append(createElement("h2", "", this.title));
+
+    const message = createElement("p", "ot-confirm-message", this.message);
+    const warning = createElement("p", "ot-confirm-warning", "This action cannot be undone.");
+    const actions = createElement("div", "ot-confirm-actions");
+    const cancel = createElement("button", "", "Cancel");
+    const confirm = createElement("button", "mod-warning", "Delete");
+    cancel.type = "button";
+    confirm.type = "button";
+    addButtonIcon(cancel, "x");
+    addButtonIcon(confirm, "trash-2");
+    cancel.addEventListener("click", () => this.finish(false));
+    confirm.addEventListener("click", () => this.finish(true));
+    actions.append(cancel, confirm);
+    this.contentEl.replaceChildren(heading, message, warning, actions);
+    requestAnimationFrame(() => cancel.focus());
+  }
+
+  finish(confirmed) {
+    if (this.settled) return;
+    this.settled = true;
+    this.resolve(confirmed);
+    this.close();
+  }
+
+  onClose() {
+    if (!this.settled) {
+      this.settled = true;
+      this.resolve(false);
+    }
+  }
+}
+
+function confirmAction(app, title, message) {
+  if (!app || !app.workspace) return Promise.resolve(true);
+  return new Promise((resolve) => new ConfirmModal(app, title, message, resolve).open());
 }
 
 /** Lets the description editor link any Markdown note already in the vault. */
@@ -601,7 +696,7 @@ class LabelPickerModal extends Modal {
     removeColor.classList.add("ot-remove-color-button");
 
     const footer = createElement("div", "ot-label-create-footer");
-    const create = createElement("button", "mod-cta", this.editingKey ? "Save" : "Create");
+    const create = createElement("button", this.editingKey ? "mod-cta ot-save-button" : "mod-cta", this.editingKey ? "Save" : "Create");
     addButtonIcon(create, this.editingKey ? "check" : "plus");
     create.type = "submit";
     if (this.editingKey && this.onDelete) {
@@ -681,7 +776,7 @@ class ListColorModal extends Modal {
 
     const actions = createElement("div", "ot-modal-actions");
     const cancel = createElement("button", "", "Cancel");
-    const save = createElement("button", "mod-cta", "Save");
+    const save = createElement("button", "mod-cta ot-save-button", "Save");
     addButtonIcon(cancel, "x");
     addButtonIcon(save, "check");
     cancel.type = "button";
@@ -812,19 +907,25 @@ class BoardAppearanceModal extends Modal {
       .addButton((button) => button.setButtonText("Delete").setWarning().setDisabled(!presets.length).onClick(async () => {
         if (!selectedPresetId) return;
         const selected = presets.find((preset) => preset.id === selectedPresetId);
-        if (!selected || !window.confirm(`Delete appearance preset "${selected.name}"?`)) return;
+        if (!selected) return;
+        const confirmed = await confirmAction(this.app, "Delete appearance preset", `Delete appearance preset "${selected.name}"?`);
+        if (!confirmed) return;
         await this.plugin.deleteAppearancePreset(selectedPresetId);
         this.render();
       }));
-    presetSetting.addButton((button) => button.setButtonText("Save current").setCta().onClick(() => {
-      new TextPromptModal(this.app, "Save appearance", "Preset name", "", async (name) => {
-        const saved = await this.plugin.saveAppearancePreset(name, this.plugin.getBoardAppearance(this.boardId));
-        if (saved) {
-          new Notice(`Appearance preset "${saved.name}" saved.`);
-          this.render();
-        }
-      }).open();
-    }));
+    presetSetting.addButton((button) => {
+      button.setButtonText("Save current").setCta();
+      button.buttonEl.addClass("ot-save-button");
+      button.onClick(() => {
+        new TextPromptModal(this.app, "Save appearance", "Preset name", "", async (name) => {
+          const saved = await this.plugin.saveAppearancePreset(name, this.plugin.getBoardAppearance(this.boardId));
+          if (saved) {
+            new Notice(`Appearance preset "${saved.name}" saved.`);
+            this.render();
+          }
+        }).open();
+      });
+    });
 
     const sourceBoards = this.plugin.data.boards.filter((item) => item.id !== this.boardId);
     let sourceBoardId = sourceBoards[0] ? sourceBoards[0].id : "";
@@ -1123,7 +1224,7 @@ class CardDatesModal extends Modal {
     const actions = createElement("div", "ot-modal-actions");
     const clear = createElement("button", "", "Clear dates");
     const cancel = createElement("button", "", "Cancel");
-    const save = createElement("button", "mod-cta", "Save");
+    const save = createElement("button", "mod-cta ot-save-button", "Save");
     addButtonIcon(clear, "x");
     addButtonIcon(cancel, "x");
     addButtonIcon(save, "check");
@@ -1228,8 +1329,12 @@ class CardModal extends Modal {
     this.localDetails = "";
     this.detailsDraft = "";
     this.editingDetails = false;
+    this.detailsEditDismissed = false;
+    this.pendingDetailAttachments = new Set();
     this.localChecklists = [];
     this.expandedChecklistNotes = new Set();
+    this.checklistNoteDrafts = new Map();
+    this.editingChecklistNotes = new Set();
     this.detailsTextarea = null;
     this.addingChecklistId = null;
     this.saveTimer = null;
@@ -1270,6 +1375,7 @@ class CardModal extends Modal {
     this.localDetails = card.details || "";
     this.detailsDraft = "";
     this.editingDetails = false;
+    this.detailsEditDismissed = false;
     this.localChecklists = normalizeChecklists(clone(card.checklists || []), []);
     this.localAssignees = clone(card.assignees || []);
     await this.setupCardLock();
@@ -1328,6 +1434,7 @@ class CardModal extends Modal {
       this.saveTimer = null;
     }
     this.stopLockHeartbeat();
+    this.discardPendingDetailAttachments().catch(console.error);
     if (this.plugin.editingCardId === this.cardId) this.plugin.editingCardId = null;
     new Notice(`🔒 ${(holder && holder.name) || "Someone"} is editing this card`);
     this.render();
@@ -1465,6 +1572,7 @@ class CardModal extends Modal {
     const card = this.card;
     const previousBody = this.contentEl.querySelector(".ot-card-modal-body");
     const bodyScrollTop = previousBody ? previousBody.scrollTop : 0;
+    this.destroyEmbeddedEditors();
     this.contentEl.replaceChildren();
     this.modalEl.addClass("ot-card-modal-shell");
     this.contentEl.addClass("ot-card-modal");
@@ -1512,7 +1620,8 @@ class CardModal extends Modal {
     });
 
     deleteButton.addEventListener("click", async () => {
-      if (!window.confirm("Delete this card and its linked Markdown note?")) return;
+      const confirmed = await confirmAction(this.app, "Delete card", "Delete this card and its linked Markdown note?");
+      if (!confirmed) return;
       await this.plugin.deleteCard(card.id);
       this.close();
     });
@@ -1584,6 +1693,8 @@ class CardModal extends Modal {
 
   onClose() {
     this.stopLockHeartbeat();
+    this.destroyEmbeddedEditors();
+    this.discardPendingDetailAttachments().catch(console.error);
     if (!this.readOnly && this.lockBoardId && this.plugin.releaseCardLock) {
       this.plugin.releaseCardLock(this.lockBoardId, this.cardId).catch(() => {});
     }
@@ -1634,8 +1745,89 @@ class CardModal extends Modal {
     return field;
   }
 
+  // The embedded Obsidian editors hold keymap scopes and a patched workspace
+  // method, so instances discarded by a re-render must be destroyed, not just
+  // dropped with their DOM.
+  trackEmbeddedEditor(editorInstance) {
+    if (!this.embeddedEditors) this.embeddedEditors = [];
+    this.embeddedEditors = this.embeddedEditors.filter((tracked) => {
+      if (tracked.containerEl && tracked.containerEl.isConnected) return true;
+      try { tracked.destroy(); } catch (error) { console.error(error); }
+      return false;
+    });
+    this.embeddedEditors.push(editorInstance);
+  }
+
+  destroyEmbeddedEditors() {
+    (this.embeddedEditors || []).forEach((tracked) => {
+      try { tracked.destroy(); } catch (error) { console.error(error); }
+    });
+    this.embeddedEditors = [];
+  }
+
   currentDetailsText() {
     return this.editingDetails ? this.detailsDraft : this.localDetails;
+  }
+
+  shouldEditDetails() {
+    const emptyDescription = !String(this.localDetails || "").trim();
+    return !this.readOnly && (this.editingDetails || (emptyDescription && !this.detailsEditDismissed));
+  }
+
+  async persistDetailsDraft(markdown) {
+    const previousDetails = this.localDetails;
+    const nextDetails = String(markdown || "").trim();
+    this.localDetails = nextDetails;
+    try {
+      await this.saveNow({ propagateError: true });
+    } catch (error) {
+      this.localDetails = previousDetails;
+      throw error;
+    }
+    await this.finalizePendingDetailAttachments(nextDetails);
+    this.detailsDraft = "";
+    this.editingDetails = false;
+    this.detailsEditDismissed = !nextDetails;
+  }
+
+  async discardPendingDetailAttachment(path) {
+    if (!this.pendingDetailAttachments || !this.pendingDetailAttachments.has(path)) return;
+    const attachment = this.app.vault.getAbstractFileByPath(path);
+    this.pendingDetailAttachments.delete(path);
+    try {
+      if (attachment) await this.app.vault.trash(attachment, false);
+    } catch (error) {
+      this.pendingDetailAttachments.add(path);
+      throw error;
+    }
+  }
+
+  async discardPendingDetailAttachments() {
+    if (!this.pendingDetailAttachments) return;
+    for (const path of [...this.pendingDetailAttachments]) {
+      await this.discardPendingDetailAttachment(path);
+    }
+  }
+
+  async finalizePendingDetailAttachments(markdown) {
+    if (!this.pendingDetailAttachments || !this.pendingDetailAttachments.size) return;
+    const referencedPaths = new Set(
+      this.splitDetailSegments(markdown)
+        .filter((segment) => segment.type === "img")
+        .map((segment) => segment.target)
+    );
+
+    for (const path of [...this.pendingDetailAttachments]) {
+      if (referencedPaths.has(path)) {
+        this.pendingDetailAttachments.delete(path);
+        continue;
+      }
+      try {
+        await this.discardPendingDetailAttachment(path);
+      } catch (error) {
+        console.error(`Could not remove unused attachment: ${path}`, error);
+      }
+    }
   }
 
   /**
@@ -1670,28 +1862,37 @@ class CardModal extends Modal {
   /**
    * Shows rendered Markdown by default, with a textarea editor on demand.
    */
-  renderDetailsField() {
+  renderDetailsField(options = {}) {
+    const noteMode = !!options.noteMode;
+    const fieldTitle = textLine(options.title) || "Description";
+    const placeholder = textLine(options.placeholder) || "Write a description...";
+    const initialMarkdown = noteMode ? String(options.markdown || "") : this.localDetails;
+    const savedMarkdown = noteMode ? String(options.savedMarkdown ?? initialMarkdown) : this.localDetails;
+    let draftMarkdown = noteMode ? initialMarkdown : this.detailsDraft;
     // Reset the block-editor caret hook; the edit branch below re-installs it.
-    this.insertDetailAtCaret = null;
+    if (!noteMode) this.insertDetailAtCaret = null;
     const field = createElement("section", "ot-field ot-details-field");
     const header = createElement("div", "ot-details-heading");
     const heading = createElement("div", "ot-details-heading-title");
     const headingIcon = createElement("span", "ot-details-heading-icon");
     setIconSafe(headingIcon, "align-left");
-    heading.append(headingIcon, createElement("span", "", "Description"));
-    const preview = createElement("div", "ot-markdown-preview");
+    heading.append(headingIcon, createElement("span", "", fieldTitle));
+    const preview = createElement("div", "ot-markdown-preview markdown-rendered");
     const editor = createElement("textarea", "ot-textarea ot-details-editor is-hidden");
-    const isEditing = !this.readOnly && (this.editingDetails || !this.localDetails.trim());
+    const isEditing = noteMode || this.shouldEditDetails();
 
-    if (isEditing && !this.editingDetails) {
+    if (isEditing && !noteMode && !this.editingDetails) {
       this.editingDetails = true;
       this.detailsDraft = this.localDetails;
+      draftMarkdown = this.detailsDraft;
     }
 
-    editor.placeholder = "Write a description...";
-    editor.value = isEditing ? this.detailsDraft : this.localDetails;
-    this.detailsTextarea = editor;
-    this.detailsPreview = preview;
+    editor.placeholder = placeholder;
+    editor.value = isEditing ? draftMarkdown : this.localDetails;
+    if (!noteMode) {
+      this.detailsTextarea = editor;
+      this.detailsPreview = preview;
+    }
 
     // Images are saved one at a time so concurrent inserts don't race the caret.
     const insertImagesSequentially = async (images) => {
@@ -1852,23 +2053,46 @@ class CardModal extends Modal {
 
     const showEditor = () => {
       if (this.readOnly) return;
+      this.detailsEditDismissed = false;
       this.editingDetails = true;
       this.detailsDraft = this.localDetails;
       this.render();
     };
 
     const saveDetails = async () => {
-      this.localDetails = editor.value.trim();
-      this.detailsDraft = "";
-      this.editingDetails = false;
-      await this.saveNow();
-      this.render();
+      if (saving || !hasUnsavedChanges()) return;
+      saving = true;
+      updateEditorState("Saving…");
+      try {
+        if (noteMode) {
+          await options.onSave(draftMarkdown);
+          return;
+        }
+        await this.persistDetailsDraft(draftMarkdown);
+        this.render();
+      } catch (error) {
+        saving = false;
+        updateEditorState("Could not save");
+        throw error;
+      }
     };
 
-    const cancelDetails = () => {
-      this.detailsDraft = "";
-      this.editingDetails = false;
-      this.render();
+    const cancelDetails = async () => {
+      if (noteMode) {
+        options.onCancel();
+        return;
+      }
+      try {
+        await this.discardPendingDetailAttachments();
+      } catch (error) {
+        console.error(error);
+        new Notice("The description was discarded, but an unused attachment could not be removed.");
+      } finally {
+        this.detailsDraft = "";
+        this.editingDetails = false;
+        this.detailsEditDismissed = true;
+        this.render();
+      }
     };
 
     // Toolbar buttons must not steal focus from the contenteditable on mousedown,
@@ -1882,7 +2106,7 @@ class CardModal extends Modal {
       const button = iconButton(icon, label, (event) => {
         event.preventDefault();
         event.stopPropagation();
-        onClick();
+        onClick(event);
       });
       button.classList.add("ot-details-tool");
       return keepEditorSelection(button);
@@ -1896,7 +2120,7 @@ class CardModal extends Modal {
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        onClick();
+        onClick(event);
       });
       return keepEditorSelection(button);
     };
@@ -1911,6 +2135,22 @@ class CardModal extends Modal {
     const blocksHost = createElement("div", "ot-block-editor");
     let blocks = [];
     let activeText = null; // { block, ce } of the focused text block
+    let saveButton = null;
+    let cancelButton = null;
+    let editorStatus = null;
+    let saving = false;
+
+    const normalizedMarkdown = (value) => String(value || "").replace(/\r\n/g, "\n").trim();
+    const hasUnsavedChanges = () => normalizedMarkdown(draftMarkdown) !== normalizedMarkdown(savedMarkdown);
+    const updateEditorState = (message = "") => {
+      const changed = hasUnsavedChanges();
+      if (saveButton) saveButton.disabled = saving || !changed;
+      if (cancelButton) cancelButton.disabled = saving;
+      if (!editorStatus) return;
+      editorStatus.textContent = message || (changed ? "Unsaved changes" : "Saved");
+      editorStatus.classList.toggle("is-dirty", changed && !saving && !message);
+      editorStatus.classList.toggle("is-error", message === "Could not save");
+    };
 
     const buildBlocks = (markdown) => {
       const built = [];
@@ -1945,8 +2185,11 @@ class CardModal extends Modal {
     };
 
     const syncDraft = () => {
-      this.detailsDraft = joinBlocks();
-      editor.value = this.detailsDraft;
+      draftMarkdown = joinBlocks();
+      if (!noteMode) this.detailsDraft = draftMarkdown;
+      editor.value = draftMarkdown;
+      if (noteMode && options.onDraftChange) options.onDraftChange(draftMarkdown);
+      updateEditorState();
     };
 
     const placeCaret = (ce, atStart) => {
@@ -1967,9 +2210,94 @@ class CardModal extends Modal {
       return null;
     };
 
+    // Obsidian live-preview markers: a heading shows its literal "#" prefix
+    // while the caret sits on that line and hides it once the caret leaves
+    // (Enter, click elsewhere, arrows). The marker is ordinary editable text
+    // that the serializer skips, so the saved markdown never doubles the "#".
+    const HEADING_SELECTOR = "h1, h2, h3, h4, h5, h6";
+    const showHeadingMarker = (heading) => {
+      if (heading.querySelector(":scope > .ot-md-token")) return;
+      const token = createElement("span", "ot-md-token", `${"#".repeat(Number(heading.tagName[1]))} `);
+      heading.prepend(token);
+      // Prepending shifts a caret anchored on the heading element itself (an
+      // empty heading right after "# " + Space) to BEFORE the marker, so the
+      // next keystroke would land behind the "#". Re-anchor it in a text node
+      // right after the marker, where the heading text belongs.
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      if (!range.collapsed || range.startContainer !== heading || range.startOffset > 1) return;
+      let textSlot = token.nextSibling;
+      if (!textSlot || textSlot.nodeType !== 3) {
+        textSlot = document.createTextNode("");
+        token.after(textSlot);
+      }
+      const caret = document.createRange();
+      caret.setStart(textSlot, 0);
+      caret.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(caret);
+    };
+    const hideHeadingMarker = (heading) => {
+      heading.querySelectorAll(":scope > .ot-md-token").forEach((token) => token.remove());
+    };
+    // Rebuilds a block element under a new tag while keeping its children and
+    // the caret in place — the primitive behind live heading retagging.
+    const replaceBlockTag = (el, tagName) => {
+      const selection = window.getSelection();
+      const caret = selection && selection.rangeCount ? { node: selection.anchorNode, offset: selection.anchorOffset } : null;
+      const replacement = document.createElement(tagName);
+      while (el.firstChild) replacement.append(el.firstChild);
+      el.replaceWith(replacement);
+      if (!caret || !replacement.contains(caret.node)) return;
+      const limit = caret.node.nodeType === 3 ? caret.node.textContent.length : caret.node.childNodes.length;
+      const range = document.createRange();
+      range.setStart(caret.node, Math.min(caret.offset, limit));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+    // The marker is ordinary editable text, so "### " can be reworked in
+    // place: deleting or adding a "#" retags the heading level live, and
+    // breaking the "#… " shape turns the line back into literal paragraph
+    // text — the editor never blocks the caret around the markers.
+    const normalizeEditedHeadingMarkers = (ce) => {
+      ce.querySelectorAll(".ot-md-token").forEach((token) => {
+        const heading = token.closest(HEADING_SELECTOR);
+        const marker = (token.textContent || "").match(/^(#{1,6})[  ]$/);
+        if (heading && marker) {
+          const level = marker[1].length;
+          if (Number(heading.tagName[1]) !== level) replaceBlockTag(heading, `h${level}`);
+          return;
+        }
+        if (!heading && marker) {
+          token.remove();
+          return;
+        }
+        token.replaceWith(document.createTextNode(token.textContent || ""));
+        if (heading) replaceBlockTag(heading, "p");
+      });
+    };
+    const refreshHeadingMarkers = () => {
+      const selection = window.getSelection();
+      const anchor = selection && selection.rangeCount ? selection.anchorNode : null;
+      const el = anchor ? (anchor.nodeType === 1 ? anchor : anchor.parentElement) : null;
+      const active = el && blocksHost.contains(el) ? el.closest(HEADING_SELECTOR) : null;
+      blocksHost.querySelectorAll(HEADING_SELECTOR).forEach((heading) => {
+        if (heading === active) showHeadingMarker(heading);
+        else hideHeadingMarker(heading);
+      });
+    };
+    ["keyup", "mouseup", "focusin"].forEach((type) => blocksHost.addEventListener(type, refreshHeadingMarkers));
+    blocksHost.addEventListener("focusout", (event) => {
+      if (event.relatedTarget && blocksHost.contains(event.relatedTarget)) return;
+      blocksHost.querySelectorAll(HEADING_SELECTOR).forEach(hideHeadingMarker);
+    });
+
     const syncBlockFromDom = (t) => {
       t.block.value = detailsHtmlToMd(t.ce);
       syncDraft();
+      refreshHeadingMarkers();
     };
 
     // Toolbar commands run against the focused contenteditable via execCommand,
@@ -1987,6 +2315,82 @@ class CardModal extends Modal {
       const current = String(document.queryCommandValue("formatBlock") || "").toLowerCase();
       document.execCommand("formatBlock", false, current === tag ? "p" : tag);
     });
+    // Heading picker: the Obsidian menu steals focus from the contenteditable,
+    // so the caret's range is captured before it opens and restored on pick —
+    // the same dance insertLink already does.
+    const openHeadingMenu = (event) => {
+      const t = focusedText();
+      if (!t) return;
+      const selection = window.getSelection();
+      const savedRange = selection && selection.rangeCount && t.ce.contains(selection.anchorNode)
+        ? selection.getRangeAt(0).cloneRange()
+        : null;
+      const applyBlockTag = (tag) => {
+        t.ce.focus();
+        if (savedRange) {
+          const restore = window.getSelection();
+          restore.removeAllRanges();
+          restore.addRange(savedRange);
+        }
+        document.execCommand("formatBlock", false, tag);
+        syncBlockFromDom(t);
+      };
+      const menu = new Menu();
+      [["Heading 1", "h1"], ["Heading 2", "h2"], ["Heading 3", "h3"], ["Normal text", "p"]].forEach(([title, tag]) => {
+        menu.addItem((item) => item.setTitle(title).onClick(() => applyBlockTag(tag)));
+      });
+      menu.showAtMouseEvent(event);
+    };
+    // Space right after a line-start markdown trigger ("-", "1.", "#"–"###",
+    // ">") converts the line into that block. Only plain paragraphs qualify —
+    // inside lists, quotes, headings, or code the Space stays literal.
+    const applyAutoformatTrigger = (ce) => {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+      const range = selection.getRangeAt(0);
+      const caretNode = range.startContainer;
+      if (!ce.contains(caretNode) || caretNode.nodeType !== 3) return false;
+      const host = caretNode.parentElement;
+      if (!host || host.closest("li, blockquote, h1, h2, h3, h4, h5, h6, code")) return false;
+      const lineHost = host.closest("p, div") || ce;
+      const beforeCaret = document.createRange();
+      beforeCaret.selectNodeContents(lineHost);
+      beforeCaret.setEnd(caretNode, range.startOffset);
+      const prefix = beforeCaret.toString();
+      const trigger = autoformatCommandForPrefix(prefix);
+      if (!trigger || range.startOffset < prefix.length) return false;
+      const removal = document.createRange();
+      removal.setStart(caretNode, range.startOffset - prefix.length);
+      removal.setEnd(caretNode, range.startOffset);
+      selection.removeAllRanges();
+      selection.addRange(removal);
+      document.execCommand("delete");
+      document.execCommand(trigger.command, false, trigger.value || null);
+      return true;
+    };
+    // Live inline preview: Space right after a completed **bold**, *italic*,
+    // ~~strike~~ or `code` run swaps the markers for the real formatting.
+    const applyInlineAutoformat = (ce) => {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+      const range = selection.getRangeAt(0);
+      const caretNode = range.startContainer;
+      if (!ce.contains(caretNode) || caretNode.nodeType !== 3) return false;
+      const host = caretNode.parentElement;
+      if (!host || host.closest("code")) return false;
+      const match = inlineAutoformatMatch(caretNode.textContent.slice(0, range.startOffset));
+      if (!match) return false;
+      const markerRange = document.createRange();
+      markerRange.setStart(caretNode, range.startOffset - match.span.length);
+      markerRange.setEnd(caretNode, range.startOffset);
+      selection.removeAllRanges();
+      selection.addRange(markerRange);
+      // The trailing &nbsp; is the consumed Space AND lands the caret outside
+      // the new element, so typing continues unformatted; the serializer folds
+      // it back into a plain space on save.
+      document.execCommand("insertHTML", false, `<${match.tag}>${escapeDetailsHtml(match.content)}</${match.tag}>&nbsp;`);
+      return true;
+    };
     const wrapCode = () => runCommand(() => {
       const selection = window.getSelection();
       if (!selection || !selection.rangeCount || selection.isCollapsed) {
@@ -2065,11 +2469,14 @@ class CardModal extends Modal {
         if (block.type === "text") {
           // A real WYSIWYG surface: markdown renders as formatted content and
           // serializes back on every input — the user never sees the markers.
-          const ce = createElement("div", "ot-block-text");
-          ce.contentEditable = "true";
+          // markdown-rendered pulls the active Obsidian theme's typography, so
+          // headings/quotes/code preview live with the vault's own look.
+          const ce = createElement("div", "ot-block-text markdown-rendered");
+          ce.contentEditable = String(!this.readOnly);
           ce.spellcheck = true;
+          ce.setAttribute("aria-label", `${fieldTitle} editor`);
           ce.innerHTML = detailsMdToHtml(block.value);
-          if (index === 0 && blocks.length === 1) ce.dataset.placeholder = "Write a description...";
+          if (index === 0 && blocks.length === 1) ce.dataset.placeholder = placeholder;
           const refreshEmpty = () => { ce.dataset.empty = ce.textContent.trim() ? "false" : "true"; };
           refreshEmpty();
           // An empty text slot wedged between two images collapses to a slim
@@ -2080,6 +2487,7 @@ class CardModal extends Modal {
           const refreshSlim = () => { ce.classList.toggle("ot-block-text--slim", betweenImages && !ce.textContent.trim()); };
           refreshSlim();
           ce.addEventListener("input", () => {
+            normalizeEditedHeadingMarkers(ce);
             block.value = detailsHtmlToMd(ce);
             syncDraft();
             refreshEmpty();
@@ -2090,7 +2498,22 @@ class CardModal extends Modal {
           // on an EMPTY line inside a blockquote or list item exits it and drops
           // the caret into a normal paragraph below — otherwise contenteditable
           // keeps every new line trapped inside the quote forever.
+          const syncAfterStructuralEdit = () => {
+            normalizeEditedHeadingMarkers(ce);
+            block.value = detailsHtmlToMd(ce);
+            syncDraft();
+            refreshEmpty();
+            refreshHeadingMarkers();
+          };
           ce.addEventListener("keydown", (event) => {
+            if (event.ctrlKey || event.metaKey || event.altKey) return;
+            if (event.key === " ") {
+              if (applyAutoformatTrigger(ce) || applyInlineAutoformat(ce)) {
+                event.preventDefault();
+                syncAfterStructuralEdit();
+              }
+              return;
+            }
             if (event.key !== "Enter" || event.shiftKey) return;
             const selection = window.getSelection();
             if (!selection || !selection.rangeCount || !selection.isCollapsed) return;
@@ -2098,8 +2521,32 @@ class CardModal extends Modal {
             if (!anchor || !ce.contains(anchor)) return;
             const el = anchor.nodeType === 1 ? anchor : anchor.parentElement;
             if (!el) return;
+            // Enter inside a heading exits to a normal paragraph (Notion and
+            // Obsidian behavior) — Chromium would otherwise continue the same
+            // heading forever, leaving every following line big and bold.
+            const heading = el.closest("h1, h2, h3, h4, h5, h6");
+            if (heading && ce.contains(heading)) {
+              event.preventDefault();
+              document.execCommand("insertParagraph");
+              document.execCommand("formatBlock", false, "p");
+              syncAfterStructuralEdit();
+              return;
+            }
             const listItem = el.closest("li");
             const quote = el.closest("blockquote");
+            // "---" + Enter becomes a real divider, matching the markdown shorthand.
+            const dividerLine = !listItem && !quote ? el.closest("p, div") : null;
+            if (dividerLine && dividerLine !== ce && ce.contains(dividerLine) && /^-{3,}$/.test((dividerLine.textContent || "").trim())) {
+              event.preventDefault();
+              const lineRange = document.createRange();
+              lineRange.selectNodeContents(dividerLine);
+              selection.removeAllRanges();
+              selection.addRange(lineRange);
+              document.execCommand("delete");
+              document.execCommand("insertHorizontalRule");
+              syncAfterStructuralEdit();
+              return;
+            }
             if (!listItem && !quote) return;
             // The "current line" must be a wrapper INSIDE the quote - closest()
             // can walk past a structureless quote up to the editor root, whose
@@ -2112,15 +2559,13 @@ class CardModal extends Modal {
             if ((line.textContent || "").replace(/\u00a0/g, " ").trim()) return; // line has content — normal Enter
             event.preventDefault();
             document.execCommand("outdent");
-            block.value = detailsHtmlToMd(ce);
-            syncDraft();
-            refreshEmpty();
+            syncAfterStructuralEdit();
           });
           ce.addEventListener("paste", (event) => {
             const images = imageFilesFromTransfer(event.clipboardData);
             if (images.length) {
               event.preventDefault();
-              insertImagesSequentially(images).catch(console.error);
+              if (!noteMode) insertImagesSequentially(images).catch(console.error);
               return;
             }
             // Paste as plain text so foreign HTML styling can't leak into the note.
@@ -2167,6 +2612,7 @@ class CardModal extends Modal {
           }
           syncDraft();
           renderBlocks();
+          this.discardPendingDetailAttachment(block.target).catch(console.error);
         });
         remove.classList.add("ot-block-image-remove");
         wrap.append(remove);
@@ -2252,10 +2698,10 @@ class CardModal extends Modal {
       const images = imageFilesFromTransfer(event.clipboardData);
       if (!images.length) return; // plain text paste — leave it alone
       event.preventDefault();
-      insertImagesSequentially(images).catch(console.error);
+      if (!noteMode) insertImagesSequentially(images).catch(console.error);
     };
     const handleDrop = (event) => {
-      if (this.readOnly || !isFileDrag(event)) return; // not a file drop — leave it
+      if (noteMode || this.readOnly || !isFileDrag(event)) return; // not a file drop — leave it
       // We invited this drop, so consume it whether or not it's an image, else a
       // stray file would fall through to Obsidian's own handling.
       event.preventDefault();
@@ -2271,7 +2717,7 @@ class CardModal extends Modal {
     // Handlers live on the whole field so crossing between the preview/editor and
     // their own children (e.g. an embedded image) never flickers the hint.
     field.addEventListener("dragover", (event) => {
-      if (this.readOnly || !isFileDrag(event)) return;
+      if (noteMode || this.readOnly || !isFileDrag(event)) return;
       event.preventDefault();
       field.classList.add("is-image-drag");
     });
@@ -2281,39 +2727,116 @@ class CardModal extends Modal {
     field.addEventListener("drop", handleDrop);
 
     if (isEditing) {
+      // Prefer Obsidian's OWN Live Preview editor (real CodeMirror 6: syntax
+      // hides and reveals around the caret exactly like in a note, with the
+      // vault's theme and settings). When its internal API is unavailable, the
+      // WYSIWYG block editor below takes over unchanged.
+      const embeddedHost = createElement("div", "ot-embedded-editor");
+      const embeddedEditor = createEmbeddedMarkdownEditor(this.app, embeddedHost, {
+        value: draftMarkdown,
+        placeholder,
+        cursorLocation: { anchor: draftMarkdown.length, head: draftMarkdown.length },
+        onChange: (value) => {
+          draftMarkdown = value;
+          if (!noteMode) this.detailsDraft = value;
+          editor.value = value;
+          if (noteMode && options.onDraftChange) options.onDraftChange(value);
+          updateEditorState();
+        },
+        onSubmit: () => saveDetails().catch(console.error),
+        onEscape: () => cancelDetails().catch(console.error),
+        onPaste: (event) => {
+          const images = imageFilesFromTransfer(event.clipboardData);
+          if (!images.length || noteMode) return false;
+          insertImagesSequentially(images).catch(console.error);
+          return true;
+        },
+      });
+      if (embeddedEditor) {
+        this.trackEmbeddedEditor(embeddedEditor);
+        editor.value = draftMarkdown;
+        if (!noteMode) {
+          this.insertDetailAtCaret = (markup) => {
+            embeddedEditor.insertAtCursor(markup);
+            return true;
+          };
+        }
+
+        const editorFrame = createElement("div", "ot-trello-editor");
+        if (!noteMode) {
+          const toolbar = createElement("div", "ot-details-toolbar");
+          toolbar.setAttribute("role", "toolbar");
+          toolbar.setAttribute("aria-label", `${fieldTitle} tools`);
+          const leftTools = createElement("div", "ot-details-toolbar-group");
+          leftTools.append(makeTool("image", "Add image", () => imageInput.click()));
+          const rightTools = createElement("div", "ot-details-toolbar-group");
+          rightTools.append(makeTool("help-circle", "Formatting help", () => new Notice("This is Obsidian's Live Preview editor: write plain Markdown (# headings, **bold**, - lists, [[links]]) and it renders as you type. Ctrl/⌘+S or Ctrl/⌘+Enter saves, Esc cancels.")));
+          toolbar.append(leftTools, rightTools);
+          editorFrame.append(toolbar);
+        }
+        editorFrame.append(embeddedHost);
+
+        const actions = createElement("div", "ot-details-actions");
+        const actionInfo = createElement("div", "ot-details-action-info");
+        editorStatus = createElement("span", "ot-details-status", "Saved");
+        editorStatus.setAttribute("aria-live", "polite");
+        actionInfo.append(
+          editorStatus,
+          createElement("span", "ot-details-shortcut", "Ctrl/⌘ + S to save · Esc to cancel"),
+        );
+        const actionButtons = createElement("div", "ot-details-action-buttons");
+        saveButton = createElement("button", "mod-cta ot-save-button", "Save");
+        cancelButton = createElement("button", "", "Cancel");
+        addButtonIcon(saveButton, "check");
+        addButtonIcon(cancelButton, "x");
+        saveButton.type = "button";
+        cancelButton.type = "button";
+        saveButton.addEventListener("click", () => saveDetails().catch(console.error));
+        cancelButton.addEventListener("click", () => cancelDetails().catch(console.error));
+        actionButtons.append(saveButton, cancelButton);
+        actions.append(actionInfo, actionButtons);
+        updateEditorState();
+
+        header.append(heading);
+        field.append(header, editorFrame, actions, imageInput, editor);
+        requestAnimationFrame(() => embeddedEditor.focusEditor());
+        return field;
+      }
+
       const toolbar = createElement("div", "ot-details-toolbar");
+      toolbar.setAttribute("role", "toolbar");
+      toolbar.setAttribute("aria-label", `${fieldTitle} formatting`);
       const leftTools = createElement("div", "ot-details-toolbar-group");
       leftTools.append(
-        makeTextTool("Tt", "Heading", () => toggleBlockFormat("h3")),
-        makeTextTool("B", "Bold", () => execCmd("bold")),
-        makeTextTool("I", "Italic", () => execCmd("italic")),
-        makeTool("ellipsis", "Quote", () => toggleBlockFormat("blockquote")),
+        makeTextTool("Tt", "Heading", openHeadingMenu),
+        makeTextTool("B", "Bold (Ctrl+B)", () => execCmd("bold")),
+        makeTextTool("I", "Italic (Ctrl+I)", () => execCmd("italic")),
+        makeTextTool("S", "Strikethrough (Ctrl+Shift+X)", () => execCmd("strikeThrough")),
+        makeTool("quote", "Quote", () => toggleBlockFormat("blockquote")),
         makeTool("list", "Bulleted list", () => execCmd("insertUnorderedList")),
-        makeTool("link", "Link", insertLink),
+        makeTool("list-ordered", "Numbered list", () => execCmd("insertOrderedList")),
+        makeTool("link", "Link (Ctrl+K)", insertLink),
         makeTool("file-text", "Link vault note", insertVaultNote),
-        makeTool("image", "Add image", () => imageInput.click()),
-        makeTool("plus", "Divider", () => execCmd("insertHorizontalRule"))
+        ...(!noteMode ? [makeTool("image", "Add image", () => imageInput.click())] : []),
+        makeTool("minus", "Divider", () => execCmd("insertHorizontalRule"))
       );
 
       const rightTools = createElement("div", "ot-details-toolbar-group");
-      rightTools.append(
-        makeTool("paperclip", "Attach image", () => imageInput.click()),
-        makeTextTool("M", "Code", wrapCode),
-        makeTool("help-circle", "Formatting help", () => new Notice("Select text, then use the toolbar — formatting shows live in the editor."))
-      );
+      rightTools.append(makeTool("code-2", "Inline code (Ctrl+E)", wrapCode));
+      rightTools.append(makeTool("help-circle", "Formatting help", () => new Notice('Type "- ", "1. ", "# " or "> " plus Space at a line start for lists, headings and quotes. Type **bold**, *italic*, `code` or ~~strike~~ plus Space to format inline. Shortcuts: Ctrl/⌘+B bold, I italic, K link, E code, Shift+X strikethrough, S save.')));
       toolbar.append(leftTools, rightTools);
 
       const editorFrame = createElement("div", "ot-trello-editor ot-block-frame");
       // The master textarea stays hidden: it only mirrors the joined markdown so
       // saveDetails / insertImageFromFile keep reading the same place as before.
-      blocks = buildBlocks(this.detailsDraft);
+      blocks = buildBlocks(draftMarkdown);
       syncDraft();
       renderBlocks();
 
       // An image pasted/attached while editing lands at the active block's caret,
       // splitting the text so the picture renders inline immediately — the user
       // never sees ![[...]] markup.
-      this.insertDetailAtCaret = (markup) => {
+      const insertDetailAtCaret = (markup) => {
         const t = focusedText();
         if (!t) return false;
         const at = blocks.indexOf(t.block);
@@ -2354,17 +2877,59 @@ class CardModal extends Modal {
         });
         return true;
       };
+      if (!noteMode) this.insertDetailAtCaret = insertDetailAtCaret;
 
       const actions = createElement("div", "ot-details-actions");
-      const save = createElement("button", "mod-cta", "Save");
-      const cancel = createElement("button", "", "Cancel");
-      addButtonIcon(save, "check");
-      addButtonIcon(cancel, "x");
-      save.type = "button";
-      cancel.type = "button";
-      save.addEventListener("click", () => saveDetails().catch(console.error));
-      cancel.addEventListener("click", cancelDetails);
-      actions.append(save, cancel);
+      const actionInfo = createElement("div", "ot-details-action-info");
+      editorStatus = createElement("span", "ot-details-status", "Saved");
+      editorStatus.setAttribute("aria-live", "polite");
+      actionInfo.append(
+        editorStatus,
+        createElement("span", "ot-details-shortcut", "Ctrl/⌘ + S to save · Esc to cancel"),
+      );
+
+      const actionButtons = createElement("div", "ot-details-action-buttons");
+      saveButton = createElement("button", "mod-cta ot-save-button", "Save");
+      cancelButton = createElement("button", "", "Cancel");
+      addButtonIcon(saveButton, "check");
+      addButtonIcon(cancelButton, "x");
+      saveButton.type = "button";
+      cancelButton.type = "button";
+      saveButton.addEventListener("click", () => saveDetails().catch(console.error));
+      cancelButton.addEventListener("click", () => cancelDetails().catch(console.error));
+      actionButtons.append(saveButton, cancelButton);
+      actions.append(actionInfo, actionButtons);
+      updateEditorState();
+
+      editorFrame.addEventListener("keydown", (event) => {
+        if (event.isComposing) return;
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          saveDetails().catch(console.error);
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          cancelDetails().catch(console.error);
+          return;
+        }
+        if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+          const key = event.key.toLowerCase();
+          const shortcut = event.shiftKey
+            ? (key === "x" ? () => execCmd("strikeThrough") : null)
+            : {
+              b: () => execCmd("bold"),
+              i: () => execCmd("italic"),
+              e: wrapCode,
+              k: insertLink,
+              s: () => saveDetails().catch(console.error),
+            }[key];
+          if (shortcut) {
+            event.preventDefault();
+            shortcut();
+          }
+        }
+      });
 
       header.append(heading);
       editorFrame.append(toolbar, blocksHost);
@@ -2742,6 +3307,7 @@ class CardModal extends Modal {
       // we can no longer reference into the note.
       if (this.readOnly || !this.detailsTextarea) return;
       await this.app.vault.createBinary(targetPath, data);
+      const previousDetails = this.localDetails;
       const inserted = this.insertDetailText(`![[${targetPath}]]`);
       if (!inserted) {
         // Couldn't place the reference — trash the orphan instead of leaving it.
@@ -2749,10 +3315,19 @@ class CardModal extends Modal {
         if (created) await this.app.vault.trash(created, false).catch(() => {});
         return;
       }
-      if (this.editingDetails) this.localDetails = this.detailsDraft;
-      // Persist the binary and its embed together (not just the debounced save),
-      // so a crash right after can't leave an unreferenced attachment.
-      await this.saveNow();
+      if (this.editingDetails) {
+        this.pendingDetailAttachments.add(targetPath);
+        return;
+      }
+
+      try {
+        await this.saveNow({ propagateError: true });
+      } catch (error) {
+        this.localDetails = previousDetails;
+        const created = this.app.vault.getAbstractFileByPath(targetPath);
+        if (created) await this.app.vault.trash(created, false).catch(console.error);
+        throw error;
+      }
     } catch (error) {
       console.error(error);
       new Notice("Couldn't add the image.");
@@ -2772,6 +3347,28 @@ class CardModal extends Modal {
       candidate = `${base} ${i}${ext}`;
     }
     return candidate;
+  }
+
+  async persistChecklistNote(filePath, body) {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!file || file.extension !== "md") throw new Error("Checklist item note not found");
+    const current = await this.app.vault.read(file);
+    const updated = checklistItemNoteWithBody(current, body);
+    if (updated !== current) await this.app.vault.modify(file, updated);
+  }
+
+  beginChecklistNoteEdit(filePath, body) {
+    this.editingChecklistNotes.add(filePath);
+    if (!this.checklistNoteDrafts.has(filePath)) this.checklistNoteDrafts.set(filePath, String(body || ""));
+  }
+
+  updateChecklistNoteDraft(filePath, draft) {
+    this.checklistNoteDrafts.set(filePath, String(draft || ""));
+  }
+
+  finishChecklistNoteEdit(filePath) {
+    this.checklistNoteDrafts.delete(filePath);
+    this.editingChecklistNotes.delete(filePath);
   }
 
   /**
@@ -2860,9 +3457,17 @@ class CardModal extends Modal {
           const warning = linkedNotes
             ? `Delete "${group.title || "Checklist"}" and its items? This will also move ${linkedNotes} linked Markdown ${linkedNotes === 1 ? "note" : "notes"} to the trash.`
             : `Delete "${group.title || "Checklist"}" and its items?`;
-          if (items.length && !window.confirm(warning)) return;
+          if (items.length) {
+            const confirmed = await confirmAction(this.app, "Delete checklist", warning);
+            if (!confirmed) return;
+          }
           try {
             await this.plugin.deleteChecklistItemFiles(this.card, items);
+            items.forEach((item) => {
+              if (!item || !item.filePath) return;
+              this.finishChecklistNoteEdit(item.filePath);
+              this.expandedChecklistNotes.delete(item.filePath);
+            });
             this.localChecklists = this.localChecklists.filter((item) => item.id !== group.id);
             if (this.addingChecklistId === group.id) this.addingChecklistId = null;
             this.render();
@@ -2983,8 +3588,8 @@ class CardModal extends Modal {
               const file = await this.plugin.ensureChecklistItemFile(this.card, item);
               item.filePath = file.path;
               await this.saveNow();
-              await this.plugin.openChecklistItemFile(file.path);
-              this.close();
+              this.expandedChecklistNotes.add(file.path);
+              this.render();
             } catch (error) {
               console.error(error);
               new Notice("Could not create the checklist item note.");
@@ -2998,24 +3603,75 @@ class CardModal extends Modal {
           let notePanel = null;
           let noteToggle = null;
           let noteContent = null;
+          let noteRenderVersion = 0;
 
           const showNoteBody = async () => {
+            const renderVersion = ++noteRenderVersion;
             noteContent.replaceChildren(createElement("span", "ot-checklist-note-status", "Loading Markdown description..."));
             try {
               const file = this.plugin.resolveChecklistItemFile(this.card, item);
               if (!file) throw new Error("Checklist item note not found");
               const markdown = await this.app.vault.read(file);
-              if (!this.expandedChecklistNotes.has(noteKey) || !noteContent.isConnected) return;
+              if (renderVersion !== noteRenderVersion || !this.expandedChecklistNotes.has(noteKey) || !noteContent.isConnected) return;
               const body = checklistItemNoteBody(markdown);
+              const draft = this.checklistNoteDrafts.get(file.path);
+              const editing = this.editingChecklistNotes.has(file.path);
+              const noteActions = createElement("div", "ot-checklist-note-actions");
+              const editButton = createElement("button", "", "Edit");
+              editButton.type = "button";
+              editButton.disabled = this.readOnly;
+              addButtonIcon(editButton, "pencil");
+              const beginEditing = () => {
+                if (this.readOnly) return;
+                this.beginChecklistNoteEdit(file.path, body);
+                showNoteBody().catch(console.error);
+              };
+              editButton.addEventListener("click", beginEditing);
               noteContent.replaceChildren();
-              if (!body) {
-                noteContent.append(createElement("span", "ot-checklist-note-status", "This note has no description."));
+              if (!editing) {
+                const preview = createElement("div", "ot-markdown-preview ot-checklist-note-preview markdown-rendered");
+                if (!body) preview.append(createElement("span", "ot-checklist-note-status", "This note has no description."));
+                else {
+                  await MarkdownRenderer.render(this.app, body, preview, file.path, this);
+                  if (renderVersion !== noteRenderVersion || !noteContent.isConnected) return;
+                }
+                preview.addEventListener("click", (event) => {
+                  if (event.target.closest("a, button, img")) return;
+                  const selection = window.getSelection();
+                  if (selection && selection.toString()) return;
+                  beginEditing();
+                });
+                noteActions.append(editButton);
+                noteContent.append(preview, noteActions);
                 return;
               }
-              await MarkdownRenderer.render(this.app, body, noteContent, file.path, this);
+
+              const noteEditor = this.renderDetailsField({
+                noteMode: true,
+                title: "Checklist item note",
+                placeholder: "Write details for this checklist item...",
+                markdown: draft !== undefined ? draft : body,
+                savedMarkdown: body,
+                onDraftChange: (nextDraft) => this.updateChecklistNoteDraft(file.path, nextDraft),
+                onSave: async (markdown) => {
+                  try {
+                    await this.persistChecklistNote(file.path, markdown);
+                  } catch (error) {
+                    new Notice("Could not save the Markdown description.");
+                    throw error;
+                  }
+                  this.finishChecklistNoteEdit(file.path);
+                  await showNoteBody();
+                },
+                onCancel: () => {
+                  this.finishChecklistNoteEdit(file.path);
+                  showNoteBody().catch(console.error);
+                },
+              });
+              noteContent.replaceChildren(noteEditor);
             } catch (error) {
               console.error(error);
-              if (!this.expandedChecklistNotes.has(noteKey) || !noteContent.isConnected) return;
+              if (renderVersion !== noteRenderVersion || !this.expandedChecklistNotes.has(noteKey) || !noteContent.isConnected) return;
               noteContent.replaceChildren(createElement("span", "ot-checklist-note-status is-error", "Could not read the Markdown description."));
             }
           };
@@ -3056,16 +3712,24 @@ class CardModal extends Modal {
 
             notePanel = createElement("div", "ot-checklist-note-panel");
             notePanel.hidden = true;
-            noteContent = createElement("div", "ot-checklist-note-content markdown-rendered");
+            noteContent = createElement("div", "ot-checklist-note-content");
             notePanel.append(noteContent);
           }
           const remove = iconButton("x", "Remove item", async () => {
             if (item.filePath) {
-              const confirmed = window.confirm(`Remove "${item.text || "Checklist item"}"? Its linked Markdown note will also be moved to the trash.`);
+              const confirmed = await confirmAction(
+                this.app,
+                "Remove checklist item",
+                `Remove "${item.text || "Checklist item"}"? Its linked Markdown note will also be moved to the trash.`,
+              );
               if (!confirmed) return;
             }
             try {
               await this.plugin.deleteChecklistItemFile(this.card, item);
+              if (item.filePath) {
+                this.finishChecklistNoteEdit(item.filePath);
+                this.expandedChecklistNotes.delete(item.filePath);
+              }
               group.items.splice(index, 1);
               renderItems();
               await this.saveNow();
@@ -3248,7 +3912,7 @@ class CardModal extends Modal {
     }, SAVE_DEBOUNCE_MS);
   }
 
-  async saveNow() {
+  async saveNow(options = {}) {
     if (this.saveTimer) {
       window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
@@ -3260,18 +3924,19 @@ class CardModal extends Modal {
 
     const patch = this.cardPatch();
     const globalLabels = clone(this.localGlobalLabels);
-    this.savePromise = this.savePromise
-      .then(() => this.plugin.updateCard(card.id, patch, globalLabels))
-      .catch((error) => {
+    const saveOperation = this.savePromise.then(() => this.plugin.updateCard(card.id, patch, globalLabels));
+    this.savePromise = saveOperation.catch((error) => {
         console.error(error);
         new Notice("Could not save card.");
       });
 
+    if (options.propagateError) return saveOperation;
     await this.savePromise;
   }
 }
 
 module.exports = {
+  ConfirmModal,
   TextPromptModal,
   LabelPickerModal,
   ListColorModal,
@@ -3279,4 +3944,8 @@ module.exports = {
   CardDatesModal,
   AboutModal,
   CardModal,
+  confirmAction,
+  detailsMdToHtml,
+  autoformatCommandForPrefix,
+  inlineAutoformatMatch,
 };

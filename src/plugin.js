@@ -32,7 +32,7 @@ const {
 } = require("./helpers");
 const { BoardView } = require("./board-view");
 const { COMPLETION_SOUND_URL } = require("./completion-sound");
-const { TextPromptModal } = require("./modals");
+const { TextPromptModal, confirmAction } = require("./modals");
 const { KanuxSettingTab } = require("./settings-tab");
 
 // Sync Deck's public bridge namespace is stable and independent from this plugin's display name.
@@ -874,7 +874,7 @@ module.exports = class KanuxPlugin extends Plugin {
     const warning = affected.length
       ? `Delete label "${storedLabel.name}"? It will be removed from ${affected.length} ${affected.length === 1 ? "card" : "cards"}.`
       : `Delete label "${storedLabel.name}"?`;
-    if (!window.confirm(warning)) return false;
+    if (!await confirmAction(this.app, "Delete label", warning)) return false;
 
     const previousGlobalLabels = clone(this.data.labels || []);
     const previousCardLabels = affected.map((card) => ({
@@ -1749,7 +1749,7 @@ module.exports = class KanuxPlugin extends Plugin {
     const cards = Object.values(this.data.cards).filter((card) => card.boardId === board.id);
     const cardSummary = cards.length === 1 ? "1 linked card" : `${cards.length} linked cards`;
     const warning = `Delete "${board.name}" and its entire folder, including ${cardSummary}? The folder will be moved to the trash.`;
-    if (!window.confirm(warning)) return;
+    if (!await confirmAction(this.app, "Delete board", warning)) return;
 
     const folder = this.app.vault.getAbstractFileByPath(board.folderPath);
     if (folder) await this.app.vault.trash(folder, true);
@@ -1829,7 +1829,7 @@ module.exports = class KanuxPlugin extends Plugin {
     const message = list.cardIds.length
       ? `Delete "${list.title}" and its ${list.cardIds.length} cards?`
       : `Delete "${list.title}"?`;
-    if (!window.confirm(message)) return;
+    if (!await confirmAction(this.app, "Delete list", message)) return;
 
     for (const cardId of list.cardIds) {
       await this.deleteCard(cardId, false);

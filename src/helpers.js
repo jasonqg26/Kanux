@@ -477,6 +477,29 @@ function checklistItemNoteBody(markdown) {
   return stripManagedChecklistHeader(body);
 }
 
+function checklistItemNoteWithBody(markdown, nextBody) {
+  const source = String(markdown || "").replace(/^\uFEFF/, "");
+  const { frontmatter, body } = splitFrontmatter(source);
+  const managed = /(?:^|\r?\n)[ \t]*kanux-checklist-item[ \t]*:[ \t]*true[ \t]*(?:#.*)?(?:\r?\n|$)/i.test(frontmatter);
+  const prefix = source.slice(0, source.length - body.length);
+  const content = String(nextBody || "").trim();
+
+  if (!managed) return `${prefix}${content}\n`;
+
+  const boilerplate = managedChecklistBoilerplate(body);
+  return `${prefix}${boilerplate}${content ? `\n\n${content}` : ""}\n`;
+}
+
+function managedChecklistBoilerplate(body) {
+  const lines = String(body || "").split(/\r?\n/);
+  let index = 0;
+  while (index < lines.length && !lines[index].trim()) index += 1;
+  if (index < lines.length && /^#[ \t]+\S/.test(lines[index])) index += 1;
+  while (index < lines.length && !lines[index].trim()) index += 1;
+  if (index < lines.length && /^Card:[ \t]*\[\[[^\]]+\]\][ \t]*$/i.test(lines[index])) index += 1;
+  return lines.slice(0, index).join("\n").trim();
+}
+
 function splitFrontmatter(markdown) {
   const document = String(markdown || "").replace(/^\uFEFF/, "");
   const match = document.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
@@ -858,6 +881,7 @@ module.exports = {
   getSectionAny,
   parseChecklist,
   checklistItemNoteBody,
+  checklistItemNoteWithBody,
   parseChecklists,
   normalizeChecklists,
   checklistToText,

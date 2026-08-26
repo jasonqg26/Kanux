@@ -12,3 +12,10 @@ The upstream project was released under the MIT License. Its original copyright
 and permission notice are preserved in LICENSES/MIT-upstream.txt. The MIT
 License continues to apply to the upstream material under the terms on which it
 was originally received.
+
+The embedded markdown editor in src/embedded-editor.js is derived from the
+MIT-licensed embeddable editor pattern by Matthew Meyers (obsidian-kanban,
+https://github.com/mgmeyers/obsidian-kanban) and Fevol
+(https://gist.github.com/Fevol/caa478ce303e69eabede7b12b2323838). Their
+original copyright and permission notice are preserved in
+LICENSES/MIT-embedded-editor.txt.

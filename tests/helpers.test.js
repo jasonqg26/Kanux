@@ -16,6 +16,7 @@ Module._load = function load(request, parent, isMain) {
 const {
   checklistItems,
   checklistItemNoteBody,
+  checklistItemNoteWithBody,
   checklistStats,
   checklistsToMarkdown,
   iconButton,
@@ -83,6 +84,15 @@ function testChecklistItemNoteBody() {
     checklistItemNoteBody(external),
     "# External heading\n\nParagraph with [[Reference]].\n\n- First\n- Second",
   );
+
+  const managedWithNewBody = checklistItemNoteWithBody(managed, "## Acceptance criteria\n\n- Keep links working");
+  assert.ok(managedWithNewBody.startsWith("---\nkanux-checklist-item: true\n"));
+  assert.ok(managedWithNewBody.includes("# Review implementation\n\nCard: [[Board/Card|Card title]]"));
+  assert.ok(managedWithNewBody.endsWith("## Acceptance criteria\n\n- Keep links working\n"));
+
+  const externalWithNewBody = checklistItemNoteWithBody(external, "# Updated heading\n\nUpdated paragraph.");
+  assert.ok(externalWithNewBody.startsWith("---\nowner: docs\n---\n"));
+  assert.ok(externalWithNewBody.endsWith("# Updated heading\n\nUpdated paragraph.\n"));
 }
 
 function testLegacyChecklistMigration() {
