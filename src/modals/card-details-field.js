@@ -18,6 +18,7 @@ const {
   splitDetailSegments,
 } = require("./details-markdown");
 const {
+  DETAILS_AUTOSAVE_MS,
   IMG_BLOCK_DRAG_TYPE,
   setIconSafe,
   imageRunAround,
@@ -47,7 +48,8 @@ function buildDetailsField(modal, options = {}) {
   const fieldTitle = textLine(options.title) || "Description";
   const placeholder = textLine(options.placeholder) || "Write a description...";
   const initialMarkdown = noteMode ? String(options.markdown || "") : modal.localDetails;
-  const savedMarkdown = noteMode ? String(options.savedMarkdown ?? initialMarkdown) : modal.localDetails;
+  // Moves forward with every autosave, so the status line tells the truth.
+  let savedMarkdown = noteMode ? String(options.savedMarkdown ?? initialMarkdown) : modal.localDetails;
   let draftMarkdown = noteMode ? initialMarkdown : modal.detailsDraft;
   // Reset the block-editor caret hook; the edit branch below re-installs it.
   if (!noteMode) modal.insertDetailAtCaret = null;
@@ -241,9 +243,14 @@ function buildDetailsField(modal, options = {}) {
     modal.render();
   };
 
-  const saveDetails = async () => {
-    if (saving || !hasUnsavedChanges()) return;
+  /**
+   * Leaves the editing session, writing anything the autosave has not caught
+   * up with yet. There is no discard path: what was typed is already on disk.
+   */
+  const finishEditing = async () => {
+    if (saving) return;
     saving = true;
+    cancelAutoSave();
     updateEditorState("Saving…");
     try {
       if (noteMode) {
@@ -257,25 +264,6 @@ function buildDetailsField(modal, options = {}) {
       saving = false;
       updateEditorState("Could not save");
       throw error;
-    }
-  };
-
-  const cancelDetails = async () => {
-    if (noteMode) {
-      options.onCancel();
-      modal.closeSideSheet(sheetKey);
-      return;
-    }
-    try {
-      await modal.discardPendingDetailAttachments();
-    } catch (error) {
-      console.error(error);
-      new Notice("The description was discarded, but an unused attachment could not be removed.");
-    } finally {
-      modal.detailsDraft = "";
-      modal.editingDetails = false;
-      modal.detailsEditDismissed = true;
-      modal.render();
     }
   };
 
@@ -315,25 +303,102 @@ function buildDetailsField(modal, options = {}) {
   // with a remove chip) — the user never sees raw markdown markers. `blocks`
   // is the source of truth while editing; each input serializes its block back
   // to markdown (detailsHtmlToMd) and syncDraft() re-joins the whole note into
-  // the hidden master textarea (`editor`) that saveDetails/saveNow already read.
+  // the hidden master textarea (`editor`) that finishEditing/saveNow already read.
   const blocksHost = createElement("div", "ot-block-editor");
   let blocks = [];
   let activeText = null; // { block, ce } of the focused text block
   let saveButton = null;
-  let cancelButton = null;
   let editorStatus = null;
   let saving = false;
+  let autoSaving = false;
+  let autoSaveTimer = null;
 
   const normalizedMarkdown = (value) => String(value || "").replace(/\r\n/g, "\n").trim();
   const hasUnsavedChanges = () => normalizedMarkdown(draftMarkdown) !== normalizedMarkdown(savedMarkdown);
   const updateEditorState = (message = "") => {
     const changed = hasUnsavedChanges();
-    if (saveButton) saveButton.disabled = saving || !changed;
-    if (cancelButton) cancelButton.disabled = saving;
+    if (saveButton) saveButton.disabled = saving;
     if (!editorStatus) return;
-    editorStatus.textContent = message || (changed ? "Unsaved changes" : "Saved");
+    // Nothing is ever left unsaved on purpose, so a dirty draft is one the
+    // autosave has not reached yet, not one waiting for the user.
+    editorStatus.textContent = message || (changed ? "Saving…" : "Saved");
     editorStatus.classList.toggle("is-dirty", changed && !saving && !message);
     editorStatus.classList.toggle("is-error", message === "Could not save");
+  };
+
+  const cancelAutoSave = () => {
+    if (!autoSaveTimer) return;
+    window.clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  };
+
+  // Typing is written on its own once it pauses. Restarting the timer on every
+  // keystroke keeps a fast typist to one write instead of one per word.
+  const queueAutoSave = () => {
+    if (modal.readOnly || !hasUnsavedChanges()) return;
+    cancelAutoSave();
+    autoSaveTimer = window.setTimeout(() => {
+      autoSaveTimer = null;
+      autoSave().catch(console.error);
+    }, DETAILS_AUTOSAVE_MS);
+  };
+
+  /**
+   * Writes the draft without ending the session, so the caret, the selection
+   * and the side sheet all stay exactly where the writer left them.
+   */
+  const autoSave = async () => {
+    // A re-render replaced this editor: its pending write belongs to the new one.
+    if (autoSaving || saving || !field.isConnected || !hasUnsavedChanges()) return;
+    const pending = draftMarkdown;
+    autoSaving = true;
+    updateEditorState("Saving…");
+    try {
+      if (noteMode) await options.onAutoSave(pending);
+      else await modal.autoSaveDetails(pending);
+      savedMarkdown = pending;
+      autoSaving = false;
+      updateEditorState();
+    } catch (error) {
+      autoSaving = false;
+      updateEditorState("Could not save");
+      throw error;
+    }
+  };
+
+  /**
+   * Leaving the editor writes straight away instead of waiting the pause out.
+   * Clicking the modal's close button blurs the editor first, so the sentence
+   * being typed is never lost to a timer that had not fired yet.
+   */
+  const flushOnBlur = (event) => {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    if (!autoSaveTimer) return;
+    cancelAutoSave();
+    autoSave().catch(console.error);
+  };
+
+  // One "Done" control: everything typed is written as it is typed, so there is
+  // nothing left to confirm and nothing to cancel back to.
+  const buildEditorActions = () => {
+    const actions = createElement("div", "ot-details-actions");
+    const actionInfo = createElement("div", "ot-details-action-info");
+    editorStatus = createElement("span", "ot-details-status", "Saved");
+    editorStatus.setAttribute("aria-live", "polite");
+    actionInfo.append(
+      editorStatus,
+      createElement("span", "ot-details-shortcut", "Saves as you type · Ctrl/⌘ + S or Esc to close"),
+    );
+
+    const actionButtons = createElement("div", "ot-details-action-buttons");
+    saveButton = createElement("button", "mod-cta ot-save-button", "Done");
+    addButtonIcon(saveButton, "check");
+    saveButton.type = "button";
+    saveButton.addEventListener("click", () => finishEditing().catch(console.error));
+    actionButtons.append(saveButton);
+    actions.append(actionInfo, actionButtons);
+    updateEditorState();
+    return actions;
   };
 
   const buildBlocks = (markdown) => {
@@ -368,13 +433,17 @@ function buildDetailsField(modal, options = {}) {
     return parts.join("\n\n");
   };
 
-  const syncDraft = () => {
-    draftMarkdown = joinBlocks();
-    if (!noteMode) modal.detailsDraft = draftMarkdown;
-    editor.value = draftMarkdown;
-    if (noteMode && options.onDraftChange) options.onDraftChange(draftMarkdown);
+  // The single funnel every edit passes through, whichever editor produced it.
+  const applyDraft = (value) => {
+    draftMarkdown = value;
+    if (!noteMode) modal.detailsDraft = value;
+    editor.value = value;
+    if (noteMode && options.onDraftChange) options.onDraftChange(value);
     updateEditorState();
+    queueAutoSave();
   };
+
+  const syncDraft = () => applyDraft(joinBlocks());
 
   const placeCaret = (ce, atStart) => {
     ce.focus();
@@ -920,15 +989,9 @@ function buildDetailsField(modal, options = {}) {
       value: draftMarkdown,
       placeholder,
       cursorLocation: { anchor: draftMarkdown.length, head: draftMarkdown.length },
-      onChange: (value) => {
-        draftMarkdown = value;
-        if (!noteMode) modal.detailsDraft = value;
-        editor.value = value;
-        if (noteMode && options.onDraftChange) options.onDraftChange(value);
-        updateEditorState();
-      },
-      onSubmit: () => saveDetails().catch(console.error),
-      onEscape: () => cancelDetails().catch(console.error),
+      onChange: (value) => applyDraft(value),
+      onSubmit: () => finishEditing().catch(console.error),
+      onEscape: () => finishEditing().catch(console.error),
       onPaste: (event) => {
         const images = imageFilesFromTransfer(event.clipboardData);
         if (!images.length || noteMode) return false;
@@ -947,6 +1010,7 @@ function buildDetailsField(modal, options = {}) {
       }
 
       const editorFrame = createElement("div", "ot-trello-editor");
+      editorFrame.addEventListener("focusout", flushOnBlur);
       const toolbar = createElement("div", "ot-details-toolbar");
       toolbar.setAttribute("role", "toolbar");
       toolbar.setAttribute("aria-label", `${fieldTitle} formatting`);
@@ -991,30 +1055,11 @@ function buildDetailsField(modal, options = {}) {
       );
       const rightTools = createElement("div", "ot-details-toolbar-group");
       rightTools.append(makeTool("code-2", "Inline code", () => embeddedEditor.wrapSelection("`")));
-      rightTools.append(makeTool("help-circle", "Formatting help", () => new Notice("Obsidian's Live Preview editor: write Markdown (# headings, **bold**, - lists, [[links]]) and it renders as you type. Ctrl/⌘+S or Ctrl/⌘+Enter saves, Esc cancels.")));
+      rightTools.append(makeTool("help-circle", "Formatting help", () => new Notice("Obsidian's Live Preview editor: write Markdown (# headings, **bold**, - lists, [[links]]) and it renders as you type. Everything saves as you type; Ctrl/⌘+S, Ctrl/⌘+Enter or Esc closes the editor.")));
       toolbar.append(leftTools, rightTools);
       editorFrame.append(toolbar, embeddedHost);
 
-      const actions = createElement("div", "ot-details-actions");
-      const actionInfo = createElement("div", "ot-details-action-info");
-      editorStatus = createElement("span", "ot-details-status", "Saved");
-      editorStatus.setAttribute("aria-live", "polite");
-      actionInfo.append(
-        editorStatus,
-        createElement("span", "ot-details-shortcut", "Ctrl/⌘ + S to save · Esc to cancel"),
-      );
-      const actionButtons = createElement("div", "ot-details-action-buttons");
-      saveButton = createElement("button", "mod-cta ot-save-button", "Save");
-      cancelButton = createElement("button", "", "Cancel");
-      addButtonIcon(saveButton, "check");
-      addButtonIcon(cancelButton, "x");
-      saveButton.type = "button";
-      cancelButton.type = "button";
-      saveButton.addEventListener("click", () => saveDetails().catch(console.error));
-      cancelButton.addEventListener("click", () => cancelDetails().catch(console.error));
-      actionButtons.append(saveButton, cancelButton);
-      actions.append(actionInfo, actionButtons);
-      updateEditorState();
+      const actions = buildEditorActions();
 
       header.append(heading);
       // With room beside the modal, the editor opens as a page-like side
@@ -1061,8 +1106,9 @@ function buildDetailsField(modal, options = {}) {
     toolbar.append(leftTools, rightTools);
 
     const editorFrame = createElement("div", "ot-trello-editor ot-block-frame");
+    editorFrame.addEventListener("focusout", flushOnBlur);
     // The master textarea stays hidden: it only mirrors the joined markdown so
-    // saveDetails / insertImageFromFile keep reading the same place as before.
+    // finishEditing / insertImageFromFile keep reading the same place as before.
     blocks = buildBlocks(draftMarkdown);
     syncDraft();
     renderBlocks();
@@ -1113,38 +1159,18 @@ function buildDetailsField(modal, options = {}) {
     };
     if (!noteMode) modal.insertDetailAtCaret = insertDetailAtCaret;
 
-    const actions = createElement("div", "ot-details-actions");
-    const actionInfo = createElement("div", "ot-details-action-info");
-    editorStatus = createElement("span", "ot-details-status", "Saved");
-    editorStatus.setAttribute("aria-live", "polite");
-    actionInfo.append(
-      editorStatus,
-      createElement("span", "ot-details-shortcut", "Ctrl/⌘ + S to save · Esc to cancel"),
-    );
-
-    const actionButtons = createElement("div", "ot-details-action-buttons");
-    saveButton = createElement("button", "mod-cta ot-save-button", "Save");
-    cancelButton = createElement("button", "", "Cancel");
-    addButtonIcon(saveButton, "check");
-    addButtonIcon(cancelButton, "x");
-    saveButton.type = "button";
-    cancelButton.type = "button";
-    saveButton.addEventListener("click", () => saveDetails().catch(console.error));
-    cancelButton.addEventListener("click", () => cancelDetails().catch(console.error));
-    actionButtons.append(saveButton, cancelButton);
-    actions.append(actionInfo, actionButtons);
-    updateEditorState();
+    const actions = buildEditorActions();
 
     editorFrame.addEventListener("keydown", (event) => {
       if (event.isComposing) return;
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
-        saveDetails().catch(console.error);
+        finishEditing().catch(console.error);
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        cancelDetails().catch(console.error);
+        finishEditing().catch(console.error);
         return;
       }
       if ((event.ctrlKey || event.metaKey) && !event.altKey) {
@@ -1156,7 +1182,7 @@ function buildDetailsField(modal, options = {}) {
             i: () => execCmd("italic"),
             e: wrapCode,
             k: insertLink,
-            s: () => saveDetails().catch(console.error),
+            s: () => finishEditing().catch(console.error),
           }[key];
         if (shortcut) {
           event.preventDefault();

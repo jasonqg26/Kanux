@@ -171,6 +171,30 @@ async function testDescriptionSaveRollsBackAfterFailure() {
   assert.strictEqual(modal.editingDetails, false);
 }
 
+async function testAutoSaveKeepsTheEditingSessionOpen() {
+  const modal = Object.create(CardModal.prototype);
+  modal.localDetails = "Original";
+  modal.detailsDraft = "Original and more";
+  modal.editingDetails = true;
+  modal.detailsEditDismissed = false;
+  const written = [];
+  modal.saveNow = async () => { written.push(modal.localDetails); };
+
+  await modal.autoSaveDetails("  Original and more  ");
+
+  // The text lands, but the session it was typed in carries on: the draft, the
+  // editor and the caret all stay where the writer left them.
+  assert.deepStrictEqual(written, ["Original and more"]);
+  assert.strictEqual(modal.localDetails, "Original and more");
+  assert.strictEqual(modal.editingDetails, true);
+  assert.strictEqual(modal.detailsDraft, "Original and more");
+
+  await modal.persistDetailsDraft("Original and more");
+  assert.strictEqual(modal.editingDetails, false);
+  assert.strictEqual(modal.detailsDraft, "");
+  assert.strictEqual(modal.detailsEditDismissed, false);
+}
+
 async function testPendingDescriptionAttachmentsFollowSaveAndCancel() {
   const trashed = [];
   const modal = Object.create(CardModal.prototype);
@@ -208,6 +232,7 @@ async function run() {
   testDescriptionImageSegmentation();
   await testExplicitSaveReportsFailureWithoutPoisoningQueue();
   await testDescriptionSaveRollsBackAfterFailure();
+  await testAutoSaveKeepsTheEditingSessionOpen();
   await testPendingDescriptionAttachmentsFollowSaveAndCancel();
   console.log("modals tests passed");
 }

@@ -6,6 +6,9 @@ const IMG_BLOCK_DRAG_TYPE = "application/x-kanux-image-block";
 
 // Debounce for keystroke-driven card saves.
 const SAVE_DEBOUNCE_MS = 350;
+// Longer for descriptions: a save there rewrites the whole note, so it waits
+// for a real pause in the writing rather than chasing every word.
+const DETAILS_AUTOSAVE_MS = 900;
 // Re-acquire the card lock well within its server TTL so it never lapses mid-edit.
 const LOCK_HEARTBEAT_MS = 5000;
 
@@ -127,6 +130,7 @@ function safeImageFileName(rawName, fallbackExt) {
 module.exports = {
   IMG_BLOCK_DRAG_TYPE,
   SAVE_DEBOUNCE_MS,
+  DETAILS_AUTOSAVE_MS,
   LOCK_HEARTBEAT_MS,
   setIconSafe,
   fillMiniCard,

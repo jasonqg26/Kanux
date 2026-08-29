@@ -568,20 +568,30 @@ class CardModal extends Modal {
     return !this.readOnly && (this.editingDetails || (emptyDescription && !this.detailsEditDismissed));
   }
 
-  async persistDetailsDraft(markdown) {
+  /**
+   * Writes the description mid-edit, leaving the editing session running so
+   * autosave never moves the caret or closes the side sheet. Attachments the
+   * draft still references are released here; the ones it dropped are trashed,
+   * exactly as an explicit save would.
+   */
+  async autoSaveDetails(markdown) {
     const previousDetails = this.localDetails;
-    const nextDetails = String(markdown || "").trim();
-    this.localDetails = nextDetails;
+    this.localDetails = String(markdown || "").trim();
     try {
       await this.saveNow({ propagateError: true });
     } catch (error) {
       this.localDetails = previousDetails;
       throw error;
     }
-    await this.finalizePendingDetailAttachments(nextDetails);
+    await this.finalizePendingDetailAttachments(this.localDetails);
+  }
+
+  /** The same write, plus closing the editing session it belonged to. */
+  async persistDetailsDraft(markdown) {
+    await this.autoSaveDetails(markdown);
     this.detailsDraft = "";
     this.editingDetails = false;
-    this.detailsEditDismissed = !nextDetails;
+    this.detailsEditDismissed = !this.localDetails;
   }
 
   async discardPendingDetailAttachment(path) {

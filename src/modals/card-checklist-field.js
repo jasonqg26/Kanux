@@ -366,10 +366,7 @@ function buildChecklistsField(modal) {
                 modal.finishChecklistNoteEdit(file.path);
                 await showNoteBody();
               },
-              onCancel: () => {
-                modal.finishChecklistNoteEdit(file.path);
-                showNoteBody().catch(console.error);
-              },
+              onAutoSave: (markdown) => modal.persistChecklistNote(file.path, markdown),
             });
             noteContent.replaceChildren(noteEditor);
           } catch (error) {
