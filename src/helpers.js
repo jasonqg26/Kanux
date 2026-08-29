@@ -316,6 +316,8 @@ const ICON_ALIASES = {
   pencil: ["pencil", "edit-3", "edit"],
   trash: ["trash-2", "trash"],
   "help-circle": ["circle-help", "help-circle"],
+  "alert-triangle": ["triangle-alert", "alert-triangle"],
+  unlock: ["lock-open", "unlock"],
 };
 
 const DEFAULT_ICON_NAMES = ["circle-help", "help-circle", "circle"];
@@ -426,11 +428,20 @@ function parseChecklist(text) {
 }
 
 function parseChecklistLine(line) {
-  const { content, assignee } = extractChecklistAssignee(line);
+  const { content: lineWithoutId, id } = extractChecklistItemId(line);
+  const { content, assignee } = extractChecklistAssignee(lineWithoutId);
   const checkbox = content.match(/^(?:-\s*)?\[([ xX])\]\s*(.*)$/);
   const done = checkbox ? checkbox[1].toLowerCase() === "x" : false;
   const value = checkbox ? checkbox[2].trim() : content.replace(/^- /, "").trim();
-  return { done, assignee, ...parseChecklistItemValue(value) };
+  return { id, done, assignee, ...parseChecklistItemValue(value) };
+}
+
+// The id comment is written last on the line, so it is extracted before the
+// assignee comment that precedes it.
+function extractChecklistItemId(line) {
+  const metadata = line.match(/\s*<!--kanux-item-id:([A-Za-z0-9_-]+)-->\s*$/);
+  if (!metadata) return { content: line, id: "" };
+  return { content: line.slice(0, metadata.index), id: metadata[1] };
 }
 
 function extractChecklistAssignee(line) {
@@ -529,29 +540,56 @@ function normalizeChecklists(checklists, legacyItems) {
     ? checklists
     : [{ title: DEFAULT_CHECKLIST_TITLE, items: Array.isArray(legacyItems) ? legacyItems : [] }];
 
+  // Ids must stay unique within the card so external references (for example
+  // future card dependencies) always resolve to exactly one group or item.
+  const seenIds = new Set();
   return source
     .filter((group) => group && typeof group === "object")
-    .map(normalizeChecklistGroup);
+    .map((group, index) => normalizeChecklistGroup(group, index, seenIds));
 }
 
-function normalizeChecklistGroup(group, index) {
+function normalizeChecklistGroup(group, index, seenIds) {
   return {
-    id: group.id || uid("checklist"),
+    id: uniqueChecklistId(group.id, "checklist", seenIds),
     title: textLine(group.title) || `${DEFAULT_CHECKLIST_TITLE} ${index + 1}`,
     color: cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR,
+    description: cleanChecklistDescription(group.description),
+    dependencies: normalizeDependencies(group.dependencies),
     items: (Array.isArray(group.items) ? group.items : [])
-      .map(normalizeChecklistItem)
+      .map((item) => normalizeChecklistItem(item, seenIds))
       .filter((item) => item.text),
   };
 }
 
-function normalizeChecklistItem(item) {
+function cleanChecklistDescription(value) {
+  return String(value || "").replace(/\r\n?/g, "\n").trim();
+}
+
+function normalizeChecklistItem(item, seenIds) {
   return {
+    id: uniqueChecklistId(item && item.id, "item", seenIds),
     done: !!(item && item.done),
     text: textLine(item && item.text),
     filePath: textLine(item && item.filePath),
     assignee: normalizeChecklistAssignee(item && item.assignee),
   };
+}
+
+/**
+ * Ids round-trip through Markdown comments, so hand edits can produce ids
+ * with invalid characters or duplicates from copied lines. Both cases receive
+ * a fresh id; every kept or generated id is recorded in `seenIds`.
+ */
+function uniqueChecklistId(value, prefix, seenIds) {
+  const candidate = cleanKanuxId(value);
+  const id = candidate && !seenIds.has(candidate) ? candidate : uid(prefix);
+  seenIds.add(id);
+  return id;
+}
+
+function cleanKanuxId(value) {
+  const id = textLine(value);
+  return /^[A-Za-z0-9_-]+$/.test(id) ? id : "";
 }
 
 function normalizeChecklistAssignee(assignee) {
@@ -591,22 +629,69 @@ function parseChecklists(text) {
 function parseChecklistHeading(line) {
   const heading = line.match(/^###\s+(.+?)\s*$/);
   if (!heading) return null;
+  return extractChecklistHeadingMetadata(heading[1]);
+}
 
-  const colorMetadata = heading[1].match(/\s*<!--kanux-checklist-color:(#[0-9a-fA-F]{6})-->\s*$/);
-  return {
-    title: colorMetadata ? heading[1].slice(0, colorMetadata.index).trim() : heading[1],
-    color: colorMetadata ? colorMetadata[1] : "",
-  };
+/**
+ * Strips the trailing metadata comments (color, id) that round-trip group
+ * data the visible heading text cannot carry. They may appear in any order;
+ * values are validated downstream by cleanColor/cleanKanuxId.
+ */
+function extractChecklistHeadingMetadata(heading) {
+  const result = { title: heading, color: "", id: "", dependencies: "" };
+  const metadata = /\s*<!--kanux-checklist-(color|id|depends):([^>\s]+)-->\s*$/;
+  for (let match = result.title.match(metadata); match; match = result.title.match(metadata)) {
+    if (match[1] === "color") result.color = match[2];
+    else if (match[1] === "id") result.id = match[2];
+    else result.dependencies = match[2];
+    result.title = result.title.slice(0, match.index).trim();
+  }
+  return result;
 }
 
 function appendParsedChecklist(groups, group) {
   if (!group) return;
+  const { description, itemLines } = splitChecklistDescription(group.lines);
   groups.push({
-    id: uid("checklist"),
+    id: cleanKanuxId(group.id) || uid("checklist"),
     title: textLine(group.title) || `${DEFAULT_CHECKLIST_TITLE} ${groups.length + 1}`,
     color: cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR,
-    items: parseChecklist(group.lines.join("\n")),
+    description,
+    dependencies: parseDependencies(group.dependencies),
+    items: parseChecklist(itemLines.join("\n")),
   });
+}
+
+/**
+ * Leading plain-text lines under a group heading are its description; the
+ * first item-like line (checkbox or dash bullet) starts the items. Plain
+ * lines that appear after that keep the legacy behavior of becoming
+ * unchecked items, so hand-written notes never lose text silently.
+ */
+function splitChecklistDescription(lines) {
+  const source = Array.isArray(lines) ? lines : [];
+  const firstItemIndex = source.findIndex(isChecklistItemLine);
+  const boundary = firstItemIndex === -1 ? source.length : firstItemIndex;
+  const description = cleanChecklistDescription(
+    source.slice(0, boundary).map(unescapeChecklistDescriptionLine).join("\n"),
+  );
+  return { description, itemLines: source.slice(boundary) };
+}
+
+function isChecklistItemLine(line) {
+  return /^\s*(?:-|\[[ xX]\])/.test(line);
+}
+
+// A description line that starts like a heading would split the group (or the
+// card section) when the note is parsed again, and one that starts like a
+// task would turn into an item. The marker is escaped with a backslash —
+// which Markdown renders invisibly — and removed again on read.
+function escapeChecklistDescriptionLine(line) {
+  return line.replace(/^(\s*)([#\-\[])/, "$1\\$2");
+}
+
+function unescapeChecklistDescriptionLine(line) {
+  return line.replace(/^(\s*)\\([#\-\[])/, "$1$2");
 }
 
 function checklistToText(items) {
@@ -627,14 +712,16 @@ function checklistItemMarkdown(item) {
 function checklistToMarkdown(items) {
   return (items || [])
     .map((item) => {
-      const base = `- [${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`;
+      let line = `- [${item.done ? "x" : " "}] ${checklistItemMarkdown(item)}`;
       const assignee = item.assignee;
       if (assignee && assignee.email) {
         // Per-item member assignment, hidden in an HTML comment so it round-trips
         // and stays invisible in Markdown preview.
-        return `${base} <!--@${safeCommentValue(assignee.email)}|${safeCommentValue(assignee.name)}|${safeCommentValue(assignee.color)}-->`;
+        line += ` <!--@${safeCommentValue(assignee.email)}|${safeCommentValue(assignee.name)}|${safeCommentValue(assignee.color)}-->`;
       }
-      return base;
+      const id = cleanKanuxId(item.id);
+      if (id) line += ` <!--kanux-item-id:${id}-->`;
+      return line;
     })
     .join("\n");
 }
@@ -646,9 +733,14 @@ function safeCommentValue(value) {
 function checklistsToMarkdown(checklists) {
   return normalizeChecklists(checklists, [])
     .map((group) => {
+      const dependencies = serializeDependencies(group.dependencies);
+      const heading = `### ${textLine(group.title) || DEFAULT_CHECKLIST_TITLE}`
+        + ` <!--kanux-checklist-color:${cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR}-->`
+        + ` <!--kanux-checklist-id:${group.id}-->`
+        + (dependencies ? ` <!--kanux-checklist-depends:${dependencies}-->` : "");
+      const description = group.description.split("\n").map(escapeChecklistDescriptionLine).join("\n");
       const items = checklistToMarkdown(group.items);
-      const color = cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR;
-      return `### ${textLine(group.title) || DEFAULT_CHECKLIST_TITLE} <!--kanux-checklist-color:${color}-->${items ? `\n${items}` : ""}`;
+      return [heading, description, items].filter(Boolean).join("\n");
     })
     .join("\n\n");
 }
@@ -669,6 +761,106 @@ function checklistStats(items) {
     total,
     percent: total ? Math.round((done / total) * 100) : 0,
   };
+}
+
+// ---- Card dependencies ----
+// A dependency points one card (or one checklist group) at another card and
+// decides how hard an unmet dependency gates the actions it guards.
+const DEPENDENCY_BLOCK_NONE = "none";
+const DEPENDENCY_BLOCK_WARN = "warn";
+const DEPENDENCY_BLOCK_TOTAL = "block";
+// Weakest to strongest: a gate reports the strongest mode still unmet. How each
+// one is named and drawn belongs to the picker that offers them, not here.
+const DEPENDENCY_BLOCK_MODES = [DEPENDENCY_BLOCK_NONE, DEPENDENCY_BLOCK_WARN, DEPENDENCY_BLOCK_TOTAL];
+// A dependency is met once the card it points at is completed. One whose card
+// no longer exists reads as missing and never blocks, so deleting a card can
+// never strand every card that referenced it.
+const DEPENDENCY_STATUS_DONE = "done";
+const DEPENDENCY_STATUS_PENDING = "pending";
+const DEPENDENCY_STATUS_MISSING = "missing";
+
+function cleanDependencyBlockMode(value) {
+  const mode = textLine(value).toLowerCase();
+  return DEPENDENCY_BLOCK_MODES.includes(mode) ? mode : DEPENDENCY_BLOCK_NONE;
+}
+
+/**
+ * Normalizes a dependency collection: one entry per referenced card, each with
+ * a valid blocking mode. Entries without a usable card id are dropped.
+ */
+function normalizeDependencies(dependencies) {
+  const seen = new Set();
+  return (Array.isArray(dependencies) ? dependencies : [])
+    .map((dependency) => ({
+      cardId: cleanKanuxId(dependency && dependency.cardId),
+      blocking: cleanDependencyBlockMode(dependency && dependency.blocking),
+    }))
+    .filter((dependency) => dependency.cardId)
+    .filter((dependency) => (seen.has(dependency.cardId) ? false : seen.add(dependency.cardId)));
+}
+
+/**
+ * Reads the compact storage format "cardId|mode,cardId2|mode2" shared by the
+ * card frontmatter and the checklist heading comment.
+ */
+function parseDependencies(raw) {
+  const entries = String(raw || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [cardId, blocking] = part.split("|").map((piece) => (piece || "").trim());
+      return { cardId, blocking };
+    });
+  return normalizeDependencies(entries);
+}
+
+// Written without spaces so the same text also fits the Markdown comment that
+// carries a checklist group's dependencies.
+function serializeDependencies(dependencies) {
+  return normalizeDependencies(dependencies)
+    .map((dependency) => `${dependency.cardId}|${dependency.blocking}`)
+    .join(",");
+}
+
+/**
+ * Resolves how a dependency collection gates one action.
+ *
+ * `resolveCard` maps a card id to the card it references, or to nothing when
+ * that card is gone. The gate reports every dependency with its status, the
+ * ones still pending, and the strongest blocking mode among those.
+ */
+function dependencyGate(dependencies, resolveCard) {
+  const entries = normalizeDependencies(dependencies).map((dependency) => {
+    const card = resolveCard ? resolveCard(dependency.cardId) : null;
+    return {
+      ...dependency,
+      title: card ? textLine(card.title) : "",
+      status: dependencyStatus(card),
+    };
+  });
+  const pending = entries.filter((entry) => entry.status === DEPENDENCY_STATUS_PENDING);
+
+  return {
+    entries,
+    pending,
+    total: entries.length,
+    met: entries.filter((entry) => entry.status === DEPENDENCY_STATUS_DONE).length,
+    mode: strongestBlockMode(pending),
+  };
+}
+
+function dependencyStatus(card) {
+  if (!card) return DEPENDENCY_STATUS_MISSING;
+  return card.completed ? DEPENDENCY_STATUS_DONE : DEPENDENCY_STATUS_PENDING;
+}
+
+function strongestBlockMode(dependencies) {
+  return (dependencies || []).reduce((strongest, dependency) => (
+    DEPENDENCY_BLOCK_MODES.indexOf(dependency.blocking) > DEPENDENCY_BLOCK_MODES.indexOf(strongest)
+      ? dependency.blocking
+      : strongest
+  ), DEPENDENCY_BLOCK_NONE);
 }
 
 /**
@@ -741,6 +933,7 @@ const CARD_METADATA_KEYS = new Set([
   "completed",
   "start",
   "due",
+  "depends-on",
 ]);
 
 function readCardMetadata(markdown) {
@@ -828,6 +1021,7 @@ function parseCardMarkdown(markdown) {
     title: titleMatch ? titleMatch[1].trim() : "",
     labels: optionalMetadata(metadata, "labels", parseLabels) || [],
     assignees: optionalMetadata(metadata, "assignees", parseAssignees),
+    dependencies: optionalMetadata(metadata, "depends-on", parseDependencies),
     completed: optionalMetadata(metadata, "completed", parseBoolean),
     startDate: optionalMetadata(metadata, "start", cleanDate),
     dueDate: optionalMetadata(metadata, "due", cleanDate),
@@ -850,6 +1044,13 @@ module.exports = {
   LIST_COLORS,
   DEFAULT_APPEARANCE,
   DEFAULT_DATA,
+  DEPENDENCY_BLOCK_MODES,
+  DEPENDENCY_BLOCK_NONE,
+  DEPENDENCY_BLOCK_TOTAL,
+  DEPENDENCY_BLOCK_WARN,
+  DEPENDENCY_STATUS_DONE,
+  DEPENDENCY_STATUS_MISSING,
+  DEPENDENCY_STATUS_PENDING,
   clone,
   uid,
   textLine,
@@ -874,6 +1075,7 @@ module.exports = {
   imageMarkupWithSize,
   createElement,
   hasDragType,
+  renderIcon,
   iconButton,
   textButton,
   addButtonIcon,
@@ -889,6 +1091,11 @@ module.exports = {
   checklistsToMarkdown,
   checklistItems,
   checklistStats,
+  cleanDependencyBlockMode,
+  dependencyGate,
+  normalizeDependencies,
+  parseDependencies,
+  serializeDependencies,
   parseLabels,
   labelsToFrontmatter,
   parseAssignees,

@@ -1,7 +1,7 @@
 const { FuzzySuggestModal, Notice, PluginSettingTab, Setting } = require("obsidian");
 
 // Settings tab for board access, sync, preferences, and version info.
-const { isImagePath } = require("./helpers");
+const { isImagePath } = require("../helpers");
 
 class VaultImageSuggestModal extends FuzzySuggestModal {
   constructor(app, onChoose) {

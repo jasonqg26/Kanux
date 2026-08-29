@@ -25,8 +25,8 @@ Module._load = function load(request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain);
 };
 
-const { CardModal, detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch } = require("../src/modals");
-const { createEmbeddedMarkdownEditor } = require("../src/embedded-editor");
+const { CardModal, detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch, splitDetailSegments } = require("../src/modals");
+const { createEmbeddedMarkdownEditor } = require("../src/editor/embedded-editor");
 
 function testEmptyDescriptionCanStayClosed() {
   const modal = Object.create(CardModal.prototype);
@@ -112,8 +112,7 @@ function testEmbeddedEditorFallsBackWithoutInternalApi() {
 }
 
 function testDescriptionImageSegmentation() {
-  const modal = Object.create(CardModal.prototype);
-  const segments = modal.splitDetailSegments([
+  const segments = splitDetailSegments([
     "Before",
     "![[attachments/image.png|320]]",
     "[ordinary link](note.md)",

@@ -40,7 +40,29 @@ function createPlugin(data, files = {}) {
   };
   plugin.refreshViews = () => {};
   plugin.savePluginData = async () => {};
+  plugin.undoStack = [];
   return plugin;
+}
+
+function createDependencyBoard(blocking) {
+  const doing = { id: "list-1", title: "Doing", cardIds: ["card-1"] };
+  const done = { id: "list-2", title: "Done", cardIds: [] };
+  const board = { id: "board-1", name: "Project", folderPath: "Project", lists: [doing, done] };
+  const blocker = { id: "card-2", title: "Design QA", boardId: board.id, listId: doing.id, completed: false };
+  const card = {
+    id: "card-1",
+    title: "Deploy",
+    boardId: board.id,
+    listId: doing.id,
+    dependencies: [{ cardId: blocker.id, blocking }],
+  };
+  const plugin = createPlugin({
+    activeBoardId: board.id,
+    boards: [board],
+    cards: { [card.id]: card, [blocker.id]: blocker },
+  });
+  plugin.writeListCardFiles = async () => {};
+  return { plugin, board, doing, done, card, blocker };
 }
 
 async function testRenameBoardMovesFolderAndUpdatesPaths() {
@@ -138,7 +160,42 @@ function testRefreshViewsHonorsTemporaryViewGuard() {
   assert.strictEqual(regularRenders, 1);
 }
 
+async function testMoveCardIsRefusedByATotalBlock() {
+  const { plugin, doing, done, card, blocker } = createDependencyBoard("block");
+
+  assert.strictEqual(await plugin.moveCard(card.id, done.id), false);
+  assert.deepStrictEqual(doing.cardIds, [card.id]);
+  assert.deepStrictEqual(done.cardIds, []);
+  assert.strictEqual(card.listId, doing.id);
+
+  blocker.completed = true;
+  assert.strictEqual(await plugin.moveCard(card.id, done.id), true);
+  assert.deepStrictEqual(done.cardIds, [card.id]);
+  assert.strictEqual(card.listId, done.id);
+}
+
+async function testBlockedCardStillReordersInsideItsList() {
+  const { plugin, doing, card } = createDependencyBoard("block");
+  doing.cardIds = ["card-0", card.id];
+
+  // Same list: no progress is being claimed, so the dependency stays out of it.
+  assert.strictEqual(await plugin.moveCard(card.id, doing.id, "card-0"), true);
+  assert.deepStrictEqual(doing.cardIds, [card.id, "card-0"]);
+}
+
+async function testUndoIgnoresTheDependencyGate() {
+  const { plugin, doing, done, card } = createDependencyBoard("block");
+  plugin.applyingUndo = true;
+
+  assert.strictEqual(await plugin.moveCard(card.id, done.id), true);
+  assert.deepStrictEqual(done.cardIds, [card.id]);
+  assert.deepStrictEqual(doing.cardIds, []);
+}
+
 async function run() {
+  await testMoveCardIsRefusedByATotalBlock();
+  await testBlockedCardStillReordersInsideItsList();
+  await testUndoIgnoresTheDependencyGate();
   await testRenameBoardMovesFolderAndUpdatesPaths();
   await testRenameBoardRollsBackWhenFolderMoveFails();
   await testDeleteBoardTrashesFolderAndCleansState();

@@ -104,6 +104,7 @@ Sync Deck adds shared vaults, member assignment, card locks, and live presence w
 - **Rich Markdown descriptions:** Write and render formatted descriptions with links, lists, quotes, code, Obsidian note references, and collapsible long content.
 - **Images and attachments:** Add, paste, resize, arrange, reorder, copy, and manage images while keeping attachments organized inside the vault.
 - **Checklists and tasks:** Build multiple colored checklists, reorder tasks, track independent progress, assign members, and associate individual tasks with their own Markdown notes.
+- **Dependencies and blocking:** Make a card — or a single checklist — depend on other cards, and pick per dependency whether an unfinished one blocks nothing, asks for confirmation, or blocks the action completely.
 - **Per-board appearance:** Customize backgrounds, colors, spacing, typography, density, borders, shadows, animations, labels, and image fitting; save presets or copy an appearance from another board.
 - **Native Obsidian storage:** Keep cards as normal Markdown notes with frontmatter, graph connections, automatic file discovery, external-change synchronization, and migration support.
 - **Productivity and accessibility:** Use commands, undo supported changes, keyboard navigation, responsive layouts, visible focus states, and reduced-motion support.
@@ -133,6 +134,17 @@ Product Launch/
 ```
 
 The board index keeps list order and graph links connected. Card metadata lives in frontmatter, while the description and checklist remain ordinary Markdown. The plugin folder stores the local UI state; your task content stays in the vault.
+
+Dependencies travel with the notes too: a card lists them in its `depends-on` frontmatter (`card-id|none|warn|block`), and a checklist keeps its own in the hidden comment on its heading, so both survive a sync to another device.
+
+## Dependencies and blocking
+
+A dependency points at another card and is met once that card is completed:
+
+- A **card** dependency guards moving the card to a different list. Reordering inside the same list is never blocked.
+- A **checklist** dependency guards ticking the items of that checklist. Unticking an item is always allowed.
+
+Each dependency chooses its own blocking level: **no blocking** (the default, informational only), **warn before continuing** (a dialog names the unfinished cards and asks whether to go on), or **block completely** (a dialog explains that the action cannot be performed and which cards block it). Change a level from the dependency's own menu or by dragging it onto another level. When several dependencies apply, the strongest unmet level wins. A dependency whose card was deleted is shown as missing and never blocks.
 
 ## Sync across devices and teams
 

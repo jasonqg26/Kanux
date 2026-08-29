@@ -19,9 +19,14 @@ const {
   checklistItemNoteWithBody,
   checklistStats,
   checklistsToMarkdown,
+  dependencyGate,
   iconButton,
+  normalizeChecklists,
+  normalizeDependencies,
   parseCardMarkdown,
   parseChecklists,
+  parseDependencies,
+  serializeDependencies,
 } = require("../src/helpers");
 
 function createFakeElement(tagName) {
@@ -143,6 +148,70 @@ function testNamedChecklistRoundTrip() {
   assert.deepStrictEqual(empty[0].items, []);
 }
 
+function testChecklistIdentityRoundTrip() {
+  const [group] = normalizeChecklists([
+    {
+      title: "Development",
+      items: [
+        { done: false, text: "Implement parser" },
+        { done: true, text: "Review", assignee: { email: "dev@example.com", name: "Dev", color: "#123456" } },
+      ],
+    },
+  ], []);
+  assert.ok(/^checklist-/.test(group.id));
+  assert.ok(group.items.every((item) => /^item-/.test(item.id)));
+
+  const markdown = checklistsToMarkdown([group]);
+  assert.ok(markdown.includes(`<!--kanux-checklist-id:${group.id}-->`));
+  group.items.forEach((item) => assert.ok(markdown.includes(`<!--kanux-item-id:${item.id}-->`)));
+
+  const [parsed] = normalizeChecklists(parseChecklists(markdown), []);
+  assert.strictEqual(parsed.id, group.id);
+  assert.deepStrictEqual(parsed.items.map((item) => item.id), group.items.map((item) => item.id));
+  assert.strictEqual(parsed.title, "Development");
+  assert.deepStrictEqual(parsed.items.map((item) => item.text), ["Implement parser", "Review"]);
+  assert.strictEqual(parsed.items[1].assignee.email, "dev@example.com");
+}
+
+function testChecklistDescriptionRoundTrip() {
+  const markdown = checklistsToMarkdown([{
+    title: "Release",
+    description: "Steps before shipping.\n# Not a heading\n- Not an item",
+    items: [{ done: false, text: "Publish" }],
+  }]);
+  assert.ok(markdown.includes("Steps before shipping."));
+  assert.ok(markdown.includes("\\# Not a heading"));
+  assert.ok(markdown.includes("\\- Not an item"));
+
+  const [parsed] = parseChecklists(markdown);
+  assert.strictEqual(parsed.description, "Steps before shipping.\n# Not a heading\n- Not an item");
+  assert.deepStrictEqual(parsed.items.map((item) => item.text), ["Publish"]);
+
+  const handWritten = parseChecklists("### Notes\nContext paragraph.\n\n- [ ] Task\nTrailing loose line");
+  assert.strictEqual(handWritten[0].description, "Context paragraph.");
+  assert.deepStrictEqual(handWritten[0].items.map((item) => item.text), ["Task", "Trailing loose line"]);
+
+  const descriptionOnly = parseChecklists("### Empty\nOnly context, no items yet.");
+  assert.strictEqual(descriptionOnly[0].description, "Only context, no items yet.");
+  assert.deepStrictEqual(descriptionOnly[0].items, []);
+
+  const [normalized] = normalizeChecklists([{ title: "Plain", items: [] }], []);
+  assert.strictEqual(normalized.description, "");
+}
+
+function testChecklistIdDeduplicationAndSanitizing() {
+  const groups = normalizeChecklists([
+    { id: "checklist-dup", title: "A", items: [{ id: "item-dup", text: "One" }, { id: "item-dup", text: "Two" }] },
+    { id: "checklist-dup", title: "B", items: [{ id: "bad id!", text: "Three" }] },
+  ], []);
+
+  assert.strictEqual(groups[0].id, "checklist-dup");
+  assert.notStrictEqual(groups[1].id, "checklist-dup");
+  assert.strictEqual(groups[0].items[0].id, "item-dup");
+  assert.notStrictEqual(groups[0].items[1].id, "item-dup");
+  assert.ok(/^item-/.test(groups[1].items[0].id));
+}
+
 function testCardParserAndAggregateStats() {
   const markdown = [
     "---",
@@ -179,6 +248,7 @@ function testCardMetadataParsing() {
     "position: 4",
     "labels: Urgent|#ef4444, Docs|#3b82f6",
     "assignees: dev@example.com|Dev User|#123456",
+    "depends-on: card-1|warn,card-2|block",
     "completed: yes",
     "start: 2026-08-25",
     "due: invalid",
@@ -197,6 +267,10 @@ function testCardMetadataParsing() {
   assert.strictEqual(card.position, 4);
   assert.deepStrictEqual(card.labels.map((label) => label.name), ["Urgent", "Docs"]);
   assert.strictEqual(card.assignees[0].email, "dev@example.com");
+  assert.deepStrictEqual(card.dependencies, [
+    { cardId: "card-1", blocking: "warn" },
+    { cardId: "card-2", blocking: "block" },
+  ]);
   assert.strictEqual(card.completed, true);
   assert.strictEqual(card.startDate, "2026-08-25");
   assert.strictEqual(card.dueDate, "");
@@ -204,15 +278,85 @@ function testCardMetadataParsing() {
   const missing = parseCardMarkdown("# Card without metadata");
   assert.strictEqual(missing.position, null);
   assert.strictEqual(missing.assignees, null);
+  assert.strictEqual(missing.dependencies, null);
   assert.strictEqual(missing.completed, null);
   assert.strictEqual(missing.startDate, null);
   assert.strictEqual(missing.dueDate, null);
+}
+
+function testDependencyNormalizationAndRoundTrip() {
+  const dependencies = normalizeDependencies([
+    { cardId: "card-1", blocking: "block" },
+    { cardId: "card-1", blocking: "warn" },
+    { cardId: "", blocking: "warn" },
+    { cardId: "card 2", blocking: "warn" },
+    { cardId: "card-3", blocking: "nonsense" },
+  ]);
+
+  // Duplicates keep the first entry, unusable ids are dropped, and an unknown
+  // blocking mode falls back to the harmless default.
+  assert.deepStrictEqual(dependencies, [
+    { cardId: "card-1", blocking: "block" },
+    { cardId: "card-3", blocking: "none" },
+  ]);
+  assert.strictEqual(serializeDependencies(dependencies), "card-1|block,card-3|none");
+  assert.deepStrictEqual(parseDependencies("card-1|block, card-3|none"), dependencies);
+  assert.deepStrictEqual(parseDependencies(""), []);
+}
+
+function testChecklistDependencyRoundTrip() {
+  const markdown = checklistsToMarkdown([{
+    id: "checklist-1",
+    title: "Release",
+    color: "#3b82f6",
+    dependencies: [{ cardId: "card-9", blocking: "block" }],
+    items: [{ id: "item-1", text: "Tag the build", done: false }],
+  }]);
+  assert.ok(markdown.includes("<!--kanux-checklist-depends:card-9|block-->"));
+
+  const parsed = parseChecklists(markdown);
+  assert.strictEqual(parsed[0].title, "Release");
+  assert.deepStrictEqual(parsed[0].dependencies, [{ cardId: "card-9", blocking: "block" }]);
+  assert.deepStrictEqual(parseChecklists("### Plain <!--kanux-checklist-id:checklist-2-->")[0].dependencies, []);
+}
+
+function testDependencyGateResolvesTheStrongestUnmetMode() {
+  const cards = {
+    "card-done": { id: "card-done", title: "Design QA", completed: true },
+    "card-open": { id: "card-open", title: "Ship docs", completed: false },
+  };
+  const resolveCard = (cardId) => cards[cardId];
+
+  const unmet = dependencyGate([{ cardId: "card-open", blocking: "none" }], resolveCard);
+  assert.strictEqual(unmet.mode, "none");
+  assert.deepStrictEqual(unmet.pending.map((entry) => entry.title), ["Ship docs"]);
+
+  // The missing card is counted but never blocks, so the warning wins.
+  const mixed = dependencyGate([
+    { cardId: "card-open", blocking: "warn" },
+    { cardId: "card-gone", blocking: "block" },
+  ], resolveCard);
+  assert.strictEqual(mixed.mode, "warn");
+  assert.strictEqual(mixed.total, 2);
+  assert.strictEqual(mixed.met, 0);
+  assert.strictEqual(mixed.entries[1].status, "missing");
+
+  const met = dependencyGate([{ cardId: "card-done", blocking: "block" }], resolveCard);
+  assert.strictEqual(met.mode, "none");
+  assert.strictEqual(met.met, 1);
+  assert.strictEqual(met.entries[0].status, "done");
 }
 
 testLegacyChecklistMigration();
 testRegisteredIconAndGenericFallback();
 testChecklistItemNoteBody();
 testNamedChecklistRoundTrip();
+testChecklistIdentityRoundTrip();
+testChecklistDescriptionRoundTrip();
+testChecklistIdDeduplicationAndSanitizing();
 testCardParserAndAggregateStats();
 testCardMetadataParsing();
+testDependencyNormalizationAndRoundTrip();
+testChecklistDependencyRoundTrip();
+testDependencyGateResolvesTheStrongestUnmetMode();
 console.log("helpers tests passed");

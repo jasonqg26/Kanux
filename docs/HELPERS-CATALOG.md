@@ -22,6 +22,9 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 - `DEFAULT_LABEL_COLOR`, `LABEL_COLORS` y `LIST_COLORS`: colores compartidos para etiquetas y listas.
 - `DEFAULT_APPEARANCE`: configuración visual inicial.
 - `DEFAULT_DATA`: estructura mínima de datos persistidos del plugin.
+- `DEPENDENCY_BLOCK_NONE`, `DEPENDENCY_BLOCK_WARN` y `DEPENDENCY_BLOCK_TOTAL`: niveles de bloqueo de una dependencia, del más débil al más fuerte.
+- `DEPENDENCY_BLOCK_MODES`: los tres niveles ordenados; su índice es la comparación que usa `dependencyGate`. Su presentación (nombre, icono y descripción) vive en `src/modals/dependency-level-picker.js`.
+- `DEPENDENCY_STATUS_DONE`, `DEPENDENCY_STATUS_PENDING` y `DEPENDENCY_STATUS_MISSING`: estado de una dependencia según la card a la que apunta.
 
 ## Valores, texto e identidad
 
@@ -64,6 +67,7 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 
 - `createElement(tag, className, text)`: crea elementos DOM con clase y texto opcionales.
 - `hasDragType(event, type)`: comprueba de forma compatible un tipo en `dataTransfer`.
+- `renderIcon(element, icon)`: pinta dentro de un elemento un icono registrado en Obsidian, resolviendo alias entre versiones y cayendo en un icono genérico si ninguno existe.
 - `iconButton(icon, label, onClick)`: crea un botón accesible con un icono registrado en Obsidian.
 - `textButton(icon, label, onClick, className)`: crea un botón de texto con un icono registrado en Obsidian.
 - `addButtonIcon(button, icon)`: agrega a un botón existente un icono registrado, con alias compatibles y un respaldo genérico.
@@ -80,13 +84,20 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 - `parseChecklist(text)`: convierte líneas Markdown en elementos de checklist.
 - `checklistItemNoteBody(markdown)`: obtiene el contenido editable de una nota de elemento enlazado.
 - `checklistItemNoteWithBody(markdown, nextBody)`: reemplaza el contenido editable y conserva el frontmatter y encabezado administrado.
-- `parseChecklists(text)`: lee grupos de checklist actuales y el formato plano heredado.
-- `normalizeChecklists(checklists, legacyItems)`: normaliza grupos, elementos, colores y miembros.
+- `parseChecklists(text)`: lee grupos de checklist actuales y el formato plano heredado, incluyendo los ids estables de grupo (`<!--kanux-checklist-id:...-->`) y de elemento (`<!--kanux-item-id:...-->`); las líneas de texto plano previas al primer elemento se leen como descripción del grupo.
+- `normalizeChecklists(checklists, legacyItems)`: normaliza grupos, elementos, colores, miembros y descripción; garantiza un id estable y único por card para cada grupo y elemento.
 - `checklistToText(items)`: serializa elementos sin viñeta Markdown.
-- `checklistToMarkdown(items)`: serializa elementos con tareas Markdown y metadatos de miembro.
-- `checklistsToMarkdown(checklists)`: serializa grupos completos con título y color.
+- `checklistToMarkdown(items)`: serializa elementos con tareas Markdown y metadatos de miembro e id.
+- `checklistsToMarkdown(checklists)`: serializa grupos completos con título, color, id y descripción (escapando marcadores de heading/tarea al inicio de línea para que el round-trip no altere la estructura).
 - `checklistItems(checklists)`: aplana los elementos de todos los grupos.
 - `checklistStats(items)`: calcula elementos completados, total y porcentaje.
+
+## Dependencias entre cards
+
+- `cleanDependencyBlockMode(value)`: valida un nivel de bloqueo y cae en `none` si no lo reconoce.
+- `normalizeDependencies(dependencies)`: normaliza la colección a una entrada `{ cardId, blocking }` por card referenciada, descartando ids inservibles y duplicados.
+- `parseDependencies(raw)` y `serializeDependencies(dependencies)`: leen y escriben el formato compacto `cardId|modo,cardId2|modo2` que comparten el frontmatter `depends-on` de la card y el comentario `<!--kanux-checklist-depends:...-->` del grupo de checklist.
+- `dependencyGate(dependencies, resolveCard)`: resuelve cómo una colección condiciona una acción. Devuelve `{ entries, pending, total, met, mode }`, donde una dependencia se cumple cuando su card está completada, una card inexistente se marca `missing` y nunca bloquea, y `mode` es el bloqueo más fuerte entre las pendientes.
 
 ## Ejemplo de reutilización
 
