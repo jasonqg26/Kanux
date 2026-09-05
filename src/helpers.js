@@ -745,6 +745,133 @@ function checklistsToMarkdown(checklists) {
     .join("\n\n");
 }
 
+/**
+ * Checklist groups prepared for reuse: nothing ticked, nothing still linked to
+ * the notes of the card they were copied from, no dependencies pointing at that
+ * card's neighbours, and no ids, so whoever normalizes them next mints a fresh
+ * set instead of every copy sharing one.
+ */
+function blankChecklists(checklists) {
+  return normalizeChecklists(checklists, []).map((group) => ({
+    title: group.title,
+    color: group.color,
+    description: group.description,
+    dependencies: [],
+    items: group.items.map((item) => ({
+      text: item.text,
+      done: false,
+      filePath: "",
+      assignee: item.assignee,
+    })),
+  }));
+}
+
+/**
+ * Where the caret belongs in a template description: inside the first blank of
+ * "As a [ ] I want [ ] so that [ ]". A pair of brackets that is all a list
+ * marker carries is a task checkbox rather than a blank, so it is skipped.
+ * Returns -1 when the text has nothing to fill in.
+ */
+function firstPlaceholderIndex(markdown) {
+  const text = String(markdown || "");
+  const gap = /\[[ \t]*\]/g;
+  for (let match = gap.exec(text); match; match = gap.exec(text)) {
+    const lineStart = text.lastIndexOf("\n", match.index) + 1;
+    if (!/^\s*[-*+]\s*$/.test(text.slice(lineStart, match.index))) return match.index + 1;
+  }
+  return -1;
+}
+
+/* ---- Template numbering ---- */
+// A template can stamp every card it makes with a running code — BUG-014 — so
+// a card can be named out loud. The counter lives in the template note, so it
+// survives a reload and syncs with the vault like everything else.
+const NUMBERING_KEYS = { prefix: "kanux-id-prefix", next: "kanux-id-next", pad: "kanux-id-pad" };
+const MAX_NUMBER_PAD = 8;
+
+/** Numbering is on when the note carries a next number; nothing else is required. */
+function parseTemplateNumbering(markdown) {
+  const read = (key) => {
+    const match = String(markdown || "").match(new RegExp(`(?:^|\\r?\\n)[ \\t]*${key}[ \\t]*:(.*)`));
+    return match ? textLine(match[1]) : "";
+  };
+  const next = numberOrNull(read(NUMBERING_KEYS.next));
+  if (next === null) return null;
+  return normalizeNumbering({
+    prefix: read(NUMBERING_KEYS.prefix),
+    next,
+    pad: numberOrNull(read(NUMBERING_KEYS.pad)),
+  });
+}
+
+function normalizeNumbering(numbering) {
+  if (!numbering) return null;
+  const next = Math.max(0, Math.floor(numberOrNull(numbering.next) || 0));
+  const pad = Math.min(MAX_NUMBER_PAD, Math.max(1, Math.floor(numberOrNull(numbering.pad) || 1)));
+  return { prefix: textLine(numbering.prefix), next, pad };
+}
+
+/** The code a card would carry: "BUG-014", or "014" when there is no prefix. */
+function formatCardCode(numbering, value) {
+  const clean = normalizeNumbering(numbering);
+  if (!clean) return "";
+  const number = numberOrNull(value);
+  const counter = number === null ? clean.next : Math.max(0, Math.floor(number));
+  const digits = String(counter).padStart(clean.pad, "0");
+  return clean.prefix ? `${clean.prefix}-${digits}` : digits;
+}
+
+
+/**
+ * Rewrites just the numbering keys of a template note, leaving the rest of the
+ * file alone. A template is a note people edit by hand, so re-serializing it
+ * from the parsed model would quietly drop anything the parser does not carry.
+ * Passing null turns numbering off. Returns the text unchanged when the note
+ * has no frontmatter to write into.
+ */
+function withNumbering(markdown, numbering) {
+  const text = String(markdown || "");
+  const block = text.match(/^(---\r?\n)([\s\S]*?)(^---[ \t]*$)/m);
+  if (!block) return text;
+
+  const ending = text.includes("\r\n") ? "\r\n" : "\n";
+  const keys = Object.values(NUMBERING_KEYS);
+  const kept = block[2]
+    .split(/\r?\n/)
+    .filter((line) => !keys.some((key) => new RegExp(`^[ \\t]*${key}[ \\t]*:`).test(line)));
+  while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
+
+  const clean = normalizeNumbering(numbering);
+  if (clean) {
+    kept.push(`${NUMBERING_KEYS.prefix}: ${clean.prefix}`);
+    kept.push(`${NUMBERING_KEYS.next}: ${clean.next}`);
+    kept.push(`${NUMBERING_KEYS.pad}: ${clean.pad}`);
+  }
+
+  return text.slice(0, block.index) + block[1] + kept.join(ending) + ending + block[3] + text.slice(block.index + block[0].length);
+}
+
+/**
+ * A card's code as it is stored: one token, no spaces. The code identifies the
+ * card, so it must survive a round trip through frontmatter unchanged.
+ */
+function cleanCardCode(value) {
+  return textLine(value).replace(/\s+/g, "");
+}
+
+/**
+ * The number inside a card's code — 14 for "BUG-014" — or -1 when the code did
+ * not come from this template. The prefix is matched literally, so a template
+ * prefixed "A.B" cannot claim the cards of one prefixed "AXB".
+ */
+function cardCodeNumber(code, numbering) {
+  const clean = normalizeNumbering(numbering);
+  if (clean === null) return -1;
+  const head = clean.prefix ? `${clean.prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-` : "";
+  const match = cleanCardCode(code).match(new RegExp(`^${head}(\\d+)$`));
+  return match ? Number(match[1]) : -1;
+}
+
 function checklistItems(checklists) {
   return (Array.isArray(checklists) ? checklists : [])
     .flatMap((group) => (group && Array.isArray(group.items) ? group.items : []));
@@ -926,6 +1053,7 @@ const CARD_METADATA_KEYS = new Set([
   "kanban-card-id",
   "kanban-board-id",
   "kanban-list-id",
+  "kanux-card-code",
   "kanux-list",
   "position",
   "labels",
@@ -1017,6 +1145,7 @@ function parseCardMarkdown(markdown) {
     boardId: metadata["kanban-board-id"] || "",
     listId: metadata["kanban-list-id"] || "",
     listTitle: metadata["kanux-list"] || "",
+    code: optionalMetadata(metadata, "kanux-card-code", cleanCardCode),
     position: numberOrNull(metadata.position),
     title: titleMatch ? titleMatch[1].trim() : "",
     labels: optionalMetadata(metadata, "labels", parseLabels) || [],
@@ -1089,9 +1218,18 @@ module.exports = {
   checklistToText,
   checklistToMarkdown,
   checklistsToMarkdown,
+  blankChecklists,
   checklistItems,
   checklistStats,
   cleanDependencyBlockMode,
+  firstPlaceholderIndex,
+  parseTemplateNumbering,
+  normalizeNumbering,
+  formatCardCode,
+  cardCodeNumber,
+  cleanCardCode,
+  withNumbering,
+  NUMBERING_KEYS,
   dependencyGate,
   normalizeDependencies,
   parseDependencies,

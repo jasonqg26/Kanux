@@ -195,6 +195,35 @@ async function testAutoSaveKeepsTheEditingSessionOpen() {
   assert.strictEqual(modal.detailsEditDismissed, false);
 }
 
+/**
+ * Autosave fires on every typing pause. If each one took an undo snapshot, a
+ * paragraph would push every real board action off the 50-deep stack, so only
+ * the first save of a session records one.
+ */
+async function testAutoSaveRecordsOneUndoPerEditingSession() {
+  const modal = Object.create(CardModal.prototype);
+  modal.localDetails = "";
+  modal.detailsDraft = "";
+  modal.editingDetails = true;
+  modal.detailsEditDismissed = false;
+  modal.detailsUndoRecorded = false;
+  const snapshots = [];
+  modal.saveNow = async (options) => { snapshots.push(options.recordUndo); };
+
+  await modal.autoSaveDetails("One");
+  await modal.autoSaveDetails("One two");
+  await modal.autoSaveDetails("One two three");
+  assert.deepStrictEqual(snapshots, [true, false, false]);
+
+  // The closing save belongs to the session it closes, so it does not snapshot
+  // either; only the edit that comes after does. Undo therefore steps back one
+  // description at a time rather than one keystroke at a time.
+  await modal.persistDetailsDraft("One two three");
+  assert.strictEqual(modal.detailsUndoRecorded, false);
+  await modal.autoSaveDetails("A second session");
+  assert.deepStrictEqual(snapshots, [true, false, false, false, true]);
+}
+
 async function testPendingDescriptionAttachmentsFollowSaveAndCancel() {
   const trashed = [];
   const modal = Object.create(CardModal.prototype);
@@ -233,6 +262,7 @@ async function run() {
   await testExplicitSaveReportsFailureWithoutPoisoningQueue();
   await testDescriptionSaveRollsBackAfterFailure();
   await testAutoSaveKeepsTheEditingSessionOpen();
+  await testAutoSaveRecordsOneUndoPerEditingSession();
   await testPendingDescriptionAttachmentsFollowSaveAndCancel();
   console.log("modals tests passed");
 }

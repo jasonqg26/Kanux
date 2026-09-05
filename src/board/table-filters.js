@@ -154,6 +154,7 @@ const tableFilterMethods = {
     if (state.labelKeys.length && !(card.labels || []).some((label) => state.labelKeys.includes(labelKey(label)))) return false;
     if (!queryTerms.length) return true;
     const searchable = [
+      card.code,
       card.title,
       card.details,
       list.title,

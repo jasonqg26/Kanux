@@ -4,6 +4,7 @@
 const {
   cleanColor,
   cleanDate,
+  cleanCardCode,
   decodeListMeta,
   normalizeChecklists,
   normalizeDependencies,
@@ -84,6 +85,7 @@ const vaultSyncMethods = {
       return board.folderPath
         && file.path.startsWith(`${board.folderPath}/`)
         && !this.isChecklistItemPath(file.path, board)
+        && !this.isTemplatePath(file.path, board)
         && file.path !== this.boardIndexPath(board)
         && file.path !== this.legacyBoardIndexPath(board);
     }) || null;
@@ -368,6 +370,9 @@ const vaultSyncMethods = {
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (!file.path.startsWith(`${board.folderPath}/`)) continue;
       if (this.isChecklistItemPath(file.path, board)) continue;
+      // A template is a card that never joined the board; importing it would
+      // put a copy of every template on the board on the next sync.
+      if (this.isTemplatePath(file.path, board)) continue;
       if (file.path === this.boardIndexPath(board) || file.path === this.legacyBoardIndexPath(board)) continue;
       if (await this.isGeneratedBoardIndexFile(file)) continue;
       files.push(file);
@@ -396,13 +401,21 @@ const vaultSyncMethods = {
         id: card.id || cardId,
         boardId: board.id,
         title: parsed.title || file.basename,
+        // Present-but-empty counts as no news, exactly the way labels are read
+        // two lines down. A peer on a version that predates this key writes it
+        // blank, and a blank must never erase a code that lives only in the
+        // note: the cost is that clearing one does not propagate, which is the
+        // trade this file already made for labels.
+        code: parsed.code ? parsed.code : cleanCardCode(card.code),
         listId: targetList.id,
         position: parsed.position !== null ? parsed.position : (card.position != null ? card.position : 0),
         labels: parsed.labels.length ? this.normalizeCardLabels(parsed.labels) : this.normalizeCardLabels(card.labels || []),
         assignees: this.normalizeAssignees(parsed.assignees !== null ? parsed.assignees : card.assignees || []),
         details: parsed.details,
         checklists: normalizeChecklists(parsed.checklists, []),
-        dependencies: normalizeDependencies(parsed.dependencies !== null ? parsed.dependencies : card.dependencies),
+        // Same rule as `code` above: an empty list is what an older peer writes
+        // for a key it does not model, so it cannot be allowed to win.
+        dependencies: normalizeDependencies(parsed.dependencies && parsed.dependencies.length ? parsed.dependencies : card.dependencies),
         completed: parsed.completed !== null ? parsed.completed : !!card.completed,
         startDate: parsed.startDate !== null ? parsed.startDate : cleanDate(card.startDate),
         dueDate: parsed.dueDate !== null ? parsed.dueDate : cleanDate(card.dueDate),

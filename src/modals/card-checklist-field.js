@@ -1,5 +1,7 @@
 const { MarkdownRenderer, Notice, setIcon } = require("obsidian");
 const {
+  DEPENDENCY_BLOCK_TOTAL,
+  DEPENDENCY_BLOCK_WARN,
   LIST_COLORS,
   addButtonIcon,
   checklistItemNoteBody,
@@ -16,8 +18,8 @@ const { TextPromptModal, confirmAction } = require("./prompt-modals");
 const { ListColorModal } = require("./list-color-modal");
 const { buildDependenciesField } = require("./card-dependencies-field");
 
-// Builds the card checklists field: groups with description, drag & drop,
-// per-item notes and member assignment.
+// Builds the card checklists field: groups with description, collapsed
+// dependencies, drag & drop, per-item notes and member assignment.
 /**
  * Renders every named checklist as an independent progress bar.
  */
@@ -98,7 +100,39 @@ function buildChecklistsField(modal) {
 
     // The very same editor the card uses, so a dependency is added and read the
     // same way whether it gates the card or one of its checklists.
-    const dependenciesField = buildDependenciesField(modal, group.dependencies);
+    //
+    // Most checklists depend on nothing, so the panel starts collapsed and the
+    // header button carries the count: hidden is quiet, never silent, and a
+    // gate that warns or blocks colours the count to say so from the header.
+    const dependenciesOpen = () => modal.openChecklistDependencies.has(group.id);
+    const dependenciesToggle = iconButton("link", "Show dependencies", () => {
+      if (dependenciesOpen()) modal.openChecklistDependencies.delete(group.id);
+      else modal.openChecklistDependencies.add(group.id);
+      paintDependenciesToggle();
+    });
+    dependenciesToggle.classList.add("ot-checklist-deps-button");
+    const dependenciesCount = createElement("span", "ot-checklist-deps-count");
+    dependenciesToggle.append(dependenciesCount);
+    header.append(dependenciesToggle);
+
+    // Called back rather than read once: adding or removing a dependency while
+    // the panel is open has to move the count the header is showing.
+    const dependenciesField = buildDependenciesField(modal, group.dependencies, () => paintDependenciesToggle());
+
+    const paintDependenciesToggle = () => {
+      const open = dependenciesOpen();
+      const gate = modal.plugin.dependencyGateFor(group.dependencies);
+      dependenciesField.hidden = !open;
+      dependenciesToggle.classList.toggle("is-expanded", open);
+      dependenciesToggle.classList.toggle("is-warning", gate.mode === DEPENDENCY_BLOCK_WARN);
+      dependenciesToggle.classList.toggle("is-blocked", gate.mode === DEPENDENCY_BLOCK_TOTAL);
+      dependenciesToggle.setAttribute("aria-expanded", String(open));
+      dependenciesToggle.title = dependenciesToggleLabel(open, gate.total);
+      dependenciesToggle.setAttribute("aria-label", dependenciesToggle.title);
+      dependenciesCount.textContent = gate.total ? String(gate.total) : "";
+      dependenciesCount.hidden = !gate.total;
+    };
+    paintDependenciesToggle();
 
     const colorButton = createElement("button", "ot-checklist-color");
     colorButton.type = "button";
@@ -582,6 +616,14 @@ function buildChecklistsField(modal) {
   }, "ot-add-checklist");
   field.append(addChecklist);
   return field;
+}
+
+// What the header button offers, so a collapsed panel still says how much is
+// behind it instead of only that something might be.
+function dependenciesToggleLabel(open, total) {
+  if (open) return "Hide dependencies";
+  if (!total) return "Show dependencies";
+  return `Show ${total} ${total === 1 ? "dependency" : "dependencies"}`;
 }
 
 module.exports = {

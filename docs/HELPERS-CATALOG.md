@@ -91,6 +91,25 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 - `checklistsToMarkdown(checklists)`: serializa grupos completos con título, color, id y descripción (escapando marcadores de heading/tarea al inicio de línea para que el round-trip no altere la estructura).
 - `checklistItems(checklists)`: aplana los elementos de todos los grupos.
 - `checklistStats(items)`: calcula elementos completados, total y porcentaje.
+- `blankChecklists(checklists)`: deja los grupos listos para reutilizar (plantillas): sin marcar, sin notas enlazadas, sin dependencias y sin ids, para que cada copia genere los suyos.
+
+## Plantillas de card
+
+- `firstPlaceholderIndex(markdown)`: posición del primer hueco rellenable (`As a [ ] I want [ ]`) donde debe caer el cursor; ignora los `[ ]` que son casillas de tarea y devuelve `-1` si no hay ninguno.
+
+### Numeración incremental
+
+El contador vive en la nota de la plantilla (`kanux-id-prefix`, `kanux-id-next`, `kanux-id-pad`), así que sobrevive un reinicio y viaja con el vault. La numeración está activa cuando la nota trae `kanux-id-next`.
+
+El código que recibe cada card se guarda en el frontmatter de la card (`kanux-card-code`), no en su título: renombrarla no le quita el identificador, y la búsqueda de la tabla lo incluye.
+
+- `NUMBERING_KEYS`: las tres claves de frontmatter del contador (`kanux-id-prefix`, `kanux-id-next`, `kanux-id-pad`). Un solo lugar decide cómo se escriben, para que lector y escritor no se separen.
+- `parseTemplateNumbering(markdown)`: lee `{ prefix, next, pad }` del frontmatter, o `null` si la plantilla no numera.
+- `normalizeNumbering(numbering)`: acota lo que el editor puede escribir — `next` nunca negativo, `pad` entre 1 y 8.
+- `formatCardCode(numbering, value)`: el código con relleno de ceros (`BUG-014`, o `014` sin prefijo). Un número más ancho que el relleno no se recorta.
+- `cleanCardCode(value)`: el código como se guarda — un solo token, sin espacios. El código identifica la card, así que debe sobrevivir el viaje por el frontmatter sin cambios.
+- `cardCodeNumber(code, numbering)`: el número dentro de un código (`14` para `BUG-014`), o `-1` si ese código no salió de esa plantilla. El prefijo se compara literal, no como patrón, y el código es el campo completo — el nombre de una card nunca puede leerse como uno.
+- `withNumbering(markdown, numbering)`: reescribe solo las claves de numeración del frontmatter y deja intacto el resto de la nota; `null` apaga la numeración.
 
 ## Dependencias entre cards
 

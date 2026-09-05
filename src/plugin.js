@@ -12,6 +12,7 @@ const { boardOpsMethods } = require("./core/board-ops");
 const { cardDependencyMethods } = require("./core/card-dependencies");
 const { cardFileMethods } = require("./core/card-files");
 const { cardOpsMethods } = require("./core/card-ops");
+const { cardTemplateMethods } = require("./core/card-templates");
 const { pluginDataMethods } = require("./core/plugin-data");
 const { syncDeckMethods } = require("./core/sync-deck");
 const { vaultDecorationMethods } = require("./core/vault-decorations");
@@ -124,7 +125,6 @@ class KanuxPlugin extends Plugin {
 
   async onunload() {
     if (this.explorerColorStyleEl) this.explorerColorStyleEl.remove();
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
 
   recordUndo(inverse) {
@@ -188,6 +188,7 @@ Object.assign(
   cardDependencyMethods,
   cardFileMethods,
   cardOpsMethods,
+  cardTemplateMethods,
   pluginDataMethods,
   syncDeckMethods,
   vaultDecorationMethods,

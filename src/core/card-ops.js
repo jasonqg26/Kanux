@@ -3,6 +3,7 @@
 const {
   VIEW_TYPE,
   cleanDate,
+  cleanCardCode,
   clone,
   imageRefsFromMarkdown,
   isImagePath,
@@ -31,22 +32,27 @@ const cardOpsMethods = {
 
   /**
    * Creates a card at the top of a list and immediately writes its note file.
+   *
+   * `seed` is the shape a card starts with — what a template hands over. Its
+   * absence leaves the plain empty card, so the composer calls this unchanged.
+   * Returns the new card's id for callers that want to open it.
    */
-  async createCard(listId, title) {
+  async createCard(listId, title, seed = {}) {
     const board = this.data.boards.find((item) => item.lists.some((list) => list.id === listId));
     const list = this.findList(listId, board);
-    if (!board || !list) return;
+    if (!board || !list) return "";
 
     const now = new Date().toISOString();
     const card = {
       id: uid("card"),
       boardId: board.id,
       title,
+      code: cleanCardCode(seed.code),
       listId,
-      labels: [],
-      assignees: [],
-      details: "",
-      checklists: normalizeChecklists(undefined, []),
+      labels: this.normalizeCardLabels(seed.labels || []),
+      assignees: this.normalizeAssignees(seed.assignees || []),
+      details: String(seed.details || ""),
+      checklists: normalizeChecklists(seed.checklists, []),
       dependencies: [],
       completed: false,
       startDate: "",
@@ -68,17 +74,24 @@ const cardOpsMethods = {
     await this.writeListCardFiles(list);
     await this.savePluginData();
     this.refreshViews();
+    return card.id;
   },
 
   /**
    * Applies a card patch, including linked file renames when the title changes.
    */
-  async updateCard(cardId, patch, globalLabels) {
+  /**
+   * `options.recordUndo: false` writes without pushing a snapshot. Autosave uses
+   * it for every keystroke after the first of an editing session: one entry per
+   * session is what undo means, and a snapshot per typing pause would push every
+   * real board action off the 50-deep stack.
+   */
+  async updateCard(cardId, patch, globalLabels, options = {}) {
     const card = this.data.cards[cardId];
     if (!card) return;
 
     // Snapshot the fields this patch touches so Cmd+Z can restore them.
-    if (!this.applyingUndo) {
+    if (!this.applyingUndo && options.recordUndo !== false) {
       const before = {};
       Object.keys(patch).forEach((key) => { before[key] = clone(card[key]); });
       const beforeGlobal = globalLabels ? clone(this.data.labels) : undefined;

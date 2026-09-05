@@ -33,7 +33,22 @@ jobs:
         run: |
           node build.js
           node tests/helpers.test.js
+          node tests/modals.test.js
+          node tests/plugin.test.js
+          node tests/board-view.test.js
           node --check main.js
+
+      # The bundle is generated, so a syntax error can only come from a source
+      # file; checking main.js alone would let one through that build.js happens
+      # to concatenate into something still parseable.
+      - name: Syntax-check every source file
+        run: node -e "const{readdirSync}=require('fs'),{execFileSync}=require('child_process');readdirSync('src',{recursive:true}).filter(f=>f.endsWith('.js')).forEach(f=>execFileSync(process.execPath,['--check','src/'+f]))"
+
+      - name: Check the version is releasable
+        shell: bash
+        run: |
+          version="$(node -p "require('./manifest.json').version")"
+          node -p "require('./versions.json')['$version'] || (console.error('versions.json has no entry for $version'), process.exit(1))"
 
       - name: Generate artifact attestations
         uses: actions/attest@v4

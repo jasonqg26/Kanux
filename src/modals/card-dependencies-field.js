@@ -45,8 +45,11 @@ function levelPosition(blocking) {
  * { cardId, blocking } entries mutated in place so its owner — the card modal
  * state, or one checklist group — keeps the same array. Every change repaints
  * the cards and saves.
+ *
+ * `onChange` runs after each of those changes, for an owner that draws its own
+ * summary of this field outside it and has to keep it truthful.
  */
-function buildDependenciesField(modal, dependencies) {
+function buildDependenciesField(modal, dependencies, onChange) {
   const field = createElement("div", "ot-field ot-dependencies-field");
 
   // The add control sits beside the caption, the way a section header reads,
@@ -81,6 +84,7 @@ function buildDependenciesField(modal, dependencies) {
     repaint();
     const moved = focusCardId && sections.querySelector(`[data-card-id="${focusCardId}"] .ot-dependency-card-main`);
     (moved || addButton).focus();
+    if (onChange) onChange();
     modal.saveNow().catch(console.error);
   };
 

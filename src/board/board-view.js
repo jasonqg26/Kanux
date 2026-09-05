@@ -9,7 +9,7 @@ const {
   iconButton,
   textButton,
 } = require("../helpers");
-const { AboutModal, BoardAppearanceModal } = require("../modals");
+const { AboutModal, BoardAppearanceModal, CardTemplateLibraryModal, CardTemplateModal } = require("../modals");
 const { boardAppearanceMethods } = require("./board-appearance");
 const { cardDragMethods } = require("./card-drag");
 const { listCardMethods } = require("./list-cards");
@@ -64,8 +64,6 @@ class BoardView extends ItemView {
     const board = this.plugin.getBoard();
     this.stopPresence();
     this.prepareBoardRoot();
-    const updateBanner = this.renderUpdateBanner();
-    if (updateBanner) this.contentEl.append(updateBanner);
     if (!board || this.showingBoardHome) {
       this.renderBoardHome();
       return;
@@ -96,16 +94,74 @@ class BoardView extends ItemView {
     this.startPresence(board);
   }
 
+  // Creating a board belongs to the boards home, where you are choosing between
+  // them; from inside one the useful actions are about its own contents.
   buildBoardToolbar(board, mode) {
     const toolbar = createElement("div", "ot-toolbar");
     toolbar.append(this.buildBoardToolbarTitle(board, mode));
     const primaryActions = createElement("div", "ot-toolbar-primary");
-    primaryActions.append(
-      textButton("plus-square", "New board", () => this.plugin.createBoardPrompt()),
-      textButton("plus", "Add list", () => this.plugin.addList())
-    );
+    if (board.lists.length) {
+      primaryActions.append(textButton("plus", "Add card", (event) => {
+        this.showAddCardMenu(event.currentTarget, board).catch(console.error);
+      }, "ot-toolbar-cta"));
+    }
+    primaryActions.append(textButton("plus-square", "Add list", () => this.plugin.addList()));
     toolbar.append(primaryActions, this.buildBoardToolbarActions(board));
     return toolbar;
+  }
+
+  /**
+   * The toolbar is shared by both view modes, but only the board mode has a
+   * per-list composer to open. In table mode the composer is already on screen,
+   * so this hands the caret to it instead of setting a flag the table ignores.
+   */
+  startBlankCard(board) {
+    if (this.getViewMode(board) !== "table") {
+      this.showCardComposer(board.lists[0].id);
+      return;
+    }
+    if (!this.focusTableComposer()) new Notice("Add a list before creating cards.");
+  }
+
+  /**
+   * Adding a card asks what kind first: an empty one, or one of the board's
+   * templates. A template goes to the list it was saved for, since the toolbar
+   * has no list of its own to mean.
+   */
+  async showAddCardMenu(button, board) {
+    const templates = await this.plugin.listCardTemplates(board);
+    const fallbackListId = board.lists[0].id;
+    const menu = new Menu();
+    menu.addItem((item) => item
+      .setTitle("Blank card")
+      .setIcon("plus")
+      .onClick(() => this.startBlankCard(board)));
+
+    if (templates.length) menu.addSeparator();
+    templates.forEach((template) => {
+      menu.addItem((item) => item
+        .setTitle(template.title)
+        .setIcon("copy")
+        .onClick(() => this.createFromTemplate(template, template.listId || fallbackListId)));
+    });
+
+    // Templates are made and managed where they are listed, the way labels are
+    // from the picker that offers them. Both stay put whether the board has
+    // templates or not: with none, this menu is the only place to make one.
+    menu.addSeparator();
+    menu.addItem((item) => item
+      .setTitle("New template")
+      .setIcon("copy-plus")
+      .onClick(() => new CardTemplateModal(this.app, this.plugin, board).open()));
+    menu.addItem((item) => item
+      .setTitle("Manage templates")
+      .setIcon("settings")
+      .onClick(() => new CardTemplateLibraryModal(this.app, this.plugin, board).open()));
+
+    // Anchored to the button: activating it from the keyboard reports no
+    // pointer coordinates and would open the menu in the viewport corner.
+    const rect = button.getBoundingClientRect();
+    menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 });
   }
 
   buildBoardToolbarTitle(board, mode) {
@@ -114,8 +170,11 @@ class BoardView extends ItemView {
       this.showingBoardHome = true;
       this.render();
     }));
-    title.append(createElement("h2", "", board.name));
+    // With several boards the switcher already says which one you are on, so it
+    // is the title. Printing the name twice took the width the rest of the bar
+    // needed and wrapped it onto a second line.
     if (this.plugin.data.boards.length > 1) title.append(this.renderBoardSelect(board));
+    else title.append(createElement("h2", "", board.name));
     title.append(this.renderViewSwitch(board, mode));
     return title;
   }
@@ -130,23 +189,6 @@ class BoardView extends ItemView {
       textButton("info", "About", () => new AboutModal(this.app, this.plugin).open())
     );
     return actions;
-  }
-
-  // "Update available" banner shown at the top when a newer GitHub release exists
-  // (Kanux is installed manually, so it gets no community-store prompt).
-  renderUpdateBanner() {
-    const info = this.plugin.updateAvailable;
-    if (!info) return null;
-    const banner = createElement("div", "ot-update-banner");
-    const label = createElement("div", "ot-update-banner-text");
-    const icon = createElement("span", "ot-update-banner-icon");
-    try { setIcon(icon, "arrow-up-circle"); } catch (error) { icon.textContent = "⭑"; }
-    label.append(icon, createElement("span", "", `Kanux ${info.version} is available.`));
-    const button = createElement("button", "mod-cta", "Update");
-    button.type = "button";
-    button.addEventListener("click", () => window.open(info.url, "_blank"));
-    banner.append(label, button);
-    return banner;
   }
 
   // Per-board, per-device view preference ("board" | "table"). Stored in data.json
