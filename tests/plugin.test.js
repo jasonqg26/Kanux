@@ -192,6 +192,176 @@ async function testUndoIgnoresTheDependencyGate() {
   assert.deepStrictEqual(doing.cardIds, []);
 }
 
+async function testDeletingATemplateTrashesOnlyItsNote() {
+  const board = { id: "board-1", name: "Project", folderPath: "Project", lists: [] };
+  const file = { path: "Project/templates/Bug report.md" };
+  const plugin = createPlugin({ boards: [board], cards: {} }, { [file.path]: file });
+  const trashed = [];
+  plugin.app.vault.trash = async (target) => { trashed.push(target.path); };
+
+  assert.strictEqual(await plugin.deleteCardTemplate({ title: "Bug report", filePath: file.path }), true);
+  assert.deepStrictEqual(trashed, [file.path]);
+
+  // A template whose note has already gone is still gone: nothing left to
+  // trash, and no reason to report a failure the library cannot act on.
+  assert.strictEqual(await plugin.deleteCardTemplate({ title: "Stale", filePath: "Project/templates/Stale.md" }), true);
+  assert.deepStrictEqual(trashed, [file.path]);
+}
+
+const TEMPLATE_NOTE = `---
+kanux-template: true
+kanban-list-id: list-1
+kanux-id-prefix: BUG
+kanux-id-next: 7
+kanux-id-pad: 3
+---
+
+# Bug report
+
+## Details
+As a [ ]
+`;
+
+function createTemplateBoard() {
+  const list = { id: "list-1", title: "Backlog", cardIds: [] };
+  const board = { id: "board-1", name: "Project", folderPath: "Project", lists: [list] };
+  const file = { path: "Project/templates/Bug report.md" };
+  const plugin = createPlugin({ activeBoardId: board.id, boards: [board], cards: {} }, { [file.path]: file });
+  plugin.writeListCardFiles = async () => {};
+  plugin.notes = { [file.path]: TEMPLATE_NOTE };
+  // Stands in for Vault.process, which the counter uses for its read-modify-write.
+  plugin.app.vault.process = async (target, mutate) => {
+    plugin.notes[target.path] = mutate(plugin.notes[target.path]);
+    return plugin.notes[target.path];
+  };
+  const template = { title: "Bug report", filePath: file.path, listId: list.id, labels: [], assignees: [], details: "", checklists: [], numbering: { prefix: "BUG", next: 7, pad: 3 } };
+  return { plugin, board, list, template, file };
+}
+
+async function testTemplateNumberingStampsTheCardAndAdvances() {
+  const { plugin, list, template } = createTemplateBoard();
+  const created = [];
+  plugin.createCard = async (listId, title, seed) => {
+    created.push({ listId, title, code: seed.code });
+    return "card-1";
+  };
+
+  assert.strictEqual(await plugin.createCardFromTemplate(template, list.id), "card-1");
+  // The code goes to the card's own field; the title stays the template's name,
+  // so renaming the card later cannot take the identifier with it.
+  assert.deepStrictEqual(created, [{ listId: list.id, title: "Bug report", code: "BUG-007" }]);
+  // The counter moves in the note, so the next card gets 008 after a reload.
+  assert.match(plugin.notes[template.filePath], /kanux-id-next: 8/);
+  assert.strictEqual(template.numbering.next, 8);
+
+  await plugin.createCardFromTemplate(template, list.id);
+  assert.strictEqual(created[1].code, "BUG-008");
+  assert.strictEqual(created[1].title, "Bug report");
+}
+
+async function testAFailedCardDoesNotBurnANumber() {
+  const { plugin, list, template } = createTemplateBoard();
+  // createCard returns "" when the list is gone; nothing was named, so the
+  // number has to still be on offer.
+  plugin.createCard = async () => "";
+
+  assert.strictEqual(await plugin.createCardFromTemplate(template, list.id), "");
+  assert.match(plugin.notes[template.filePath], /kanux-id-next: 7/);
+  assert.strictEqual(template.numbering.next, 7);
+}
+
+async function testAnUnnumberedTemplateHandsOutNoCode() {
+  const { plugin, list, template } = createTemplateBoard();
+  template.numbering = null;
+  const created = [];
+  plugin.createCard = async (listId, title, seed) => {
+    created.push({ title, code: seed.code });
+    return "card-1";
+  };
+
+  await plugin.createCardFromTemplate(template, list.id);
+  assert.deepStrictEqual(created, [{ title: "Bug report", code: "" }]);
+  assert.match(plugin.notes[template.filePath], /kanux-id-next: 7/);
+}
+
+async function testRestartingNumberingRewindsTheCounter() {
+  const { plugin, template } = createTemplateBoard();
+  // Codes are read from the card's own field, so a card merely *named* after a
+  // code is not mistaken for one that carries it.
+  plugin.data.cards = {
+    "card-1": { id: "card-1", code: "BUG-003", title: "Older bug" },
+    "card-2": { id: "card-2", code: "", title: "BUG-004 not really a code" },
+    "card-3": { id: "card-3", code: "TASK-003", title: "Another template's card" },
+  };
+
+  // No workspace in the harness, so confirmAction resolves true: this exercises
+  // the write, not the dialog.
+  assert.strictEqual(await plugin.resetTemplateNumbering(template), true);
+  assert.match(plugin.notes[template.filePath], /kanux-id-next: 1/);
+  assert.strictEqual(template.numbering.next, 1);
+  assert.deepStrictEqual(plugin.cardsCarryingCode(template).map((card) => card.id), ["card-1"]);
+}
+
+function cardNote(fields) {
+  return [
+    "---",
+    "kanban-card-id: card-1",
+    "kanban-list-id: list-1",
+    `kanux-card-code: ${fields.code}`,
+    `depends-on: ${fields.depends}`,
+    "position: 0",
+    "labels: ",
+    "---",
+    "",
+    "# Deploy",
+    "",
+  ].join("\n");
+}
+
+/**
+ * A peer running a version that predates these keys writes them blank. Blank
+ * must never win: a card code and a dependency live only in the note and in
+ * this device's memory, so an overwrite would be unrecoverable.
+ */
+async function importNoteOverCard(noteFields) {
+  const list = { id: "list-1", title: "Doing", cardIds: ["card-1"] };
+  const board = { id: "board-1", name: "Project", folderPath: "Project", lists: [list] };
+  const card = {
+    id: "card-1",
+    title: "Deploy",
+    boardId: board.id,
+    listId: list.id,
+    filePath: "Project/cards/Deploy.md",
+    code: "BUG-014",
+    dependencies: [{ cardId: "card-2", blocking: "block" }],
+  };
+  const file = { path: card.filePath, basename: "Deploy", extension: "md" };
+  const plugin = createPlugin({ activeBoardId: board.id, boards: [board], cards: { "card-1": card } }, { [file.path]: file });
+
+  plugin.app.vault.getMarkdownFiles = () => [file];
+  plugin.app.vault.read = async () => cardNote(noteFields);
+  plugin.healQuotedDuplicateLists = () => false;
+  plugin.reconcileListsFromIndex = async () => false;
+  plugin.isGeneratedBoardIndexFile = async () => false;
+  plugin.normalizeCardFilePath = async () => false;
+  plugin.writeListCardFiles = async () => {};
+
+  await plugin.syncBoardCardsFromFolder(board);
+  return plugin.data.cards["card-1"];
+}
+
+async function testAnEmptyKeyCannotEraseACodeOrADependency() {
+  const kept = await importNoteOverCard({ code: "", depends: "" });
+  assert.strictEqual(kept.code, "BUG-014");
+  assert.deepStrictEqual(kept.dependencies, [{ cardId: "card-2", blocking: "block" }]);
+}
+
+async function testARealValueInTheNoteStillWins() {
+  const updated = await importNoteOverCard({ code: "TASK-002", depends: "card-9|warn" });
+  assert.strictEqual(updated.code, "TASK-002");
+  assert.deepStrictEqual(updated.dependencies, [{ cardId: "card-9", blocking: "warn" }]);
+}
+
 async function run() {
   await testMoveCardIsRefusedByATotalBlock();
   await testBlockedCardStillReordersInsideItsList();
@@ -199,6 +369,13 @@ async function run() {
   await testRenameBoardMovesFolderAndUpdatesPaths();
   await testRenameBoardRollsBackWhenFolderMoveFails();
   await testDeleteBoardTrashesFolderAndCleansState();
+  await testDeletingATemplateTrashesOnlyItsNote();
+  await testTemplateNumberingStampsTheCardAndAdvances();
+  await testAFailedCardDoesNotBurnANumber();
+  await testAnUnnumberedTemplateHandsOutNoCode();
+  await testRestartingNumberingRewindsTheCounter();
+  await testAnEmptyKeyCannotEraseACodeOrADependency();
+  await testARealValueInTheNoteStillWins();
   testRefreshViewsHonorsTemporaryViewGuard();
   console.log("plugin tests passed");
 }

@@ -11,6 +11,7 @@ const {
   labelKey,
   normalizeChecklists,
   normalizeDependencies,
+  renderIcon,
   textLine,
   initials,
   uid,
@@ -26,7 +27,7 @@ const { buildChecklistsField } = require("./card-checklist-field");
 
 // Controls that only reveal content, so a read-only viewer keeps them: they
 // expand a panel or open a preview without ever writing to the card.
-const VIEW_ONLY_CONTROL_CLASSES = ["ot-image-tile", "ot-checklist-note-action"];
+const VIEW_ONLY_CONTROL_CLASSES = ["ot-image-tile", "ot-checklist-deps-button", "ot-checklist-note-action"];
 
 // The card editor modal: state, locking, saving, and field wiring.
 class CardModal extends Modal {
@@ -37,12 +38,17 @@ class CardModal extends Modal {
     // notesOnly: show just the title + Description + Checklist (used by the table
     // view, where labels / members / dates / status are edited inline in the cells).
     this.notesOnly = !!options.notesOnly;
+    // Character offset the description editor should open on, for a card made
+    // from a fill-in-the-gaps template. Consumed by the first render.
+    this.focusDetailsAt = typeof options.focusDetailsAt === "number" ? options.focusDetailsAt : null;
     this.localTitle = "";
     this.localLabels = [];
     this.localGlobalLabels = [];
     this.localDetails = "";
     this.detailsDraft = "";
     this.editingDetails = false;
+    // One undo snapshot per description editing session; see autoSaveDetails.
+    this.detailsUndoRecorded = false;
     this.detailsEditDismissed = false;
     this.pendingDetailAttachments = new Set();
     this.localChecklists = [];
@@ -94,6 +100,8 @@ class CardModal extends Modal {
     this.localDetails = card.details || "";
     this.detailsDraft = "";
     this.editingDetails = false;
+    // One undo snapshot per description editing session; see autoSaveDetails.
+    this.detailsUndoRecorded = false;
     this.detailsEditDismissed = false;
     this.localChecklists = normalizeChecklists(clone(card.checklists || []), []);
     this.localDependencies = normalizeDependencies(card.dependencies);
@@ -101,6 +109,9 @@ class CardModal extends Modal {
     // the opt-in "Add description" flow survives re-renders until first save.
     this.openChecklistDescriptions = new Set();
     this.focusChecklistDescriptionId = null;
+    // Group ids whose dependency panel is open. Built fresh on every load, which
+    // is what makes collapsed the state a card is always reopened in.
+    this.openChecklistDependencies = new Set();
     this.localAssignees = clone(card.assignees || []);
     await this.setupCardLock();
     this.render();
@@ -161,7 +172,7 @@ class CardModal extends Modal {
     this.discardPendingDetailAttachments().catch(console.error);
     if (this.plugin.editingCardId === this.cardId) this.plugin.editingCardId = null;
     if (this.plugin.viewRefreshPending) this.plugin.refreshViews();
-    new Notice(`🔒 ${(holder && holder.name) || "Someone"} is editing this card`);
+    new Notice(`${(holder && holder.name) || "Someone"} is editing this card`);
     this.render();
   }
 
@@ -318,13 +329,15 @@ class CardModal extends Modal {
 
     const board = this.plugin.findBoardForCard(card);
     const list = board && board.lists.find((item) => item.id === card.listId);
-    // Centered document-style header: title, then where the card lives.
+    // Centered document-style header: the code that names this card, the title,
+    // then where the card lives.
     const header = createElement("header", "ot-card-modal-header");
     const location = createElement("div", "ot-card-modal-location");
     if (list) location.append(createElement("span", "ot-card-modal-location-pill", list.title));
     if (list && board) location.append(createElement("span", "ot-card-modal-location-sep", "·"));
     if (board) location.append(createElement("span", "", board.name));
     if (!list && !board) location.append(createElement("span", "", "Kanux card"));
+    if (card.code) header.append(createElement("div", "ot-card-modal-code", card.code));
     header.append(title, location);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
@@ -392,8 +405,7 @@ class CardModal extends Modal {
     const children = [header, body, actions];
     if (this.readOnly) {
       this.contentEl.addClass("ot-card-readonly");
-      const holderName = (this.lockHolder && this.lockHolder.name) || "Someone";
-      children.unshift(createElement("div", "ot-card-lock-banner", `🔒 ${holderName} is editing this card — read only`));
+      children.unshift(this.buildLockBanner());
     }
     this.contentEl.append(...children);
     if (bodyScrollTop) requestAnimationFrame(() => { body.scrollTop = bodyScrollTop; });
@@ -407,6 +419,16 @@ class CardModal extends Modal {
       // checklist description, whose blur handler collapses it immediately.
       requestAnimationFrame(() => title.focus());
     }
+  }
+
+  // Banner atop a read-only card, naming whoever currently holds the edit lock.
+  buildLockBanner() {
+    const holderName = (this.lockHolder && this.lockHolder.name) || "Someone";
+    const banner = createElement("div", "ot-card-lock-banner");
+    const icon = createElement("span", "ot-card-lock-banner-icon");
+    renderIcon(icon, "lock");
+    banner.append(icon, createElement("span", "", `${holderName} is editing this card — read only`));
+    return banner;
   }
 
   // Freeze every editable control inside the given fields so a read-only viewer
@@ -565,7 +587,8 @@ class CardModal extends Modal {
 
   shouldEditDetails() {
     const emptyDescription = !String(this.localDetails || "").trim();
-    return !this.readOnly && (this.editingDetails || (emptyDescription && !this.detailsEditDismissed));
+    return !this.readOnly
+      && (this.editingDetails || typeof this.focusDetailsAt === "number" || (emptyDescription && !this.detailsEditDismissed));
   }
 
   /**
@@ -577,12 +600,17 @@ class CardModal extends Modal {
   async autoSaveDetails(markdown) {
     const previousDetails = this.localDetails;
     this.localDetails = String(markdown || "").trim();
+    // Only the first autosave of a session takes a snapshot, so undo steps back
+    // to the description as it was before this edit rather than through every
+    // typing pause along the way.
+    const recordUndo = !this.detailsUndoRecorded;
     try {
-      await this.saveNow({ propagateError: true });
+      await this.saveNow({ propagateError: true, recordUndo });
     } catch (error) {
       this.localDetails = previousDetails;
       throw error;
     }
+    this.detailsUndoRecorded = true;
     await this.finalizePendingDetailAttachments(this.localDetails);
   }
 
@@ -591,6 +619,8 @@ class CardModal extends Modal {
     await this.autoSaveDetails(markdown);
     this.detailsDraft = "";
     this.editingDetails = false;
+    // The session is over, so the next edit takes its own undo snapshot.
+    this.detailsUndoRecorded = false;
     this.detailsEditDismissed = !this.localDetails;
   }
 
@@ -728,7 +758,7 @@ class CardModal extends Modal {
 
     const patch = this.cardPatch();
     const globalLabels = clone(this.localGlobalLabels);
-    const saveOperation = this.savePromise.then(() => this.plugin.updateCard(card.id, patch, globalLabels));
+    const saveOperation = this.savePromise.then(() => this.plugin.updateCard(card.id, patch, globalLabels, { recordUndo: options.recordUndo }));
     this.savePromise = saveOperation.catch((error) => {
         console.error(error);
         new Notice("Could not save card.");

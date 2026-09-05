@@ -985,10 +985,16 @@ function buildDetailsField(modal, options = {}) {
     // vault's theme and settings). When its internal API is unavailable, the
     // WYSIWYG block editor below takes over unchanged.
     const embeddedHost = createElement("div", "ot-embedded-editor");
+    // A card made from a fill-in-the-gaps template asks for the caret in its
+    // first blank; everything else starts at the end, ready to keep writing.
+    const caret = !noteMode && typeof modal.focusDetailsAt === "number"
+      ? Math.min(modal.focusDetailsAt, draftMarkdown.length)
+      : draftMarkdown.length;
+    if (!noteMode) modal.focusDetailsAt = null;
     const embeddedEditor = createEmbeddedMarkdownEditor(modal.app, embeddedHost, {
       value: draftMarkdown,
       placeholder,
-      cursorLocation: { anchor: draftMarkdown.length, head: draftMarkdown.length },
+      cursorLocation: { anchor: caret, head: caret },
       onChange: (value) => applyDraft(value),
       onSubmit: () => finishEditing().catch(console.error),
       onEscape: () => finishEditing().catch(console.error),

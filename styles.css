@@ -79,6 +79,7 @@ button.ot-save-button:disabled {
 .ot-card-lock {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   align-self: flex-start;
   margin-top: 6px;
   padding: 2px 8px;
@@ -91,7 +92,21 @@ button.ot-save-button:disabled {
   white-space: nowrap;
 }
 
+.ot-card-lock-icon {
+  display: inline-flex;
+}
+
+.ot-card-lock-icon > svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+}
+
 .ot-card-lock-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin-bottom: 12px;
   padding: 9px 12px;
   border-radius: 8px;
@@ -99,6 +114,17 @@ button.ot-save-button:disabled {
   background: #f59e0b;
   font-size: 13px;
   font-weight: 700;
+}
+
+.ot-card-lock-banner-icon {
+  display: inline-flex;
+}
+
+.ot-card-lock-banner-icon > svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
 }
 
 .ot-card-readonly .is-disabled,
@@ -163,11 +189,15 @@ button.ot-save-button:disabled {
   object-fit: cover;
 }
 
+/* One wrapping row: the board name takes whatever width is left, and a group
+   that no longer fits drops to the next line whole. A grid could not do the
+   second part — its columns kept their size and the name simply overflowed on
+   top of them, which is what put Add card behind the view switch. */
 .ot-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 10px;
   min-height: 44px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 10px;
@@ -176,17 +206,26 @@ button.ot-save-button:disabled {
   box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
 }
 
+/* Basis rather than a bare 1fr: below it the name yields the line instead of
+   squeezing the switch, and above it grows into the space it is given. */
 .ot-toolbar-title {
   display: flex;
+  flex: 1 1 200px;
   align-items: center;
   min-width: 0;
-  gap: 8px;
+  gap: 6px;
 }
 
+/* A nowrap title only ellipsizes once it is allowed to shrink: with the flex
+   default of min-width auto it stays at full text width and spills instead. */
 .ot-toolbar h2 {
   margin: 0;
-  font-size: calc(22px * var(--ot-font-scale, 1));
+  min-width: 0;
+  overflow: hidden;
+  font-size: calc(19px * var(--ot-font-scale, 1));
   line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ot-board-select {
@@ -196,16 +235,29 @@ button.ot-save-button:disabled {
 
 .ot-toolbar-actions {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  /* Holds the right edge whether it shares the first line or has its own. A
+     divider rule went here and had to go: once this group wraps onto its own
+     line the border has nothing on its left to divide it from. */
+  margin-left: auto;
+  padding-left: 4px;
 }
 
 .ot-toolbar-primary {
   display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
   gap: 8px;
+}
+
+/* The switch is two words wide at most; the name is what should give way. */
+.ot-toolbar .ot-view-switch {
+  flex: none;
 }
 
 .ot-toolbar .ot-text-button {
@@ -228,6 +280,55 @@ button.ot-save-button:disabled {
 .ot-board-root.is-surfaces-light .ot-list-footer .ot-text-button:hover {
   color: #111318;
   background: #e8ebf0;
+}
+
+/* Toolbar controls run smaller than the ones inside a list: six of them share
+   one line, and at list size they crowded the board name out of it. */
+.ot-board-root .ot-toolbar .ot-text-button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: calc(13.5px * var(--ot-font-scale, 1));
+}
+
+/* With several boards the switcher is the title, so it reads like one: plain
+   until it is hovered, the way the card modal's own title behaves. */
+.ot-toolbar .ot-board-select {
+  min-width: 0;
+  max-width: 260px;
+  /* Shrinking is what keeps the bar on one line, so a squeezed name has to read
+     as cut rather than as a shorter board. */
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0 6px;
+  /* The toolbar colour rather than transparent: a native select needs an
+     explicit background or its option list renders unreadable on Windows. */
+  background-color: var(--background-secondary);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: calc(19px * var(--ot-font-scale, 1));
+  font-weight: 700;
+}
+
+.ot-toolbar .ot-board-select:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ot-toolbar .ot-board-select:focus-visible {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-form-field);
+}
+
+/* Adding a card is what the bar is for; the rest are things you do once. */
+.ot-board-root .ot-toolbar .ot-text-button.ot-toolbar-cta {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+  color: var(--interactive-accent);
+}
+
+.ot-board-root .ot-toolbar .ot-text-button.ot-toolbar-cta:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+  color: var(--interactive-accent);
 }
 
 .ot-welcome-panel {
@@ -735,6 +836,39 @@ button.ot-save-button:disabled {
   gap: 6px;
   min-height: 24px;
   padding: 0;
+}
+
+/* A card's identifier, in front of its name. Inline-block rather than a flex
+   item so a long title wraps around it the way it would around a first word,
+   and sized in em so it follows the board's own title size. */
+.ot-card-code {
+  display: inline-block;
+  margin-right: 6px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+  border-radius: 5px;
+  padding: 0 5px;
+  color: var(--interactive-accent);
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 0.68em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  /* Middle rather than baseline: on the baseline the chip's descender space
+     grew the title's line box, making a card with a code 2px taller than one
+     without, which showed up as ragged card heights down a list. */
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.ot-card.is-completed .ot-card-code {
+  border-color: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+/* In the library row the chip is a flex item, so the row centres it. */
+.ot-mini-card-meta .ot-card-code {
+  margin-right: 0;
+  font-size: 10px;
 }
 
 .ot-card-title {
@@ -1281,6 +1415,17 @@ button.ot-save-button:disabled {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
 }
 
+/* The card's identifier reads as a document number above its name: no chip,
+   because here it is the heading's own eyebrow rather than a tag in a list. */
+.ot-card-modal-code {
+  color: var(--interactive-accent);
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
 .ot-card-modal-location {
   display: flex;
   flex-wrap: wrap;
@@ -1409,6 +1554,213 @@ button.ot-save-button:disabled {
 
 .ot-prompt-modal h2 {
   margin: 0;
+}
+
+/* Card template editor. The shell, header, two-column body and sticky actions
+   are the card modal's own rules — this block is only what a template has and
+   a card does not. */
+.ot-template-modal .ot-title-input {
+  text-align: center;
+}
+
+.ot-template-modal .ot-title-input.is-invalid {
+  border-color: var(--ot-danger-color, var(--color-red, #dc2626));
+}
+
+.ot-template-error {
+  margin: 0;
+  color: var(--ot-danger-color, var(--color-red, #dc2626));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* The destination list is a control where the card modal prints a static pill,
+   so it keeps the pill's shape and picks up the affordances of a button. */
+.ot-template-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  min-height: 0;
+  padding: 2px 10px;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 12px;
+  touch-action: manipulation;
+}
+
+.ot-template-list:hover {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+
+.ot-template-details {
+  width: 100%;
+  min-height: 128px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.ot-template-hint {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+/* ---- Numbering ---- */
+.ot-template-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ot-template-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+/* Prefix takes the room; the two counters are as wide as their digits need. */
+.ot-template-number-boxes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px 58px;
+  gap: 6px;
+}
+
+.ot-template-number-box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ot-template-number-box input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An explicit display beats the [hidden] attribute’s own display:none, so the
+   two blocks the toggle hides have to opt back out by hand. */
+.ot-template-number-boxes[hidden],
+.ot-template-number-preview[hidden] {
+  display: none;
+}
+
+.ot-template-number-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  border-radius: 7px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+}
+
+.ot-template-number-caption {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ot-template-number-name {
+  color: var(--text-normal);
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+
+/* The code a template hands out next, on its row in the library. */
+.ot-template-checklists {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ot-template-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--ot-checklist-color, var(--interactive-accent));
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--background-primary);
+}
+
+.ot-template-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ot-template-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Template library: one row per saved template, each a card-shaped link to the
+   note plus the one action that has nowhere else to live. */
+.modal.ot-template-library-shell {
+  width: min(440px, calc(100vw - 32px));
+}
+
+.ot-template-library {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ot-template-library-header h2 {
+  margin: 0;
+  text-align: center;
+}
+
+.ot-template-library-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 58vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+
+.ot-template-library-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.ot-template-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.ot-template-delete:hover {
+  color: var(--ot-danger-color, var(--color-red, #dc2626));
 }
 
 .ot-date-modal {
@@ -2500,6 +2852,12 @@ button.ot-save-button:disabled {
   gap: 8px;
 }
 
+/* Inside a checklist the panel is opt-in, and the field's own display:flex
+   would otherwise win against the hidden attribute's display:none. */
+.ot-dependencies-field[hidden] {
+  display: none;
+}
+
 /* The field owns its caption so it reads identically inside the sidebar and
    inside a checklist group, where the sidebar rules do not reach. */
 .ot-dependencies-field > .ot-field-row > span:first-child {
@@ -2889,6 +3247,53 @@ button.ot-save-button:disabled {
   opacity: 1;
 }
 
+/* Sits with the description button and behaves like it — quiet until the group
+   is hovered — except when it is carrying a count, which has to be legible
+   without hovering anything. Wider than a plain icon button to fit that count. */
+.ot-checklist-deps-button {
+  flex: 0 0 auto;
+  gap: 3px;
+  width: auto;
+  min-width: 30px;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--text-faint);
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+.ot-checklist-group:hover .ot-checklist-deps-button,
+.ot-checklist-deps-button:focus-visible,
+.ot-checklist-deps-button.is-expanded,
+.ot-checklist-deps-button.is-warning,
+.ot-checklist-deps-button.is-blocked {
+  opacity: 1;
+}
+
+.ot-checklist-deps-button.is-expanded {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-checklist-deps-button.is-warning {
+  color: var(--ot-warn-color, #c2620f);
+}
+
+.ot-checklist-deps-button.is-blocked {
+  color: var(--ot-danger-color, var(--color-red, #dc2626));
+}
+
+.ot-checklist-deps-count {
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.ot-checklist-deps-count[hidden] {
+  display: none;
+}
+
 .ot-checklist-description {
   margin-top: 2px;
 }
@@ -3256,6 +3661,12 @@ button.ot-save-button:disabled {
   padding: 4px 0 4px 88px;
 }
 
+/* The dependency panel's own empty line: it is not a checklist item, so the
+   indent that lines items up under their checkbox does not apply to it. */
+.ot-checklist-group .ot-dependencies-field .ot-empty-text {
+  padding: 0;
+}
+
 .ot-card-modal.is-sync-disabled .ot-checklist-group .ot-empty-text {
   padding-left: 54px;
 }
@@ -3281,7 +3692,11 @@ button.ot-save-button:disabled {
   color: var(--text-normal);
 }
 
-.is-hidden {
+/* Scoped: a bare .is-hidden would hide that class anywhere in Obsidian, in
+   core UI and in other plugins, not only inside Kanux. */
+.ot-board-root .is-hidden,
+.ot-card-modal .is-hidden,
+.ot-side-sheet .is-hidden {
   display: none;
 }
 
@@ -3382,14 +3797,18 @@ button.ot-save-button:disabled {
     padding: 10px;
   }
 
-  .ot-toolbar {
-    grid-template-columns: 1fr;
-  }
-
+  /* On a phone the bar is tall rather than cramped: a row per group, each
+     starting at the left edge, instead of two groups sharing a tight line. */
   .ot-toolbar-title,
   .ot-toolbar-primary,
   .ot-toolbar-actions {
+    flex: 1 1 100%;
     justify-content: flex-start;
+  }
+
+  .ot-toolbar-actions {
+    margin-left: 0;
+    padding-left: 0;
   }
 
   .ot-welcome-panel {
@@ -4242,37 +4661,6 @@ body.ot-col-resizing * {
 }
 .ot-label-filter-limit[hidden] {
   display: none;
-}
-
-/* "Update available" banner (manual installs get no store prompt) */
-.ot-update-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 8px 12px 2px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-}
-.ot-update-banner-text {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.9em;
-  color: var(--text-normal);
-}
-.ot-update-banner-icon {
-  display: inline-flex;
-  color: var(--interactive-accent);
-}
-.ot-update-banner-icon svg {
-  width: 16px;
-  height: 16px;
-}
-.ot-update-banner button {
-  flex: 0 0 auto;
 }
 
 /* ---- Embedded Obsidian Live Preview editor ---- */

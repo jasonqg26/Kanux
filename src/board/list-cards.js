@@ -10,13 +10,15 @@ const {
   checklistStats,
   createElement,
   dateRangeLabel,
+  firstPlaceholderIndex,
   hasDragType,
   iconButton,
   initials,
+  renderIcon,
   textButton,
   textLine,
 } = require("../helpers");
-const { CardDatesModal, CardModal, ListColorModal, confirmAction } = require("../modals");
+const { CardDatesModal, CardModal, CardTemplateLibraryModal, CardTemplateModal, ListColorModal, TextPromptModal, confirmAction } = require("../modals");
 
 const listCardMethods = {
   /**
@@ -221,9 +223,20 @@ const listCardMethods = {
 
   buildCardMain(card, { isRenaming, lockHolder }) {
     const main = createElement("div", "ot-card-main");
-    const title = isRenaming ? this.renderCardTitleEditor(card) : createElement("div", "ot-card-title", card.title);
+    const title = isRenaming ? this.renderCardTitleEditor(card) : this.buildCardTitle(card);
     main.append(this.buildCardCompleteButton(card, lockHolder), title, this.buildCardActions(card, lockHolder));
     return main;
+  },
+
+  /**
+   * The code reads as a chip in front of the name. It lives in the card's own
+   * frontmatter, so renaming the card does not take its identifier with it.
+   */
+  buildCardTitle(card) {
+    const title = createElement("div", "ot-card-title");
+    if (card.code) title.append(createElement("span", "ot-card-code", card.code));
+    title.append(createElement("span", "ot-card-title-text", card.title));
+    return title;
   },
 
   buildCardCompleteButton(card, lockHolder) {
@@ -294,15 +307,18 @@ const listCardMethods = {
   },
 
   buildLockBadge(holder) {
+    const holderName = (holder && holder.name) || "Someone";
     const badge = createElement("span", "ot-card-lock");
     badge.style.setProperty("--ot-lock-color", (holder && holder.color) || "#f59e0b");
-    badge.append(createElement("span", "", `🔒 ${(holder && holder.name) || "Someone"}`));
-    badge.title = `${(holder && holder.name) || "Someone"} is editing this card`;
+    const icon = createElement("span", "ot-card-lock-icon");
+    renderIcon(icon, "lock");
+    badge.append(icon, createElement("span", "", holderName));
+    badge.title = `${holderName} is editing this card`;
     return badge;
   },
 
   notifyCardLocked(holder) {
-    new Notice(`🔒 ${(holder && holder.name) || "Someone"} is editing this card`);
+    new Notice(`${(holder && holder.name) || "Someone"} is editing this card`);
   },
 
   /**
@@ -421,6 +437,12 @@ const listCardMethods = {
     });
     menu.addItem((item) => {
       item
+        .setTitle("Save as template")
+        .setIcon("copy-plus")
+        .onClick(() => this.saveCardAsTemplate(card));
+    });
+    menu.addItem((item) => {
+      item
         .setTitle("Delete card")
         .setIcon("trash")
         .onClick(async () => {
@@ -432,8 +454,77 @@ const listCardMethods = {
     menu.showAtMouseEvent(event);
   },
 
+  saveCardAsTemplate(card) {
+    const board = this.plugin.findBoardForCard(card);
+    new TextPromptModal(this.app, "Save as template", "Template name", card.title, async (name) => {
+      try {
+        await this.plugin.saveCardTemplate(board, this.plugin.cardAsTemplate(card, name));
+        new Notice(`Template "${name}" saved.`);
+      } catch (error) {
+        console.error(error);
+        new Notice("Could not save the template.");
+      }
+    }).open();
+  },
+
+  /**
+   * Templates are read from the board folder when asked for, so the second menu
+   * only opens once they are in hand.
+   */
+  async showTemplateMenu(anchor, list) {
+    const board = this.plugin.getBoard();
+    const templates = await this.plugin.listCardTemplates(board);
+    const menu = new Menu();
+    if (!templates.length) menu.addItem((item) => item.setTitle("No templates yet").setDisabled(true));
+    templates.forEach((template) => {
+      menu.addItem((item) => item
+        .setTitle(template.title)
+        .setIcon("file-text")
+        .onClick(() => this.createFromTemplate(template, list.id)));
+    });
+
+    // Always offered, so a board with no templates gets a way out of here
+    // rather than a line telling it what it cannot do.
+    menu.addSeparator();
+    menu.addItem((item) => item
+      .setTitle("New template")
+      .setIcon("copy-plus")
+      .onClick(() => new CardTemplateModal(this.app, this.plugin, board).open()));
+    menu.addItem((item) => item
+      .setTitle("Manage templates")
+      .setIcon("settings")
+      .onClick(() => new CardTemplateLibraryModal(this.app, this.plugin, board).open()));
+    menu.showAtPosition(anchor);
+  },
+
+  // The card opens on its description with the caret in the first blank, so a
+  // fill-in-the-gaps template can be answered without hunting for the spot.
+  // Both menus call this from an onClick that cannot await, so it swallows its
+  // own failures: an unhandled rejection here would leave the user with no card,
+  // no editor and no message.
+  async createFromTemplate(template, listId) {
+    try {
+      const cardId = await this.plugin.createCardFromTemplate(template, listId);
+      if (!cardId) return;
+      const gap = firstPlaceholderIndex(template.details);
+      new CardModal(this.app, this.plugin, cardId, gap >= 0 ? { focusDetailsAt: gap } : {}).open();
+    } catch (error) {
+      console.error(error);
+      new Notice(`Could not create a card from "${template.title}". Its note may have been moved or deleted.`);
+    }
+  },
+
   showListMenu(event, list) {
     const menu = new Menu();
+    // The template menu opens where this one did, so the second step lands in
+    // the same place however the first was reached.
+    const anchor = { x: event.clientX, y: event.clientY };
+    menu.addItem((item) => {
+      item
+        .setTitle("New card from template")
+        .setIcon("copy")
+        .onClick(() => this.showTemplateMenu(anchor, list).catch(console.error));
+    });
     menu.addItem((item) => {
       item
         .setTitle("Rename list")

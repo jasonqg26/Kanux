@@ -312,7 +312,10 @@ const tableViewMethods = {
   buildTableNameCell(card, lockHolder) {
     const nameCell = createElement("td", "ot-td ot-td-name");
     const nameInner = createElement("div", "ot-td-name-inner");
-    nameInner.append(this.buildTableCompletionControl(card, lockHolder), createElement("span", "ot-td-title", card.title));
+    const title = createElement("span", "ot-td-title");
+    if (card.code) title.append(createElement("span", "ot-card-code", card.code));
+    title.append(createElement("span", "", card.title));
+    nameInner.append(this.buildTableCompletionControl(card, lockHolder), title);
     const hints = this.buildTableCardHints(card);
     if (hints.childElementCount) nameInner.append(hints);
     if (lockHolder) nameInner.append(this.buildLockBadge(lockHolder));
@@ -560,6 +563,19 @@ const tableViewMethods = {
     });
     creator.append(form);
     return creator;
+  },
+
+  /**
+   * Table mode has no per-list composer to open, so "Blank card" from the
+   * toolbar hands over to the composer this view already shows. Returns false
+   * when there is none (a board with no lists), so the caller can say so.
+   */
+  focusTableComposer() {
+    const input = this.contentEl.querySelector(".ot-table-composer-input");
+    if (!input) return false;
+    input.scrollIntoView({ block: "nearest" });
+    input.focus();
+    return true;
   },
 };
 

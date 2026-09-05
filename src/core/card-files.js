@@ -7,6 +7,7 @@ const {
   cardFileBaseName,
   checklistsToMarkdown,
   cleanColor,
+  cleanCardCode,
   cleanDate,
   kanuxListTag,
   labelsToFrontmatter,
@@ -99,7 +100,9 @@ const cardFileMethods = {
     const nextPath = await this.nextCardPath(card.title, card.filePath, board);
     if (nextPath === card.filePath) return false;
 
-    await this.app.vault.rename(file, nextPath);
+    // renameFile, not vault.rename: Obsidian rewrites every wikilink that points
+    // at this note, including the Card: backlink in its own checklist notes.
+    await this.app.fileManager.renameFile(file, nextPath);
     card.filePath = nextPath;
     return true;
   },
@@ -110,7 +113,7 @@ const cardFileMethods = {
 
     const file = this.app.vault.getAbstractFileByPath(card.filePath);
     if (file && file.extension === "md") {
-      await this.app.vault.rename(file, nextPath);
+      await this.app.fileManager.renameFile(file, nextPath);
     }
     card.filePath = nextPath;
   },
@@ -224,6 +227,7 @@ const cardFileMethods = {
       `kanban-card-id: ${card.id}`,
       `kanban-board-id: ${card.boardId || ""}`,
       `kanban-list-id: ${card.listId || ""}`,
+      `kanux-card-code: ${cleanCardCode(card.code)}`,
       `position: ${position >= 0 ? position : 0}`,
       this.tagFrontmatter(tags),
       `kanux-board: ${this.frontmatterText(board && board.name)}`,

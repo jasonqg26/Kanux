@@ -7,6 +7,8 @@ const { CardDatesModal } = require("./modals/card-dates-modal");
 const { AboutModal } = require("./modals/about-modal");
 const { CardModal } = require("./modals/card-modal");
 const { CardPickerModal } = require("./modals/card-picker-modal");
+const { CardTemplateModal } = require("./modals/card-template-modal");
+const { CardTemplateLibraryModal } = require("./modals/card-template-library-modal");
 const { detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch, splitDetailSegments } = require("./modals/details-markdown");
 
 module.exports = {
@@ -19,6 +21,8 @@ module.exports = {
   AboutModal,
   CardModal,
   CardPickerModal,
+  CardTemplateModal,
+  CardTemplateLibraryModal,
   alertAction,
   confirmAction,
   detailsMdToHtml,

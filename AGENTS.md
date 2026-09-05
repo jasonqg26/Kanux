@@ -27,14 +27,39 @@ Después de cambios relevantes, la IA está obligada a ejecutar y validar el có
 ```powershell
 node build.js
 node tests\helpers.test.js
+node tests\modals.test.js
+node tests\plugin.test.js
+node tests\board-view.test.js
 node --check main.js
-Get-ChildItem src -Filter *.js | ForEach-Object { node --check $_.FullName }
+Get-ChildItem src -Filter *.js -Recurse | ForEach-Object { node --check $_.FullName }
 git diff --check
 git status --short
 ```
+
+**Las cuatro suites, no solo una.** `helpers` cubre las utilidades puras, `modals` el ciclo de vida de los campos de card, `plugin` las operaciones de datos y `board-view` la geometría del drag & drop. Un cambio en `helpers.js` puede romper cualquiera de las otras tres.
+
+**`-Recurse` es obligatorio.** Sin él `Get-ChildItem` solo alcanza los cuatro archivos de la raíz de `src/`; los cuarenta de `core/`, `board/`, `modals/`, `editor/` y `settings/` quedarían sin revisar.
+
 Verifica también con `rg` que no se hayan introducido llamadas a `fs`, `os` o `path`, ni reglas CSS prohibidas.
 
-## 5. Licencias e Identidad
+## 5. Texto de la interfaz
+
+- **Sin emojis**: nunca uses emojis en textos de la interfaz, avisos (`Notice`), diálogos ni como respaldo cuando un icono no resuelve. Para eso está el respaldo genérico de `renderIcon`.
+- **Mensajes accionables**: un error dice qué hacer a continuación, no solo que algo falló.
+
+## 6. Finales de línea
+
+El repositorio es mixto por historia, así que **respeta el archivo que estás editando** y nunca mezcles dentro de uno:
+
+| Archivo | Final de línea |
+| --- | --- |
+| `styles.css`, `src/helpers.js`, `tests/helpers.test.js` | CRLF |
+| El resto de `src/`, `tests/` y `docs/` | LF |
+| `main.js` | Generado: hereda de sus fuentes y no se edita |
+
+`git diff --check` **no** detecta un archivo con finales mezclados. Si editas por script, compruébalo aparte al terminar.
+
+## 7. Licencias e Identidad
 
 - El proyecto deriva de `ismailivanov/task-deck`. No elimines ni alteres las atribuciones, créditos ni avisos de copyright ubicados en `README.md`, `NOTICE`, y archivos de licencias.
 - No cambies el ID `kanux` después de publicado y asegúrate de que toda nueva feature respete la privacidad local (sin dependencias externas dinámicas o telemetría).

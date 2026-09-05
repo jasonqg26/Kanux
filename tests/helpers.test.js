@@ -14,12 +14,20 @@ Module._load = function load(request, parent, isMain) {
 };
 
 const {
+  blankChecklists,
   checklistItems,
   checklistItemNoteBody,
   checklistItemNoteWithBody,
   checklistStats,
   checklistsToMarkdown,
   dependencyGate,
+  firstPlaceholderIndex,
+  formatCardCode,
+  normalizeNumbering,
+  parseTemplateNumbering,
+  withNumbering,
+  cardCodeNumber,
+  cleanCardCode,
   iconButton,
   normalizeChecklists,
   normalizeDependencies,
@@ -284,6 +292,52 @@ function testCardMetadataParsing() {
   assert.strictEqual(missing.dueDate, null);
 }
 
+function testTemplateChecklistsStartClean() {
+  const source = [{
+    id: "checklist-1",
+    title: "Steps",
+    color: "#3b82f6",
+    description: "How to reproduce",
+    dependencies: [{ cardId: "card-9", blocking: "block" }],
+    items: [{
+      id: "item-1",
+      text: "Reproduce",
+      done: true,
+      filePath: "Board/checklist-items/Reproduce.md",
+      assignee: { email: "dev@example.com", name: "Dev", color: "#123456" },
+    }],
+  }];
+
+  const blanked = blankChecklists(source);
+
+  // Nothing that belonged to the card it was copied from comes along.
+  assert.strictEqual(blanked[0].id, undefined);
+  assert.deepStrictEqual(blanked[0].dependencies, []);
+  assert.strictEqual(blanked[0].items[0].id, undefined);
+  assert.strictEqual(blanked[0].items[0].done, false);
+  assert.strictEqual(blanked[0].items[0].filePath, "");
+
+  // The shape worth reusing survives.
+  assert.strictEqual(blanked[0].title, "Steps");
+  assert.strictEqual(blanked[0].color, "#3b82f6");
+  assert.strictEqual(blanked[0].description, "How to reproduce");
+  assert.strictEqual(blanked[0].items[0].assignee.email, "dev@example.com");
+
+  // Two cards made from one template get their own ids instead of sharing a set.
+  const first = normalizeChecklists(blankChecklists(source), []);
+  const second = normalizeChecklists(blankChecklists(source), []);
+  assert.notStrictEqual(first[0].id, second[0].id);
+  assert.notStrictEqual(first[0].items[0].id, second[0].items[0].id);
+}
+
+function testTemplatePlaceholderCaret() {
+  assert.strictEqual(firstPlaceholderIndex("As a [ ] I want [ ]"), 6);
+  // A checkbox is a task, not a blank waiting to be filled in.
+  assert.strictEqual(firstPlaceholderIndex("- [ ] Reproduce\n\nAs a [ ] I want"), 23);
+  assert.strictEqual(firstPlaceholderIndex("Nothing to fill in here"), -1);
+  assert.strictEqual(firstPlaceholderIndex(""), -1);
+}
+
 function testDependencyNormalizationAndRoundTrip() {
   const dependencies = normalizeDependencies([
     { cardId: "card-1", blocking: "block" },
@@ -347,6 +401,80 @@ function testDependencyGateResolvesTheStrongestUnmetMode() {
   assert.strictEqual(met.entries[0].status, "done");
 }
 
+function testCardCodesPadAndCarryTheirPrefix() {
+  assert.strictEqual(formatCardCode({ prefix: "BUG", next: 14, pad: 3 }), "BUG-014");
+  assert.strictEqual(formatCardCode({ prefix: "", next: 7, pad: 4 }), "0007");
+  assert.strictEqual(formatCardCode(null), "");
+  // A number wider than the padding is not truncated to fit it.
+  assert.strictEqual(formatCardCode({ prefix: "BUG", next: 1234, pad: 2 }), "BUG-1234");
+  // A code is one token: it identifies the card, so it has to survive a trip
+  // through frontmatter byte for byte.
+  assert.strictEqual(cleanCardCode(" BUG-014 "), "BUG-014");
+  assert.strictEqual(cleanCardCode("BUG 014"), "BUG014");
+  assert.strictEqual(cleanCardCode(null), "");
+}
+
+function testNumberingSurvivesTheNoteRoundTrip() {
+  const note = "---\nkanux-template: true\nlabels: \n---\n\n# Bug report\n\n## Details\nAs a [ ]\n";
+  assert.strictEqual(parseTemplateNumbering(note), null);
+
+  const on = withNumbering(note, { prefix: "BUG", next: 1, pad: 3 });
+  assert.deepStrictEqual(parseTemplateNumbering(on), { prefix: "BUG", next: 1, pad: 3 });
+
+  // Advancing rewrites the key instead of adding a second one.
+  const bumped = withNumbering(on, { prefix: "BUG", next: 2, pad: 3 });
+  assert.deepStrictEqual(parseTemplateNumbering(bumped), { prefix: "BUG", next: 2, pad: 3 });
+  assert.strictEqual((bumped.match(/kanux-id-next/g) || []).length, 1);
+
+  // Everything the parser does not model has to come back untouched: a template
+  // is a note people edit by hand.
+  const off = withNumbering(bumped, null);
+  assert.strictEqual(parseTemplateNumbering(off), null);
+  assert.ok(off.includes("labels: ") && off.includes("# Bug report") && off.includes("As a [ ]"));
+  assert.strictEqual(off, note);
+
+  // A note with no frontmatter has nowhere to keep a counter, so it is left be.
+  assert.strictEqual(withNumbering("# Plain", { prefix: "X", next: 1, pad: 1 }), "# Plain");
+}
+
+function testNumberingClampsWhatTheEditorCanType() {
+  assert.deepStrictEqual(normalizeNumbering({ prefix: " BUG ", next: "9", pad: "2" }), { prefix: "BUG", next: 9, pad: 2 });
+  // Digits below one or past the cap, and a negative counter, cannot be stored.
+  assert.deepStrictEqual(normalizeNumbering({ prefix: "", next: -5, pad: 0 }), { prefix: "", next: 0, pad: 1 });
+  assert.deepStrictEqual(normalizeNumbering({ prefix: "", next: 1, pad: 99 }), { prefix: "", next: 1, pad: 8 });
+  assert.strictEqual(normalizeNumbering(null), null);
+}
+
+function testCodeDetectionIsPrefixExact() {
+  const numbering = { prefix: "BUG", next: 1, pad: 3 };
+  assert.strictEqual(cardCodeNumber("BUG-014", numbering), 14);
+  assert.strictEqual(cardCodeNumber("BUG-7", numbering), 7);
+  assert.strictEqual(cardCodeNumber("", numbering), -1);
+  assert.strictEqual(cardCodeNumber("BUGS-014", numbering), -1);
+  // A code is the whole field, so a card's name can never be read as one.
+  assert.strictEqual(cardCodeNumber("BUG-014 Broken login", numbering), -1);
+  // A prefix is matched literally, not as a pattern.
+  assert.strictEqual(cardCodeNumber("A.B-7", { prefix: "A.B", next: 1, pad: 1 }), 7);
+  assert.strictEqual(cardCodeNumber("AXB-7", { prefix: "A.B", next: 1, pad: 1 }), -1);
+}
+
+function testCardCodeSurvivesTheFrontmatterRoundTrip() {
+  const note = `---
+kanban-card-id: card-1
+kanux-card-code: BUG-014
+labels:
+---
+
+# Broken login
+`;
+  assert.strictEqual(parseCardMarkdown(note).code, "BUG-014");
+
+  // Absent is not the same as empty: a note written before codes existed must
+  // leave whatever the card already holds alone, so the parser reports null.
+  assert.strictEqual(parseCardMarkdown(note.replace(/^kanux-card-code:.*\n/m, "")).code, null);
+  assert.strictEqual(parseCardMarkdown(note.replace("BUG-014", "")).code, "");
+}
+
 testLegacyChecklistMigration();
 testRegisteredIconAndGenericFallback();
 testChecklistItemNoteBody();
@@ -359,4 +487,11 @@ testCardMetadataParsing();
 testDependencyNormalizationAndRoundTrip();
 testChecklistDependencyRoundTrip();
 testDependencyGateResolvesTheStrongestUnmetMode();
+testTemplateChecklistsStartClean();
+testTemplatePlaceholderCaret();
+testCardCodesPadAndCarryTheirPrefix();
+testNumberingSurvivesTheNoteRoundTrip();
+testNumberingClampsWhatTheEditorCanType();
+testCodeDetectionIsPrefixExact();
+testCardCodeSurvivesTheFrontmatterRoundTrip();
 console.log("helpers tests passed");

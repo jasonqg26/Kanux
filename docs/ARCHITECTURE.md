@@ -38,6 +38,7 @@ Mezclados en `KanuxPlugin.prototype` desde `plugin.js`:
 | `board-ops.js` | Búsquedas (`getBoard`/`findList`…) y CRUD de boards y listas orientado al usuario. |
 | `card-dependencies.js` | Dependencias de card y de checklist: resolución del gate, descripción de la card referenciada y la confirmación previa a la acción. |
 | `card-ops.js` | CRUD de cards, completado, borrado de labels y los snapshots de undo. |
+| `card-templates.js` | Plantillas de card: lectura y escritura de las notas de `<board>/templates/`, captura desde una card, creación de cards a partir de ellas, el contador que asigna `kanux-card-code`, y apertura y borrado de la plantilla misma. |
 | `card-files.js` | Persistencia de notas de card: rutas, frontmatter/tags, escritura con concurrencia optimista y notas de checklist items. |
 | `board-index.js` | Índices generados por board: escritura/adopción, restauración de boards y limpieza. |
 | `vault-sync.js` | Reconciliación con el vault: import de notas, eventos, poda de boards/cards, dedupe y migración de media. |
@@ -70,10 +71,12 @@ Mezclados en `BoardView.prototype` desde `board/board-view.js`:
 | `card-modal.js` | Shell del editor de card: estado local, lock colaborativo, ciclo de guardado y cableado de campos. |
 | `card-details-field.js` | Campo de descripción de card: WYSIWYG, autoformato y adjuntos. |
 | `card-detail-images.js` | Imágenes del campo de detalles: tamaño, resize interactivo, portapapeles e inserción de archivos. |
-| `card-checklist-field.js` | Campo de checklists: grupos con descripción, drag & drop, notas por item y miembros. |
-| `card-dependencies-field.js` | Editor de dependencias compartido por la card y cada grupo de checklist. |
+| `card-checklist-field.js` | Campo de checklists: grupos con descripción, dependencias plegadas, drag & drop, notas por item y miembros. |
+| `card-dependencies-field.js` | Editor de dependencias compartido por la card y cada grupo de checklist. Avisa a su dueño de cada cambio para que un resumen dibujado fuera del campo siga siendo cierto. |
 | `dependency-level-picker.js` | Los tres niveles de bloqueo: cómo se presentan y el popover que los intercambia. |
 | `card-picker-modal.js` | Selector de una card del vault, con búsqueda por título y ubicación. |
+| `card-template-modal.js` | Editor de plantillas de card, con el chrome del modal de card: título, lista destino, etiquetas, miembros, numeración, descripción rellenable y checklists. |
+| `card-template-library-modal.js` | Las plantillas del tablero: abrir su nota, reiniciar su numeración, borrarlas y crear una nueva. |
 | `card-pdf-export.js` | Export de la card a PDF seguro para el vault. |
 | `card-dates-modal.js` | Selector de fechas de inicio/vencimiento. |
 | `label-picker-modal.js` | Selección y edición de etiquetas. |
@@ -84,6 +87,28 @@ Mezclados en `BoardView.prototype` desde `board/board-view.js`:
 | `about-modal.js` | Panel de créditos. |
 | `details-markdown.js` | Conversión Markdown ↔ HTML del subconjunto WYSIWYG, autoformato y segmentación de detalles (funciones puras). |
 | `modal-ui.js` | Utilidades pequeñas de DOM/imagen y constantes de timing compartidas por los modales. |
+
+## Editor y ajustes
+
+Módulos independientes, no mixins: cada uno exporta su propia clase.
+
+| Módulo | Responsabilidad |
+| --- | --- |
+| `editor/embedded-editor.js` | Editor Markdown embebido de Obsidian dentro del campo de descripción: montaje, `Scope` de teclas y desmontaje. Se apoya en APIs internas, así que verifica su disponibilidad en tiempo de ejecución y devuelve `null` para que el llamador use el editor inline. |
+| `settings/settings-tab.js` | Pestaña de ajustes del plugin (`PluginSettingTab`): acceso a boards, sync, preferencias y versión. Incluye su propio `VaultImageSuggestModal` porque solo lo usa el selector de fondo de esta pestaña; si un segundo consumidor lo necesita, se mueve a `modals/`. |
+
+## Pruebas (`tests/`)
+
+Cuatro suites sin dependencias externas: cada una hace stub del módulo `obsidian` con `Module._load` y corre con `node tests/<archivo>`. **Las cuatro son parte de la validación obligatoria** (ver `AGENTS.md`); un cambio en `helpers.js` puede romper cualquiera.
+
+| Suite | Cubre |
+| --- | --- |
+| `helpers.test.js` | Utilidades puras de `helpers.js`: round-trips de Markdown, checklists, dependencias, numeración e iconos. |
+| `modals.test.js` | Ciclo de vida de los campos de card: borradores de descripción, autoguardado, notas de checklist y formateo Markdown. |
+| `plugin.test.js` | Operaciones sobre datos del plugin: rename/borrado de boards, el gate de dependencias en `moveCard` y el contador de plantillas. |
+| `board-view.test.js` | Geometría del drag & drop: anclas de drop, auto-scroll en los bordes y selección de la card destino. |
+
+Los stubs de `obsidian` son mínimos por diseño: si una prueba necesita una API nueva, se agrega al stub de esa suite, no a un helper compartido.
 
 ## Reglas al escalar
 

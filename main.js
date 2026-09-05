@@ -748,6 +748,133 @@ function checklistsToMarkdown(checklists) {
     .join("\n\n");
 }
 
+/**
+ * Checklist groups prepared for reuse: nothing ticked, nothing still linked to
+ * the notes of the card they were copied from, no dependencies pointing at that
+ * card's neighbours, and no ids, so whoever normalizes them next mints a fresh
+ * set instead of every copy sharing one.
+ */
+function blankChecklists(checklists) {
+  return normalizeChecklists(checklists, []).map((group) => ({
+    title: group.title,
+    color: group.color,
+    description: group.description,
+    dependencies: [],
+    items: group.items.map((item) => ({
+      text: item.text,
+      done: false,
+      filePath: "",
+      assignee: item.assignee,
+    })),
+  }));
+}
+
+/**
+ * Where the caret belongs in a template description: inside the first blank of
+ * "As a [ ] I want [ ] so that [ ]". A pair of brackets that is all a list
+ * marker carries is a task checkbox rather than a blank, so it is skipped.
+ * Returns -1 when the text has nothing to fill in.
+ */
+function firstPlaceholderIndex(markdown) {
+  const text = String(markdown || "");
+  const gap = /\[[ \t]*\]/g;
+  for (let match = gap.exec(text); match; match = gap.exec(text)) {
+    const lineStart = text.lastIndexOf("\n", match.index) + 1;
+    if (!/^\s*[-*+]\s*$/.test(text.slice(lineStart, match.index))) return match.index + 1;
+  }
+  return -1;
+}
+
+/* ---- Template numbering ---- */
+// A template can stamp every card it makes with a running code — BUG-014 — so
+// a card can be named out loud. The counter lives in the template note, so it
+// survives a reload and syncs with the vault like everything else.
+const NUMBERING_KEYS = { prefix: "kanux-id-prefix", next: "kanux-id-next", pad: "kanux-id-pad" };
+const MAX_NUMBER_PAD = 8;
+
+/** Numbering is on when the note carries a next number; nothing else is required. */
+function parseTemplateNumbering(markdown) {
+  const read = (key) => {
+    const match = String(markdown || "").match(new RegExp(`(?:^|\\r?\\n)[ \\t]*${key}[ \\t]*:(.*)`));
+    return match ? textLine(match[1]) : "";
+  };
+  const next = numberOrNull(read(NUMBERING_KEYS.next));
+  if (next === null) return null;
+  return normalizeNumbering({
+    prefix: read(NUMBERING_KEYS.prefix),
+    next,
+    pad: numberOrNull(read(NUMBERING_KEYS.pad)),
+  });
+}
+
+function normalizeNumbering(numbering) {
+  if (!numbering) return null;
+  const next = Math.max(0, Math.floor(numberOrNull(numbering.next) || 0));
+  const pad = Math.min(MAX_NUMBER_PAD, Math.max(1, Math.floor(numberOrNull(numbering.pad) || 1)));
+  return { prefix: textLine(numbering.prefix), next, pad };
+}
+
+/** The code a card would carry: "BUG-014", or "014" when there is no prefix. */
+function formatCardCode(numbering, value) {
+  const clean = normalizeNumbering(numbering);
+  if (!clean) return "";
+  const number = numberOrNull(value);
+  const counter = number === null ? clean.next : Math.max(0, Math.floor(number));
+  const digits = String(counter).padStart(clean.pad, "0");
+  return clean.prefix ? `${clean.prefix}-${digits}` : digits;
+}
+
+
+/**
+ * Rewrites just the numbering keys of a template note, leaving the rest of the
+ * file alone. A template is a note people edit by hand, so re-serializing it
+ * from the parsed model would quietly drop anything the parser does not carry.
+ * Passing null turns numbering off. Returns the text unchanged when the note
+ * has no frontmatter to write into.
+ */
+function withNumbering(markdown, numbering) {
+  const text = String(markdown || "");
+  const block = text.match(/^(---\r?\n)([\s\S]*?)(^---[ \t]*$)/m);
+  if (!block) return text;
+
+  const ending = text.includes("\r\n") ? "\r\n" : "\n";
+  const keys = Object.values(NUMBERING_KEYS);
+  const kept = block[2]
+    .split(/\r?\n/)
+    .filter((line) => !keys.some((key) => new RegExp(`^[ \\t]*${key}[ \\t]*:`).test(line)));
+  while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
+
+  const clean = normalizeNumbering(numbering);
+  if (clean) {
+    kept.push(`${NUMBERING_KEYS.prefix}: ${clean.prefix}`);
+    kept.push(`${NUMBERING_KEYS.next}: ${clean.next}`);
+    kept.push(`${NUMBERING_KEYS.pad}: ${clean.pad}`);
+  }
+
+  return text.slice(0, block.index) + block[1] + kept.join(ending) + ending + block[3] + text.slice(block.index + block[0].length);
+}
+
+/**
+ * A card's code as it is stored: one token, no spaces. The code identifies the
+ * card, so it must survive a round trip through frontmatter unchanged.
+ */
+function cleanCardCode(value) {
+  return textLine(value).replace(/\s+/g, "");
+}
+
+/**
+ * The number inside a card's code — 14 for "BUG-014" — or -1 when the code did
+ * not come from this template. The prefix is matched literally, so a template
+ * prefixed "A.B" cannot claim the cards of one prefixed "AXB".
+ */
+function cardCodeNumber(code, numbering) {
+  const clean = normalizeNumbering(numbering);
+  if (clean === null) return -1;
+  const head = clean.prefix ? `${clean.prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-` : "";
+  const match = cleanCardCode(code).match(new RegExp(`^${head}(\\d+)$`));
+  return match ? Number(match[1]) : -1;
+}
+
 function checklistItems(checklists) {
   return (Array.isArray(checklists) ? checklists : [])
     .flatMap((group) => (group && Array.isArray(group.items) ? group.items : []));
@@ -929,6 +1056,7 @@ const CARD_METADATA_KEYS = new Set([
   "kanban-card-id",
   "kanban-board-id",
   "kanban-list-id",
+  "kanux-card-code",
   "kanux-list",
   "position",
   "labels",
@@ -1020,6 +1148,7 @@ function parseCardMarkdown(markdown) {
     boardId: metadata["kanban-board-id"] || "",
     listId: metadata["kanban-list-id"] || "",
     listTitle: metadata["kanux-list"] || "",
+    code: optionalMetadata(metadata, "kanux-card-code", cleanCardCode),
     position: numberOrNull(metadata.position),
     title: titleMatch ? titleMatch[1].trim() : "",
     labels: optionalMetadata(metadata, "labels", parseLabels) || [],
@@ -1092,9 +1221,18 @@ module.exports = {
   checklistToText,
   checklistToMarkdown,
   checklistsToMarkdown,
+  blankChecklists,
   checklistItems,
   checklistStats,
   cleanDependencyBlockMode,
+  firstPlaceholderIndex,
+  parseTemplateNumbering,
+  normalizeNumbering,
+  formatCardCode,
+  cardCodeNumber,
+  cleanCardCode,
+  withNumbering,
+  NUMBERING_KEYS,
   dependencyGate,
   normalizeDependencies,
   parseDependencies,
@@ -2913,8 +3051,11 @@ function levelPosition(blocking) {
  * { cardId, blocking } entries mutated in place so its owner — the card modal
  * state, or one checklist group — keeps the same array. Every change repaints
  * the cards and saves.
+ *
+ * `onChange` runs after each of those changes, for an owner that draws its own
+ * summary of this field outside it and has to keep it truthful.
  */
-function buildDependenciesField(modal, dependencies) {
+function buildDependenciesField(modal, dependencies, onChange) {
   const field = createElement("div", "ot-field ot-dependencies-field");
 
   // The add control sits beside the caption, the way a section header reads,
@@ -2949,6 +3090,7 @@ function buildDependenciesField(modal, dependencies) {
     repaint();
     const moved = focusCardId && sections.querySelector(`[data-card-id="${focusCardId}"] .ot-dependency-card-main`);
     (moved || addButton).focus();
+    if (onChange) onChange();
     modal.saveNow().catch(console.error);
   };
 
@@ -4661,10 +4803,16 @@ function buildDetailsField(modal, options = {}) {
     // vault's theme and settings). When its internal API is unavailable, the
     // WYSIWYG block editor below takes over unchanged.
     const embeddedHost = createElement("div", "ot-embedded-editor");
+    // A card made from a fill-in-the-gaps template asks for the caret in its
+    // first blank; everything else starts at the end, ready to keep writing.
+    const caret = !noteMode && typeof modal.focusDetailsAt === "number"
+      ? Math.min(modal.focusDetailsAt, draftMarkdown.length)
+      : draftMarkdown.length;
+    if (!noteMode) modal.focusDetailsAt = null;
     const embeddedEditor = createEmbeddedMarkdownEditor(modal.app, embeddedHost, {
       value: draftMarkdown,
       placeholder,
-      cursorLocation: { anchor: draftMarkdown.length, head: draftMarkdown.length },
+      cursorLocation: { anchor: caret, head: caret },
       onChange: (value) => applyDraft(value),
       onSubmit: () => finishEditing().catch(console.error),
       onEscape: () => finishEditing().catch(console.error),
@@ -5098,6 +5246,8 @@ module.exports = {
   "src/modals/card-checklist-field.js": function(module, exports, __require) {
 const { MarkdownRenderer, Notice, setIcon } = require("obsidian");
 const {
+  DEPENDENCY_BLOCK_TOTAL,
+  DEPENDENCY_BLOCK_WARN,
   LIST_COLORS,
   addButtonIcon,
   checklistItemNoteBody,
@@ -5114,8 +5264,8 @@ const { TextPromptModal, confirmAction } = __require("src/modals/prompt-modals.j
 const { ListColorModal } = __require("src/modals/list-color-modal.js");
 const { buildDependenciesField } = __require("src/modals/card-dependencies-field.js");
 
-// Builds the card checklists field: groups with description, drag & drop,
-// per-item notes and member assignment.
+// Builds the card checklists field: groups with description, collapsed
+// dependencies, drag & drop, per-item notes and member assignment.
 /**
  * Renders every named checklist as an independent progress bar.
  */
@@ -5196,7 +5346,39 @@ function buildChecklistsField(modal) {
 
     // The very same editor the card uses, so a dependency is added and read the
     // same way whether it gates the card or one of its checklists.
-    const dependenciesField = buildDependenciesField(modal, group.dependencies);
+    //
+    // Most checklists depend on nothing, so the panel starts collapsed and the
+    // header button carries the count: hidden is quiet, never silent, and a
+    // gate that warns or blocks colours the count to say so from the header.
+    const dependenciesOpen = () => modal.openChecklistDependencies.has(group.id);
+    const dependenciesToggle = iconButton("link", "Show dependencies", () => {
+      if (dependenciesOpen()) modal.openChecklistDependencies.delete(group.id);
+      else modal.openChecklistDependencies.add(group.id);
+      paintDependenciesToggle();
+    });
+    dependenciesToggle.classList.add("ot-checklist-deps-button");
+    const dependenciesCount = createElement("span", "ot-checklist-deps-count");
+    dependenciesToggle.append(dependenciesCount);
+    header.append(dependenciesToggle);
+
+    // Called back rather than read once: adding or removing a dependency while
+    // the panel is open has to move the count the header is showing.
+    const dependenciesField = buildDependenciesField(modal, group.dependencies, () => paintDependenciesToggle());
+
+    const paintDependenciesToggle = () => {
+      const open = dependenciesOpen();
+      const gate = modal.plugin.dependencyGateFor(group.dependencies);
+      dependenciesField.hidden = !open;
+      dependenciesToggle.classList.toggle("is-expanded", open);
+      dependenciesToggle.classList.toggle("is-warning", gate.mode === DEPENDENCY_BLOCK_WARN);
+      dependenciesToggle.classList.toggle("is-blocked", gate.mode === DEPENDENCY_BLOCK_TOTAL);
+      dependenciesToggle.setAttribute("aria-expanded", String(open));
+      dependenciesToggle.title = dependenciesToggleLabel(open, gate.total);
+      dependenciesToggle.setAttribute("aria-label", dependenciesToggle.title);
+      dependenciesCount.textContent = gate.total ? String(gate.total) : "";
+      dependenciesCount.hidden = !gate.total;
+    };
+    paintDependenciesToggle();
 
     const colorButton = createElement("button", "ot-checklist-color");
     colorButton.type = "button";
@@ -5682,6 +5864,14 @@ function buildChecklistsField(modal) {
   return field;
 }
 
+// What the header button offers, so a collapsed panel still says how much is
+// behind it instead of only that something might be.
+function dependenciesToggleLabel(open, total) {
+  if (open) return "Hide dependencies";
+  if (!total) return "Show dependencies";
+  return `Show ${total} ${total === 1 ? "dependency" : "dependencies"}`;
+}
+
 module.exports = {
   buildChecklistsField,
 };
@@ -5701,6 +5891,7 @@ const {
   labelKey,
   normalizeChecklists,
   normalizeDependencies,
+  renderIcon,
   textLine,
   initials,
   uid,
@@ -5716,7 +5907,7 @@ const { buildChecklistsField } = __require("src/modals/card-checklist-field.js")
 
 // Controls that only reveal content, so a read-only viewer keeps them: they
 // expand a panel or open a preview without ever writing to the card.
-const VIEW_ONLY_CONTROL_CLASSES = ["ot-image-tile", "ot-checklist-note-action"];
+const VIEW_ONLY_CONTROL_CLASSES = ["ot-image-tile", "ot-checklist-deps-button", "ot-checklist-note-action"];
 
 // The card editor modal: state, locking, saving, and field wiring.
 class CardModal extends Modal {
@@ -5727,12 +5918,17 @@ class CardModal extends Modal {
     // notesOnly: show just the title + Description + Checklist (used by the table
     // view, where labels / members / dates / status are edited inline in the cells).
     this.notesOnly = !!options.notesOnly;
+    // Character offset the description editor should open on, for a card made
+    // from a fill-in-the-gaps template. Consumed by the first render.
+    this.focusDetailsAt = typeof options.focusDetailsAt === "number" ? options.focusDetailsAt : null;
     this.localTitle = "";
     this.localLabels = [];
     this.localGlobalLabels = [];
     this.localDetails = "";
     this.detailsDraft = "";
     this.editingDetails = false;
+    // One undo snapshot per description editing session; see autoSaveDetails.
+    this.detailsUndoRecorded = false;
     this.detailsEditDismissed = false;
     this.pendingDetailAttachments = new Set();
     this.localChecklists = [];
@@ -5784,6 +5980,8 @@ class CardModal extends Modal {
     this.localDetails = card.details || "";
     this.detailsDraft = "";
     this.editingDetails = false;
+    // One undo snapshot per description editing session; see autoSaveDetails.
+    this.detailsUndoRecorded = false;
     this.detailsEditDismissed = false;
     this.localChecklists = normalizeChecklists(clone(card.checklists || []), []);
     this.localDependencies = normalizeDependencies(card.dependencies);
@@ -5791,6 +5989,9 @@ class CardModal extends Modal {
     // the opt-in "Add description" flow survives re-renders until first save.
     this.openChecklistDescriptions = new Set();
     this.focusChecklistDescriptionId = null;
+    // Group ids whose dependency panel is open. Built fresh on every load, which
+    // is what makes collapsed the state a card is always reopened in.
+    this.openChecklistDependencies = new Set();
     this.localAssignees = clone(card.assignees || []);
     await this.setupCardLock();
     this.render();
@@ -5851,7 +6052,7 @@ class CardModal extends Modal {
     this.discardPendingDetailAttachments().catch(console.error);
     if (this.plugin.editingCardId === this.cardId) this.plugin.editingCardId = null;
     if (this.plugin.viewRefreshPending) this.plugin.refreshViews();
-    new Notice(`🔒 ${(holder && holder.name) || "Someone"} is editing this card`);
+    new Notice(`${(holder && holder.name) || "Someone"} is editing this card`);
     this.render();
   }
 
@@ -6008,13 +6209,15 @@ class CardModal extends Modal {
 
     const board = this.plugin.findBoardForCard(card);
     const list = board && board.lists.find((item) => item.id === card.listId);
-    // Centered document-style header: title, then where the card lives.
+    // Centered document-style header: the code that names this card, the title,
+    // then where the card lives.
     const header = createElement("header", "ot-card-modal-header");
     const location = createElement("div", "ot-card-modal-location");
     if (list) location.append(createElement("span", "ot-card-modal-location-pill", list.title));
     if (list && board) location.append(createElement("span", "ot-card-modal-location-sep", "·"));
     if (board) location.append(createElement("span", "", board.name));
     if (!list && !board) location.append(createElement("span", "", "Kanux card"));
+    if (card.code) header.append(createElement("div", "ot-card-modal-code", card.code));
     header.append(title, location);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
@@ -6082,8 +6285,7 @@ class CardModal extends Modal {
     const children = [header, body, actions];
     if (this.readOnly) {
       this.contentEl.addClass("ot-card-readonly");
-      const holderName = (this.lockHolder && this.lockHolder.name) || "Someone";
-      children.unshift(createElement("div", "ot-card-lock-banner", `🔒 ${holderName} is editing this card — read only`));
+      children.unshift(this.buildLockBanner());
     }
     this.contentEl.append(...children);
     if (bodyScrollTop) requestAnimationFrame(() => { body.scrollTop = bodyScrollTop; });
@@ -6097,6 +6299,16 @@ class CardModal extends Modal {
       // checklist description, whose blur handler collapses it immediately.
       requestAnimationFrame(() => title.focus());
     }
+  }
+
+  // Banner atop a read-only card, naming whoever currently holds the edit lock.
+  buildLockBanner() {
+    const holderName = (this.lockHolder && this.lockHolder.name) || "Someone";
+    const banner = createElement("div", "ot-card-lock-banner");
+    const icon = createElement("span", "ot-card-lock-banner-icon");
+    renderIcon(icon, "lock");
+    banner.append(icon, createElement("span", "", `${holderName} is editing this card — read only`));
+    return banner;
   }
 
   // Freeze every editable control inside the given fields so a read-only viewer
@@ -6255,7 +6467,8 @@ class CardModal extends Modal {
 
   shouldEditDetails() {
     const emptyDescription = !String(this.localDetails || "").trim();
-    return !this.readOnly && (this.editingDetails || (emptyDescription && !this.detailsEditDismissed));
+    return !this.readOnly
+      && (this.editingDetails || typeof this.focusDetailsAt === "number" || (emptyDescription && !this.detailsEditDismissed));
   }
 
   /**
@@ -6267,12 +6480,17 @@ class CardModal extends Modal {
   async autoSaveDetails(markdown) {
     const previousDetails = this.localDetails;
     this.localDetails = String(markdown || "").trim();
+    // Only the first autosave of a session takes a snapshot, so undo steps back
+    // to the description as it was before this edit rather than through every
+    // typing pause along the way.
+    const recordUndo = !this.detailsUndoRecorded;
     try {
-      await this.saveNow({ propagateError: true });
+      await this.saveNow({ propagateError: true, recordUndo });
     } catch (error) {
       this.localDetails = previousDetails;
       throw error;
     }
+    this.detailsUndoRecorded = true;
     await this.finalizePendingDetailAttachments(this.localDetails);
   }
 
@@ -6281,6 +6499,8 @@ class CardModal extends Modal {
     await this.autoSaveDetails(markdown);
     this.detailsDraft = "";
     this.editingDetails = false;
+    // The session is over, so the next edit takes its own undo snapshot.
+    this.detailsUndoRecorded = false;
     this.detailsEditDismissed = !this.localDetails;
   }
 
@@ -6418,7 +6638,7 @@ class CardModal extends Modal {
 
     const patch = this.cardPatch();
     const globalLabels = clone(this.localGlobalLabels);
-    const saveOperation = this.savePromise.then(() => this.plugin.updateCard(card.id, patch, globalLabels));
+    const saveOperation = this.savePromise.then(() => this.plugin.updateCard(card.id, patch, globalLabels, { recordUndo: options.recordUndo }));
     this.savePromise = saveOperation.catch((error) => {
         console.error(error);
         new Notice("Could not save card.");
@@ -6434,6 +6654,650 @@ module.exports = {
 };
 
   },
+  "src/modals/card-template-modal.js": function(module, exports, __require) {
+const { Menu, Modal, Notice } = require("obsidian");
+
+// The card template editor: the shape a repeated kind of card starts from.
+// It wears the card modal's own chrome — document header, main column beside a
+// sidebar, sticky actions — because what you are filling in *is* a card, and
+// two layouts for the same content would only make you learn it twice.
+const {
+  LIST_COLORS,
+  addButtonIcon,
+  cleanColor,
+  clone,
+  createElement,
+  formatCardCode,
+  iconButton,
+  initials,
+  textButton,
+  textLine,
+} = __require("src/helpers.js");
+const { LabelPickerModal } = __require("src/modals/label-picker-modal.js");
+const { ListColorModal } = __require("src/modals/list-color-modal.js");
+const { confirmAction } = __require("src/modals/prompt-modals.js");
+
+const BLANK_HINT = "Write [ ] wherever the card should be filled in — “As a [ ] I want [ ] so that [ ]”. The editor opens on the first one.";
+const NUMBER_HINT = "Every card made from this template takes the next code and the counter moves on. The code is stored on the card, so renaming it keeps the code. Restart the counter any time from Manage templates.";
+const DEFAULT_PAD = 3;
+
+class CardTemplateModal extends Modal {
+  constructor(app, plugin, board, onSaved = null) {
+    super(app);
+    this.plugin = plugin;
+    this.board = board;
+    this.onSaved = onSaved;
+    this.saving = false;
+    this.template = {
+      title: "",
+      listId: (board.lists[0] && board.lists[0].id) || "",
+      labels: [],
+      assignees: [],
+      details: "",
+      checklists: [],
+      numbering: null,
+    };
+    // Kept aside from the template so switching numbering off and back on does
+    // not throw away the prefix that was already typed.
+    this.numberingDraft = { prefix: "", next: 1, pad: DEFAULT_PAD };
+    this.globalLabels = clone(plugin.data.labels || []);
+  }
+
+  onOpen() {
+    this.modalEl.addClass("ot-card-modal-shell");
+    this.contentEl.addClass("ot-card-modal");
+    this.contentEl.addClass("ot-template-modal");
+
+    const main = createElement("main", "ot-card-modal-main");
+    main.append(this.buildDetailsField(), this.buildChecklistsField());
+
+    const sidebar = createElement("aside", "ot-card-modal-sidebar");
+    sidebar.append(this.buildLabelsField());
+    if (this.plugin.isSyncDeckEnabled()) sidebar.append(this.buildMembersField());
+    sidebar.append(this.buildNumberingField());
+
+    const body = createElement("div", "ot-card-modal-body");
+    body.append(main, sidebar);
+
+    this.contentEl.replaceChildren(this.buildHeader(), body, this.buildActions());
+
+    // Escape takes the same path as Cancel: a form with typing in it should not
+    // vanish on a stray keypress. Guarded because the modal still has to build
+    // where `scope` is absent (the test harness stubs Modal out).
+    if (this.scope) {
+      this.scope.register([], "Escape", () => {
+        this.requestClose();
+        return false;
+      });
+    }
+
+    requestAnimationFrame(() => this.titleInput.focus());
+  }
+
+  onClose() {
+    this.contentEl.replaceChildren();
+  }
+
+  /** Title, then where its cards land — the card modal's own header, editable. */
+  buildHeader() {
+    const header = createElement("header", "ot-card-modal-header");
+
+    this.titleInput = createElement("input", "ot-title-input");
+    this.titleInput.type = "text";
+    this.titleInput.placeholder = "Bug report";
+    this.titleInput.value = this.template.title;
+    this.titleInput.setAttribute("aria-label", "Card title");
+    this.titleInput.addEventListener("input", () => {
+      this.template.title = this.titleInput.value;
+      this.clearError();
+      this.paintNumberPreview();
+    });
+
+    this.errorEl = createElement("p", "ot-template-error");
+    this.errorEl.setAttribute("aria-live", "polite");
+    this.errorEl.hidden = true;
+
+    header.append(this.titleInput, this.errorEl, this.buildLocation());
+    return header;
+  }
+
+  /**
+   * The destination list sits where the card modal prints the card's own
+   * location, so the header answers the same question in both: where is this.
+   */
+  buildLocation() {
+    const location = createElement("div", "ot-card-modal-location");
+    const pill = createElement("button", "ot-card-modal-location-pill ot-template-list");
+    pill.type = "button";
+    pill.setAttribute("aria-haspopup", "true");
+
+    const paint = () => {
+      const list = this.plugin.findList(this.template.listId, this.board);
+      const dot = createElement("span", "ot-mini-card-dot");
+      if (list && list.color) dot.style.setProperty("--ot-mini-card-color", list.color);
+      const name = (list && list.title) || "Choose a list";
+      pill.replaceChildren(dot, createElement("span", "", name));
+      pill.setAttribute("aria-label", `Destination list: ${name}`);
+    };
+
+    pill.addEventListener("click", (event) => {
+      const menu = new Menu();
+      this.board.lists.forEach((list) => {
+        menu.addItem((item) => item
+          .setTitle(list.title)
+          .setChecked(list.id === this.template.listId)
+          .onClick(() => {
+            this.template.listId = list.id;
+            paint();
+          }));
+      });
+      const rect = event.currentTarget.getBoundingClientRect();
+      menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 });
+    });
+
+    paint();
+    location.append(pill, createElement("span", "ot-card-modal-location-sep", "·"), createElement("span", "", this.board.name));
+    return location;
+  }
+
+  buildLabelsField() {
+    const field = createElement("div", "ot-field ot-label-editor");
+    field.append(createElement("span", "", "Labels"));
+    const pills = createElement("div", "ot-selected-labels");
+
+    const paint = () => {
+      pills.replaceChildren();
+      this.template.labels.forEach((label, index) => {
+        const pill = createElement("button", "ot-large-label-pill", label.name);
+        pill.type = "button";
+        pill.style.backgroundColor = label.color;
+        pill.title = "Remove label";
+        pill.setAttribute("aria-label", `Remove label ${label.name}`);
+        pill.addEventListener("click", () => {
+          this.template.labels.splice(index, 1);
+          paint();
+        });
+        pills.append(pill);
+      });
+      const add = iconButton("plus", "Choose labels", () => {
+        new LabelPickerModal(this.app, this.globalLabels, this.template.labels, (labels, selected) => {
+          this.globalLabels = labels;
+          this.template.labels = selected;
+          paint();
+        }).open();
+      });
+      add.classList.add("ot-label-add-button");
+      pills.append(add);
+    };
+
+    paint();
+    field.append(pills);
+    return field;
+  }
+
+  buildMembersField() {
+    const field = createElement("div", "ot-field");
+    field.append(createElement("span", "", "Members"));
+    const row = createElement("div", "ot-assignee-row");
+
+    const paint = () => {
+      row.replaceChildren();
+      this.template.assignees.forEach((member, index) => {
+        const chip = createElement("span", "ot-assignee-chip");
+        const remove = iconButton("x", `Remove ${member.name || member.email}`, () => {
+          this.template.assignees.splice(index, 1);
+          paint();
+        });
+        remove.classList.add("ot-assignee-remove");
+        chip.append(this.memberAvatar(member), createElement("span", "ot-assignee-name", member.name || member.email), remove);
+        row.append(chip);
+      });
+      const add = iconButton("plus", "Assign a member", (event) => this.showMemberMenu(event, paint));
+      add.classList.add("ot-assignee-add");
+      row.append(add);
+    };
+
+    paint();
+    field.append(row);
+    return field;
+  }
+
+  /**
+   * A running code — BUG-014 — stamped on the front of every card this template
+   * makes, so a card can be named out loud.
+   */
+  buildNumberingField() {
+    const field = createElement("div", "ot-field ot-template-numbering");
+    field.append(createElement("span", "", "Numbering"));
+
+    const toggleRow = createElement("label", "ot-template-toggle");
+    const toggle = createElement("input", "");
+    toggle.type = "checkbox";
+    toggle.checked = !!this.template.numbering;
+    toggleRow.append(toggle, createElement("span", "", "Number each card"));
+
+    const boxes = createElement("div", "ot-template-number-boxes");
+    boxes.append(
+      this.buildNumberBox("Prefix", "prefix"),
+      this.buildNumberBox("Next", "next"),
+      this.buildNumberBox("Digits", "pad"),
+    );
+
+    this.previewEl = createElement("p", "ot-template-number-preview");
+    this.previewEl.setAttribute("aria-live", "polite");
+    const hint = createElement("span", "ot-template-hint", NUMBER_HINT);
+
+    const paint = () => {
+      const on = toggle.checked;
+      this.template.numbering = on ? { ...this.numberingDraft } : null;
+      boxes.hidden = !on;
+      this.previewEl.hidden = !on;
+      hint.hidden = !on;
+      this.paintNumberPreview();
+    };
+
+    toggle.addEventListener("change", paint);
+    paint();
+
+    field.append(toggleRow, boxes, this.previewEl, hint);
+    return field;
+  }
+
+  buildNumberBox(label, key) {
+    const wrap = createElement("label", "ot-template-number-box");
+    const input = createElement("input", "ot-input");
+    if (key === "prefix") {
+      input.type = "text";
+      input.placeholder = "BUG";
+      input.spellcheck = false;
+      input.autocapitalize = "characters";
+    } else {
+      input.type = "number";
+      input.inputMode = "numeric";
+      input.min = key === "pad" ? "1" : "0";
+      if (key === "pad") input.max = "8";
+    }
+    input.value = String(this.numberingDraft[key]);
+    input.addEventListener("input", () => {
+      this.numberingDraft[key] = key === "prefix" ? input.value : Number(input.value);
+      if (this.template.numbering) this.template.numbering = { ...this.numberingDraft };
+      this.paintNumberPreview();
+    });
+
+    wrap.append(createElement("span", "", label), input);
+    return wrap;
+  }
+
+  paintNumberPreview() {
+    if (!this.previewEl) return;
+    const code = formatCardCode(this.template.numbering);
+    if (!code) {
+      this.previewEl.replaceChildren();
+      return;
+    }
+    // Shown the way the card will wear it: the code beside the name, in the same
+    // chip the board uses — never inside the title, which a rename would take.
+    const name = createElement("span", "ot-template-number-name");
+    name.append(
+      createElement("span", "ot-card-code", code),
+      createElement("span", "", this.template.title || "Untitled card"),
+    );
+    this.previewEl.replaceChildren(createElement("span", "ot-template-number-caption", "Next card"), name);
+  }
+
+  memberAvatar(member) {
+    const avatar = createElement("span", "ot-card-avatar");
+    avatar.style.setProperty("--ot-avatar-color", member.color || "#8b5cf6");
+    const picture = this.plugin.getMemberPicture(member.email);
+    if (picture) {
+      const image = createElement("img", "");
+      image.src = picture;
+      image.alt = "";
+      avatar.append(image);
+      return avatar;
+    }
+    avatar.textContent = initials(member.name || member.email);
+    avatar.classList.add("is-initials");
+    return avatar;
+  }
+
+  showMemberMenu(event, paint) {
+    const members = this.plugin.getVaultMembers();
+    const menu = new Menu();
+    if (!members.length) {
+      menu.addItem((item) => item.setTitle("No members — sign in to Sync Deck").setDisabled(true));
+    }
+    members.forEach((member) => {
+      const chosen = this.template.assignees.some((assignee) => assignee.email === member.email);
+      menu.addItem((item) => item
+        .setTitle(member.name || member.email)
+        .setChecked(chosen)
+        .onClick(() => {
+          this.template.assignees = chosen
+            ? this.template.assignees.filter((assignee) => assignee.email !== member.email)
+            : [...this.template.assignees, { email: member.email, name: member.name, color: member.color }];
+          paint();
+        }));
+    });
+    menu.showAtMouseEvent(event);
+  }
+
+  buildDetailsField() {
+    const field = createElement("div", "ot-field");
+    field.append(createElement("span", "", "Description"));
+    const input = createElement("textarea", "ot-textarea ot-template-details");
+    input.rows = 6;
+    input.placeholder = "As a [ ] I want [ ] so that [ ]";
+    input.value = this.template.details;
+    input.setAttribute("aria-label", "Description");
+    input.addEventListener("input", () => { this.template.details = input.value; });
+    field.append(input, createElement("span", "ot-template-hint", BLANK_HINT));
+    return field;
+  }
+
+  buildChecklistsField() {
+    const field = createElement("div", "ot-field");
+    const header = createElement("div", "ot-field-row");
+    const groups = createElement("div", "ot-template-checklists");
+
+    const paint = () => {
+      groups.replaceChildren();
+      if (!this.template.checklists.length) groups.append(createElement("span", "ot-empty-text", "No checklists yet"));
+      this.template.checklists.forEach((group, index) => groups.append(this.buildChecklistGroup(group, index, paint)));
+    };
+
+    const add = iconButton("plus", "Add checklist", () => {
+      this.template.checklists.push({
+        title: `Checklist ${this.template.checklists.length + 1}`,
+        color: LIST_COLORS[this.template.checklists.length % LIST_COLORS.length],
+        description: "",
+        dependencies: [],
+        items: [],
+      });
+      paint();
+    });
+    add.classList.add("ot-dependency-add");
+    header.append(createElement("span", "", "Checklists"), add);
+
+    paint();
+    field.append(header, groups);
+    return field;
+  }
+
+  // Groups keep the order they were added in; that order is what the created
+  // card gets, so moving one is done by removing and adding it again.
+  buildChecklistGroup(group, index, repaintGroups) {
+    const section = createElement("div", "ot-template-checklist");
+    section.style.setProperty("--ot-checklist-color", group.color);
+
+    const header = createElement("div", "ot-checklist-header");
+    const name = createElement("input", "ot-checklist-name");
+    name.type = "text";
+    name.value = group.title;
+    name.setAttribute("aria-label", "Checklist name");
+    name.addEventListener("input", () => { group.title = name.value; });
+
+    const color = createElement("button", "ot-checklist-color");
+    color.type = "button";
+    color.title = "Choose checklist color";
+    color.setAttribute("aria-label", "Choose checklist color");
+    color.style.backgroundColor = group.color;
+    color.addEventListener("click", () => {
+      new ListColorModal(this.app, group.title || "Checklist", group.color, (picked) => {
+        group.color = cleanColor(picked) || group.color;
+        repaintGroups();
+      }, "Checklist").open();
+    });
+
+    const remove = iconButton("trash", "Remove checklist", () => {
+      this.template.checklists.splice(index, 1);
+      repaintGroups();
+    });
+    remove.classList.add("ot-checklist-delete");
+
+    header.append(name, color, remove);
+    section.append(header, this.buildChecklistItems(group));
+    return section;
+  }
+
+  buildChecklistItems(group) {
+    const wrap = createElement("div", "ot-template-items");
+
+    const paint = () => {
+      wrap.replaceChildren();
+      group.items.forEach((item, index) => {
+        const row = createElement("div", "ot-template-item");
+        const input = createElement("input", "ot-input");
+        input.type = "text";
+        input.placeholder = "Checklist item";
+        input.value = item.text;
+        input.setAttribute("aria-label", "Checklist item");
+        input.addEventListener("input", () => { item.text = input.value; });
+        const remove = iconButton("x", "Remove item", () => {
+          group.items.splice(index, 1);
+          paint();
+        });
+        row.append(input, remove);
+        wrap.append(row);
+      });
+      wrap.append(textButton("plus", "Add item", () => {
+        group.items.push({ text: "", done: false, filePath: "", assignee: null });
+        paint();
+        const inputs = wrap.querySelectorAll("input");
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      }));
+    };
+
+    paint();
+    return wrap;
+  }
+
+  buildActions() {
+    const actions = createElement("div", "ot-modal-actions");
+    const cancel = createElement("button", "", "Cancel");
+    const save = createElement("button", "mod-cta ot-save-button", "Create template");
+    cancel.type = "button";
+    save.type = "button";
+    addButtonIcon(cancel, "x");
+    addButtonIcon(save, "check");
+    cancel.addEventListener("click", () => this.requestClose());
+    save.addEventListener("click", () => this.submit(save).catch(console.error));
+    actions.append(cancel, save);
+    return actions;
+  }
+
+  /** Anything filled in is worth a question before it is dropped. */
+  isDirty() {
+    const template = this.template;
+    return !!(textLine(template.title)
+      || template.labels.length
+      || template.assignees.length
+      || String(template.details).trim()
+      || template.checklists.length
+      || template.numbering);
+  }
+
+  requestClose() {
+    if (!this.isDirty()) {
+      this.close();
+      return;
+    }
+    confirmAction(this.app, "Discard template", "Discard this template? Nothing you filled in is saved yet.", {
+      confirmText: "Discard",
+      confirmIcon: "trash-2",
+      warning: "",
+    }).then((discard) => {
+      if (discard) this.close();
+    }).catch(console.error);
+  }
+
+  showError(message) {
+    this.errorEl.textContent = message;
+    this.errorEl.hidden = false;
+    this.titleInput.setAttribute("aria-invalid", "true");
+    this.titleInput.classList.add("is-invalid");
+    this.titleInput.focus();
+  }
+
+  clearError() {
+    if (this.errorEl.hidden) return;
+    this.errorEl.hidden = true;
+    this.titleInput.removeAttribute("aria-invalid");
+    this.titleInput.classList.remove("is-invalid");
+  }
+
+  async submit(button) {
+    if (this.saving) return;
+    const title = textLine(this.template.title);
+    if (!title) {
+      this.showError("Give the template a card title.");
+      return;
+    }
+
+    this.saving = true;
+    button.disabled = true;
+    try {
+      // Empty groups and empty items are dropped on the way out, so a checklist
+      // started and abandoned does not reach every card made from this.
+      await this.plugin.saveCardTemplate(this.board, {
+        ...this.template,
+        title,
+        checklists: this.template.checklists.filter((group) => textLine(group.title) || group.items.length),
+      });
+      new Notice(`Template “${title}” created.`);
+      this.close();
+      if (this.onSaved) this.onSaved();
+    } catch (error) {
+      console.error(error);
+      new Notice("Could not create the template. The board folder may be read-only.");
+      this.saving = false;
+      button.disabled = false;
+    }
+  }
+}
+
+module.exports = { CardTemplateModal };
+
+  },
+  "src/modals/card-template-library-modal.js": function(module, exports, __require) {
+const { Modal } = require("obsidian");
+
+// The board's card templates, listed so they can be read, edited and removed.
+// Making a card from a template belongs to the board (the Add card menu, the
+// list menus); what has no home there is managing the templates themselves.
+const { addButtonIcon, createElement, formatCardCode, iconButton } = __require("src/helpers.js");
+const { CardTemplateModal } = __require("src/modals/card-template-modal.js");
+const { fillMiniCard } = __require("src/modals/modal-ui.js");
+
+const EMPTY_HINT = "No templates yet. A template holds the title, labels, description and checklists that a repeated kind of card starts from.";
+
+class CardTemplateLibraryModal extends Modal {
+  constructor(app, plugin, board) {
+    super(app);
+    this.plugin = plugin;
+    this.board = board;
+    this.templates = [];
+    this.loaded = false;
+  }
+
+  onOpen() {
+    this.modalEl.addClass("ot-template-library-shell");
+    this.contentEl.addClass("ot-template-library");
+    // The frame goes up before the folder read comes back: rendering the empty
+    // state first would claim there are no templates for as long as it takes.
+    this.render();
+    this.refresh().catch(console.error);
+  }
+
+  onClose() {
+    this.contentEl.replaceChildren();
+  }
+
+  /** Re-read the folder: the notes are the record, not anything held here. */
+  async refresh() {
+    this.templates = await this.plugin.listCardTemplates(this.board);
+    this.loaded = true;
+    if (this.contentEl.isConnected) this.render();
+  }
+
+  render() {
+    const header = createElement("div", "ot-template-library-header");
+    header.append(createElement("h2", "", "Card templates"));
+
+    const body = createElement("div", "ot-template-library-body");
+    if (this.templates.length) this.templates.forEach((template) => body.append(this.buildRow(template)));
+    else if (this.loaded) body.append(createElement("p", "ot-template-library-empty", EMPTY_HINT));
+
+    this.contentEl.replaceChildren(header, body, this.buildActions());
+  }
+
+  /**
+   * A template is a note, so editing one is opening it. Handing that off keeps
+   * the file the only place a template is written.
+   */
+  buildRow(template) {
+    const row = createElement("div", "ot-template-row");
+
+    const list = this.plugin.findList(template.listId, this.board);
+    const open = createElement("button", "");
+    open.type = "button";
+    open.title = "Open the template note";
+    // The same surface a card wears elsewhere: a template is read as the card
+    // it will become, destination list and next code included — that code is
+    // the number the next card actually gets, so it is worth seeing here.
+    const code = formatCardCode(template.numbering);
+    fillMiniCard(open, {
+      title: template.title,
+      listTitle: (list && list.title) || "",
+      listColor: (list && list.color) || "",
+    }, code ? createElement("span", "ot-card-code", code) : null);
+    open.addEventListener("click", () => {
+      this.close();
+      this.plugin.openCardTemplate(template).catch(console.error);
+    });
+
+    const remove = iconButton("trash-2", "Delete template", () => this.remove(template).catch(console.error));
+    remove.classList.add("ot-template-delete");
+
+    // The counter is the one thing about a template you change without editing
+    // it, so it gets an action of its own rather than a trip through the note.
+    if (code) {
+      const restart = iconButton("rotate-ccw", `Restart numbering — next is ${code}`, () => this.restart(template).catch(console.error));
+      row.append(open, restart, remove);
+    } else {
+      row.append(open, remove);
+    }
+    return row;
+  }
+
+  async remove(template) {
+    if (await this.plugin.deleteCardTemplate(template)) await this.refresh();
+  }
+
+  async restart(template) {
+    if (await this.plugin.resetTemplateNumbering(template)) await this.refresh();
+  }
+
+  buildActions() {
+    const actions = createElement("div", "ot-modal-actions");
+    const close = createElement("button", "", "Close");
+    const create = createElement("button", "mod-cta", "New template");
+    close.type = "button";
+    create.type = "button";
+    addButtonIcon(close, "x");
+    addButtonIcon(create, "copy-plus");
+    close.addEventListener("click", () => this.close());
+    create.addEventListener("click", () => {
+      new CardTemplateModal(this.app, this.plugin, this.board, () => this.refresh().catch(console.error)).open();
+    });
+    actions.append(close, create);
+    return actions;
+  }
+}
+
+module.exports = { CardTemplateLibraryModal };
+
+  },
   "src/modals.js": function(module, exports, __require) {
 // Barrel for the modal modules so consumers keep one import path.
 const { TextPromptModal, ConfirmModal, alertAction, confirmAction } = __require("src/modals/prompt-modals.js");
@@ -6444,6 +7308,8 @@ const { CardDatesModal } = __require("src/modals/card-dates-modal.js");
 const { AboutModal } = __require("src/modals/about-modal.js");
 const { CardModal } = __require("src/modals/card-modal.js");
 const { CardPickerModal } = __require("src/modals/card-picker-modal.js");
+const { CardTemplateModal } = __require("src/modals/card-template-modal.js");
+const { CardTemplateLibraryModal } = __require("src/modals/card-template-library-modal.js");
 const { detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch, splitDetailSegments } = __require("src/modals/details-markdown.js");
 
 module.exports = {
@@ -6456,6 +7322,8 @@ module.exports = {
   AboutModal,
   CardModal,
   CardPickerModal,
+  CardTemplateModal,
+  CardTemplateLibraryModal,
   alertAction,
   confirmAction,
   detailsMdToHtml,
@@ -6806,13 +7674,15 @@ const {
   checklistStats,
   createElement,
   dateRangeLabel,
+  firstPlaceholderIndex,
   hasDragType,
   iconButton,
   initials,
+  renderIcon,
   textButton,
   textLine,
 } = __require("src/helpers.js");
-const { CardDatesModal, CardModal, ListColorModal, confirmAction } = __require("src/modals.js");
+const { CardDatesModal, CardModal, CardTemplateLibraryModal, CardTemplateModal, ListColorModal, TextPromptModal, confirmAction } = __require("src/modals.js");
 
 const listCardMethods = {
   /**
@@ -7017,9 +7887,20 @@ const listCardMethods = {
 
   buildCardMain(card, { isRenaming, lockHolder }) {
     const main = createElement("div", "ot-card-main");
-    const title = isRenaming ? this.renderCardTitleEditor(card) : createElement("div", "ot-card-title", card.title);
+    const title = isRenaming ? this.renderCardTitleEditor(card) : this.buildCardTitle(card);
     main.append(this.buildCardCompleteButton(card, lockHolder), title, this.buildCardActions(card, lockHolder));
     return main;
+  },
+
+  /**
+   * The code reads as a chip in front of the name. It lives in the card's own
+   * frontmatter, so renaming the card does not take its identifier with it.
+   */
+  buildCardTitle(card) {
+    const title = createElement("div", "ot-card-title");
+    if (card.code) title.append(createElement("span", "ot-card-code", card.code));
+    title.append(createElement("span", "ot-card-title-text", card.title));
+    return title;
   },
 
   buildCardCompleteButton(card, lockHolder) {
@@ -7090,15 +7971,18 @@ const listCardMethods = {
   },
 
   buildLockBadge(holder) {
+    const holderName = (holder && holder.name) || "Someone";
     const badge = createElement("span", "ot-card-lock");
     badge.style.setProperty("--ot-lock-color", (holder && holder.color) || "#f59e0b");
-    badge.append(createElement("span", "", `🔒 ${(holder && holder.name) || "Someone"}`));
-    badge.title = `${(holder && holder.name) || "Someone"} is editing this card`;
+    const icon = createElement("span", "ot-card-lock-icon");
+    renderIcon(icon, "lock");
+    badge.append(icon, createElement("span", "", holderName));
+    badge.title = `${holderName} is editing this card`;
     return badge;
   },
 
   notifyCardLocked(holder) {
-    new Notice(`🔒 ${(holder && holder.name) || "Someone"} is editing this card`);
+    new Notice(`${(holder && holder.name) || "Someone"} is editing this card`);
   },
 
   /**
@@ -7217,6 +8101,12 @@ const listCardMethods = {
     });
     menu.addItem((item) => {
       item
+        .setTitle("Save as template")
+        .setIcon("copy-plus")
+        .onClick(() => this.saveCardAsTemplate(card));
+    });
+    menu.addItem((item) => {
+      item
         .setTitle("Delete card")
         .setIcon("trash")
         .onClick(async () => {
@@ -7228,8 +8118,77 @@ const listCardMethods = {
     menu.showAtMouseEvent(event);
   },
 
+  saveCardAsTemplate(card) {
+    const board = this.plugin.findBoardForCard(card);
+    new TextPromptModal(this.app, "Save as template", "Template name", card.title, async (name) => {
+      try {
+        await this.plugin.saveCardTemplate(board, this.plugin.cardAsTemplate(card, name));
+        new Notice(`Template "${name}" saved.`);
+      } catch (error) {
+        console.error(error);
+        new Notice("Could not save the template.");
+      }
+    }).open();
+  },
+
+  /**
+   * Templates are read from the board folder when asked for, so the second menu
+   * only opens once they are in hand.
+   */
+  async showTemplateMenu(anchor, list) {
+    const board = this.plugin.getBoard();
+    const templates = await this.plugin.listCardTemplates(board);
+    const menu = new Menu();
+    if (!templates.length) menu.addItem((item) => item.setTitle("No templates yet").setDisabled(true));
+    templates.forEach((template) => {
+      menu.addItem((item) => item
+        .setTitle(template.title)
+        .setIcon("file-text")
+        .onClick(() => this.createFromTemplate(template, list.id)));
+    });
+
+    // Always offered, so a board with no templates gets a way out of here
+    // rather than a line telling it what it cannot do.
+    menu.addSeparator();
+    menu.addItem((item) => item
+      .setTitle("New template")
+      .setIcon("copy-plus")
+      .onClick(() => new CardTemplateModal(this.app, this.plugin, board).open()));
+    menu.addItem((item) => item
+      .setTitle("Manage templates")
+      .setIcon("settings")
+      .onClick(() => new CardTemplateLibraryModal(this.app, this.plugin, board).open()));
+    menu.showAtPosition(anchor);
+  },
+
+  // The card opens on its description with the caret in the first blank, so a
+  // fill-in-the-gaps template can be answered without hunting for the spot.
+  // Both menus call this from an onClick that cannot await, so it swallows its
+  // own failures: an unhandled rejection here would leave the user with no card,
+  // no editor and no message.
+  async createFromTemplate(template, listId) {
+    try {
+      const cardId = await this.plugin.createCardFromTemplate(template, listId);
+      if (!cardId) return;
+      const gap = firstPlaceholderIndex(template.details);
+      new CardModal(this.app, this.plugin, cardId, gap >= 0 ? { focusDetailsAt: gap } : {}).open();
+    } catch (error) {
+      console.error(error);
+      new Notice(`Could not create a card from "${template.title}". Its note may have been moved or deleted.`);
+    }
+  },
+
   showListMenu(event, list) {
     const menu = new Menu();
+    // The template menu opens where this one did, so the second step lands in
+    // the same place however the first was reached.
+    const anchor = { x: event.clientX, y: event.clientY };
+    menu.addItem((item) => {
+      item
+        .setTitle("New card from template")
+        .setIcon("copy")
+        .onClick(() => this.showTemplateMenu(anchor, list).catch(console.error));
+    });
     menu.addItem((item) => {
       item
         .setTitle("Rename list")
@@ -7753,6 +8712,7 @@ const tableFilterMethods = {
     if (state.labelKeys.length && !(card.labels || []).some((label) => state.labelKeys.includes(labelKey(label)))) return false;
     if (!queryTerms.length) return true;
     const searchable = [
+      card.code,
       card.title,
       card.details,
       list.title,
@@ -8217,7 +9177,10 @@ const tableViewMethods = {
   buildTableNameCell(card, lockHolder) {
     const nameCell = createElement("td", "ot-td ot-td-name");
     const nameInner = createElement("div", "ot-td-name-inner");
-    nameInner.append(this.buildTableCompletionControl(card, lockHolder), createElement("span", "ot-td-title", card.title));
+    const title = createElement("span", "ot-td-title");
+    if (card.code) title.append(createElement("span", "ot-card-code", card.code));
+    title.append(createElement("span", "", card.title));
+    nameInner.append(this.buildTableCompletionControl(card, lockHolder), title);
     const hints = this.buildTableCardHints(card);
     if (hints.childElementCount) nameInner.append(hints);
     if (lockHolder) nameInner.append(this.buildLockBadge(lockHolder));
@@ -8466,6 +9429,19 @@ const tableViewMethods = {
     creator.append(form);
     return creator;
   },
+
+  /**
+   * Table mode has no per-list composer to open, so "Blank card" from the
+   * toolbar hands over to the composer this view already shows. Returns false
+   * when there is none (a board with no lists), so the caller can say so.
+   */
+  focusTableComposer() {
+    const input = this.contentEl.querySelector(".ot-table-composer-input");
+    if (!input) return false;
+    input.scrollIntoView({ block: "nearest" });
+    input.focus();
+    return true;
+  },
 };
 
 module.exports = { tableViewMethods };
@@ -8483,7 +9459,7 @@ const {
   iconButton,
   textButton,
 } = __require("src/helpers.js");
-const { AboutModal, BoardAppearanceModal } = __require("src/modals.js");
+const { AboutModal, BoardAppearanceModal, CardTemplateLibraryModal, CardTemplateModal } = __require("src/modals.js");
 const { boardAppearanceMethods } = __require("src/board/board-appearance.js");
 const { cardDragMethods } = __require("src/board/card-drag.js");
 const { listCardMethods } = __require("src/board/list-cards.js");
@@ -8538,8 +9514,6 @@ class BoardView extends ItemView {
     const board = this.plugin.getBoard();
     this.stopPresence();
     this.prepareBoardRoot();
-    const updateBanner = this.renderUpdateBanner();
-    if (updateBanner) this.contentEl.append(updateBanner);
     if (!board || this.showingBoardHome) {
       this.renderBoardHome();
       return;
@@ -8570,16 +9544,74 @@ class BoardView extends ItemView {
     this.startPresence(board);
   }
 
+  // Creating a board belongs to the boards home, where you are choosing between
+  // them; from inside one the useful actions are about its own contents.
   buildBoardToolbar(board, mode) {
     const toolbar = createElement("div", "ot-toolbar");
     toolbar.append(this.buildBoardToolbarTitle(board, mode));
     const primaryActions = createElement("div", "ot-toolbar-primary");
-    primaryActions.append(
-      textButton("plus-square", "New board", () => this.plugin.createBoardPrompt()),
-      textButton("plus", "Add list", () => this.plugin.addList())
-    );
+    if (board.lists.length) {
+      primaryActions.append(textButton("plus", "Add card", (event) => {
+        this.showAddCardMenu(event.currentTarget, board).catch(console.error);
+      }, "ot-toolbar-cta"));
+    }
+    primaryActions.append(textButton("plus-square", "Add list", () => this.plugin.addList()));
     toolbar.append(primaryActions, this.buildBoardToolbarActions(board));
     return toolbar;
+  }
+
+  /**
+   * The toolbar is shared by both view modes, but only the board mode has a
+   * per-list composer to open. In table mode the composer is already on screen,
+   * so this hands the caret to it instead of setting a flag the table ignores.
+   */
+  startBlankCard(board) {
+    if (this.getViewMode(board) !== "table") {
+      this.showCardComposer(board.lists[0].id);
+      return;
+    }
+    if (!this.focusTableComposer()) new Notice("Add a list before creating cards.");
+  }
+
+  /**
+   * Adding a card asks what kind first: an empty one, or one of the board's
+   * templates. A template goes to the list it was saved for, since the toolbar
+   * has no list of its own to mean.
+   */
+  async showAddCardMenu(button, board) {
+    const templates = await this.plugin.listCardTemplates(board);
+    const fallbackListId = board.lists[0].id;
+    const menu = new Menu();
+    menu.addItem((item) => item
+      .setTitle("Blank card")
+      .setIcon("plus")
+      .onClick(() => this.startBlankCard(board)));
+
+    if (templates.length) menu.addSeparator();
+    templates.forEach((template) => {
+      menu.addItem((item) => item
+        .setTitle(template.title)
+        .setIcon("copy")
+        .onClick(() => this.createFromTemplate(template, template.listId || fallbackListId)));
+    });
+
+    // Templates are made and managed where they are listed, the way labels are
+    // from the picker that offers them. Both stay put whether the board has
+    // templates or not: with none, this menu is the only place to make one.
+    menu.addSeparator();
+    menu.addItem((item) => item
+      .setTitle("New template")
+      .setIcon("copy-plus")
+      .onClick(() => new CardTemplateModal(this.app, this.plugin, board).open()));
+    menu.addItem((item) => item
+      .setTitle("Manage templates")
+      .setIcon("settings")
+      .onClick(() => new CardTemplateLibraryModal(this.app, this.plugin, board).open()));
+
+    // Anchored to the button: activating it from the keyboard reports no
+    // pointer coordinates and would open the menu in the viewport corner.
+    const rect = button.getBoundingClientRect();
+    menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 });
   }
 
   buildBoardToolbarTitle(board, mode) {
@@ -8588,8 +9620,11 @@ class BoardView extends ItemView {
       this.showingBoardHome = true;
       this.render();
     }));
-    title.append(createElement("h2", "", board.name));
+    // With several boards the switcher already says which one you are on, so it
+    // is the title. Printing the name twice took the width the rest of the bar
+    // needed and wrapped it onto a second line.
     if (this.plugin.data.boards.length > 1) title.append(this.renderBoardSelect(board));
+    else title.append(createElement("h2", "", board.name));
     title.append(this.renderViewSwitch(board, mode));
     return title;
   }
@@ -8604,23 +9639,6 @@ class BoardView extends ItemView {
       textButton("info", "About", () => new AboutModal(this.app, this.plugin).open())
     );
     return actions;
-  }
-
-  // "Update available" banner shown at the top when a newer GitHub release exists
-  // (Kanux is installed manually, so it gets no community-store prompt).
-  renderUpdateBanner() {
-    const info = this.plugin.updateAvailable;
-    if (!info) return null;
-    const banner = createElement("div", "ot-update-banner");
-    const label = createElement("div", "ot-update-banner-text");
-    const icon = createElement("span", "ot-update-banner-icon");
-    try { setIcon(icon, "arrow-up-circle"); } catch (error) { icon.textContent = "⭑"; }
-    label.append(icon, createElement("span", "", `Kanux ${info.version} is available.`));
-    const button = createElement("button", "mod-cta", "Update");
-    button.type = "button";
-    button.addEventListener("click", () => window.open(info.url, "_blank"));
-    banner.append(label, button);
-    return banner;
   }
 
   // Per-board, per-device view preference ("board" | "table"). Stored in data.json
@@ -10146,6 +11164,7 @@ const {
   cardFileBaseName,
   checklistsToMarkdown,
   cleanColor,
+  cleanCardCode,
   cleanDate,
   kanuxListTag,
   labelsToFrontmatter,
@@ -10238,7 +11257,9 @@ const cardFileMethods = {
     const nextPath = await this.nextCardPath(card.title, card.filePath, board);
     if (nextPath === card.filePath) return false;
 
-    await this.app.vault.rename(file, nextPath);
+    // renameFile, not vault.rename: Obsidian rewrites every wikilink that points
+    // at this note, including the Card: backlink in its own checklist notes.
+    await this.app.fileManager.renameFile(file, nextPath);
     card.filePath = nextPath;
     return true;
   },
@@ -10249,7 +11270,7 @@ const cardFileMethods = {
 
     const file = this.app.vault.getAbstractFileByPath(card.filePath);
     if (file && file.extension === "md") {
-      await this.app.vault.rename(file, nextPath);
+      await this.app.fileManager.renameFile(file, nextPath);
     }
     card.filePath = nextPath;
   },
@@ -10363,6 +11384,7 @@ const cardFileMethods = {
       `kanban-card-id: ${card.id}`,
       `kanban-board-id: ${card.boardId || ""}`,
       `kanban-list-id: ${card.listId || ""}`,
+      `kanux-card-code: ${cleanCardCode(card.code)}`,
       `position: ${position >= 0 ? position : 0}`,
       this.tagFrontmatter(tags),
       `kanux-board: ${this.frontmatterText(board && board.name)}`,
@@ -10508,6 +11530,7 @@ module.exports = { COMPLETION_SOUND_URL };
 const {
   VIEW_TYPE,
   cleanDate,
+  cleanCardCode,
   clone,
   imageRefsFromMarkdown,
   isImagePath,
@@ -10536,22 +11559,27 @@ const cardOpsMethods = {
 
   /**
    * Creates a card at the top of a list and immediately writes its note file.
+   *
+   * `seed` is the shape a card starts with — what a template hands over. Its
+   * absence leaves the plain empty card, so the composer calls this unchanged.
+   * Returns the new card's id for callers that want to open it.
    */
-  async createCard(listId, title) {
+  async createCard(listId, title, seed = {}) {
     const board = this.data.boards.find((item) => item.lists.some((list) => list.id === listId));
     const list = this.findList(listId, board);
-    if (!board || !list) return;
+    if (!board || !list) return "";
 
     const now = new Date().toISOString();
     const card = {
       id: uid("card"),
       boardId: board.id,
       title,
+      code: cleanCardCode(seed.code),
       listId,
-      labels: [],
-      assignees: [],
-      details: "",
-      checklists: normalizeChecklists(undefined, []),
+      labels: this.normalizeCardLabels(seed.labels || []),
+      assignees: this.normalizeAssignees(seed.assignees || []),
+      details: String(seed.details || ""),
+      checklists: normalizeChecklists(seed.checklists, []),
       dependencies: [],
       completed: false,
       startDate: "",
@@ -10573,17 +11601,24 @@ const cardOpsMethods = {
     await this.writeListCardFiles(list);
     await this.savePluginData();
     this.refreshViews();
+    return card.id;
   },
 
   /**
    * Applies a card patch, including linked file renames when the title changes.
    */
-  async updateCard(cardId, patch, globalLabels) {
+  /**
+   * `options.recordUndo: false` writes without pushing a snapshot. Autosave uses
+   * it for every keystroke after the first of an editing session: one entry per
+   * session is what undo means, and a snapshot per typing pause would push every
+   * real board action off the 50-deep stack.
+   */
+  async updateCard(cardId, patch, globalLabels, options = {}) {
     const card = this.data.cards[cardId];
     if (!card) return;
 
     // Snapshot the fields this patch touches so Cmd+Z can restore them.
-    if (!this.applyingUndo) {
+    if (!this.applyingUndo && options.recordUndo !== false) {
       const before = {};
       Object.keys(patch).forEach((key) => { before[key] = clone(card[key]); });
       const beforeGlobal = globalLabels ? clone(this.data.labels) : undefined;
@@ -10864,6 +11899,277 @@ const cardOpsMethods = {
 };
 
 module.exports = { cardOpsMethods };
+
+  },
+  "src/core/card-templates.js": function(module, exports, __require) {
+const { Notice } = require("obsidian");
+
+// Card templates: the saved starting point for a repeated kind of card. They
+// are card notes that never joined a board, kept in the board's templates
+// folder, so they sync, read and edit like everything else in the vault.
+const {
+  assigneesToFrontmatter,
+  blankChecklists,
+  cardCodeNumber,
+  cardFileBaseName,
+  checklistsToMarkdown,
+  clone,
+  formatCardCode,
+  labelsToFrontmatter,
+  normalizeNumbering,
+  parseCardMarkdown,
+  parseTemplateNumbering,
+  textLine,
+  withNumbering,
+} = __require("src/helpers.js");
+const { confirmAction } = __require("src/modals.js");
+
+const TEMPLATE_FLAG = /(?:^|\r?\n)[ \t]*kanux-template[ \t]*:[ \t]*true[ \t]*(?:\r?\n|$)/i;
+const UNTITLED_TEMPLATE = "Untitled template";
+
+const cardTemplateMethods = {
+  templatesFolder(board) {
+    return board && board.folderPath ? `${board.folderPath}/templates` : "";
+  },
+
+  isTemplatePath(path, board) {
+    const folder = this.templatesFolder(board);
+    return !!(folder && path && String(path).startsWith(`${folder}/`));
+  },
+
+  /** Every template a board has, in the order they read on screen. */
+  async listCardTemplates(board) {
+    const folder = this.templatesFolder(board);
+    if (!folder) return [];
+
+    const templates = [];
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (!file.path.startsWith(`${folder}/`)) continue;
+      const template = await this.readCardTemplate(file);
+      if (template) templates.push(template);
+    }
+    return templates.sort((first, second) => first.title.localeCompare(second.title));
+  },
+
+  async readCardTemplate(file) {
+    let markdown = "";
+    try {
+      markdown = await this.app.vault.read(file);
+    } catch (error) {
+      return null;
+    }
+    if (!TEMPLATE_FLAG.test(markdown)) return null;
+
+    const parsed = parseCardMarkdown(markdown);
+    return {
+      filePath: file.path,
+      title: parsed.title || file.basename || UNTITLED_TEMPLATE,
+      listId: parsed.listId,
+      labels: parsed.labels,
+      assignees: parsed.assignees || [],
+      details: parsed.details,
+      checklists: parsed.checklists,
+      numbering: parseTemplateNumbering(markdown),
+    };
+  },
+
+  /**
+   * The template a card would make: its shape, with everything that belongs to
+   * that one card in particular left behind.
+   */
+  cardAsTemplate(card, title) {
+    return {
+      title: textLine(title) || textLine(card.title) || UNTITLED_TEMPLATE,
+      listId: card.listId,
+      labels: clone(card.labels || []),
+      assignees: clone(card.assignees || []),
+      details: String(card.details || ""),
+      checklists: blankChecklists(card.checklists),
+      numbering: null,
+    };
+  },
+
+  /**
+   * Writes a template note. No `tags` and no card id: a template must not show
+   * up under the board's tag hierarchy or be mistaken for a card by the sync.
+   */
+  async saveCardTemplate(board, template) {
+    const folder = this.templatesFolder(board);
+    if (!folder) throw new Error("no board folder for the template");
+    await this.ensureBoardFolder(board);
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      await this.app.vault.createFolder(folder).catch(() => {});
+    }
+
+    const list = this.findList(template.listId, board);
+    const markdown = [
+      "---",
+      "kanux-template: true",
+      `kanban-board-id: ${board.id}`,
+      `kanban-list-id: ${template.listId || ""}`,
+      `kanux-board: ${this.frontmatterText(board.name)}`,
+      `kanux-list: ${this.frontmatterText(list && list.title)}`,
+      `labels: ${labelsToFrontmatter(template.labels)}`,
+      `assignees: ${assigneesToFrontmatter(template.assignees)}`,
+      "---",
+      "",
+      `# ${textLine(template.title)}`,
+      "",
+      "## Details",
+      template.details || "",
+      "",
+      "## Checklist",
+      checklistsToMarkdown(template.checklists),
+      "",
+    ].join("\n");
+
+    const path = await this.nextTemplatePath(folder, template.title);
+    await this.app.vault.create(path, withNumbering(markdown, template.numbering));
+    return path;
+  },
+
+  async nextTemplatePath(folder, title) {
+    const base = cardFileBaseName(title || UNTITLED_TEMPLATE);
+    let path = `${folder}/${base}.md`;
+    let index = 2;
+    while (this.app.vault.getAbstractFileByPath(path)) {
+      path = `${folder}/${base} ${index}.md`;
+      index += 1;
+    }
+    return path;
+  },
+
+  /**
+   * Creates a card from a template. `listId` wins over the template's own
+   * destination: asking for a card in a list is more specific than a default
+   * chosen when the template was saved.
+   */
+  async createCardFromTemplate(template, listId) {
+    const targetListId = listId || template.listId;
+    const board = this.data.boards.find((item) => item.lists.some((list) => list.id === targetListId));
+    if (!board) {
+      new Notice("That template's list no longer exists. Open a list menu to choose where the card goes.");
+      return "";
+    }
+
+    // The code goes in the card's own field, not its name: a rename must not
+    // cost the card its identifier.
+    const cardId = await this.createCard(targetListId, template.title || UNTITLED_TEMPLATE, {
+      code: formatCardCode(template.numbering),
+      labels: template.labels,
+      assignees: template.assignees,
+      details: template.details,
+      checklists: blankChecklists(template.checklists),
+    });
+
+    // Only once the card exists: a creation that failed must not burn a number.
+    // And a counter that cannot be written is worth saying out loud rather than
+    // throwing — the card is already on the board, so losing the caller here
+    // would cost the user their editor and tell them nothing.
+    if (cardId) {
+      try {
+        await this.bumpTemplateNumbering(template);
+      } catch (error) {
+        console.error(error);
+        new Notice(`The card was created, but "${template.title}" could not advance its counter, so the next card would repeat ${formatCardCode(template.numbering)}.`);
+      }
+    }
+    return cardId;
+  },
+
+  /** Hands the next code out and advances the counter by one. */
+  async bumpTemplateNumbering(template) {
+    const numbering = normalizeNumbering(template.numbering);
+    if (!numbering) return;
+
+    const next = { ...numbering, next: numbering.next + 1 };
+    if (await this.writeTemplateNumbering(template, next)) template.numbering = next;
+  },
+
+  /**
+   * Writes the counter back to the template note. `process` rather than the
+   * `modify` used elsewhere: it reads and writes under one lock, so two cards
+   * created back to back cannot both take the same number.
+   */
+  async writeTemplateNumbering(template, numbering) {
+    const file = this.app.vault.getAbstractFileByPath(template.filePath);
+    if (!file) return false;
+
+    let written = false;
+    await this.app.vault.process(file, (markdown) => {
+      const updated = withNumbering(markdown, numbering);
+      written = updated !== markdown;
+      return updated;
+    });
+    return written;
+  },
+
+  /**
+   * Restarts the counter. Numbers already handed out are in card titles, not
+   * here, so the confirmation says how many are about to be issued twice —
+   * a restart is what breaks the uniqueness, and the choice belongs to you.
+   */
+  async resetTemplateNumbering(template, start = 1) {
+    const numbering = normalizeNumbering(template.numbering);
+    if (!numbering) return false;
+
+    const next = { ...numbering, next: Math.max(0, Math.floor(start)) };
+    const reused = this.cardsCarryingCode(template).filter((card) => cardCodeNumber(card.code, next) >= next.next);
+    const message = reused.length
+      ? `Restart numbering at ${formatCardCode(next)}? ${reused.length} ${reused.length === 1 ? "card already carries a code" : "cards already carry codes"} from here on, so those numbers would be issued twice.`
+      : `Restart numbering at ${formatCardCode(next)}?`;
+
+    const confirmed = await confirmAction(this.app, "Restart numbering", message, {
+      confirmText: "Restart",
+      confirmIcon: "rotate-ccw",
+      danger: reused.length > 0,
+      warning: "",
+    });
+    if (!confirmed) return false;
+
+    if (!await this.writeTemplateNumbering(template, next)) return false;
+    template.numbering = next;
+    new Notice(`Next card from "${template.title}" will be ${formatCardCode(next)}.`);
+    return true;
+  },
+
+  cardsCarryingCode(template) {
+    const numbering = normalizeNumbering(template.numbering);
+    if (!numbering) return [];
+    return Object.values(this.data.cards).filter((card) => cardCodeNumber(card.code, numbering) >= 0);
+  },
+
+
+  /**
+   * Editing a template is opening its note: the file is the template, so a
+   * second editor here could only disagree with it.
+   */
+  async openCardTemplate(template) {
+    const file = this.app.vault.getAbstractFileByPath(template.filePath);
+    if (!file) {
+      new Notice("That template note is no longer in the vault.");
+      return;
+    }
+    await this.app.workspace.getLeaf(false).openFile(file);
+  },
+
+  /**
+   * Deleting a template touches nothing but its own note: a card made from one
+   * keeps no link back, so nothing has to be unpicked first.
+   */
+  async deleteCardTemplate(template) {
+    const title = template.title || UNTITLED_TEMPLATE;
+    const message = `Delete the template "${title}"? Cards already made from it are not affected.`;
+    if (!await confirmAction(this.app, "Delete template", message)) return false;
+
+    const file = this.app.vault.getAbstractFileByPath(template.filePath);
+    if (file) await this.app.vault.trash(file, true);
+    new Notice(`Template "${title}" deleted.`);
+    return true;
+  },
+};
+
+module.exports = { cardTemplateMethods };
 
   },
   "src/core/plugin-data.js": function(module, exports, __require) {
@@ -11381,6 +12687,7 @@ module.exports = { vaultDecorationMethods };
 const {
   cleanColor,
   cleanDate,
+  cleanCardCode,
   decodeListMeta,
   normalizeChecklists,
   normalizeDependencies,
@@ -11461,6 +12768,7 @@ const vaultSyncMethods = {
       return board.folderPath
         && file.path.startsWith(`${board.folderPath}/`)
         && !this.isChecklistItemPath(file.path, board)
+        && !this.isTemplatePath(file.path, board)
         && file.path !== this.boardIndexPath(board)
         && file.path !== this.legacyBoardIndexPath(board);
     }) || null;
@@ -11745,6 +13053,9 @@ const vaultSyncMethods = {
     for (const file of this.app.vault.getMarkdownFiles()) {
       if (!file.path.startsWith(`${board.folderPath}/`)) continue;
       if (this.isChecklistItemPath(file.path, board)) continue;
+      // A template is a card that never joined the board; importing it would
+      // put a copy of every template on the board on the next sync.
+      if (this.isTemplatePath(file.path, board)) continue;
       if (file.path === this.boardIndexPath(board) || file.path === this.legacyBoardIndexPath(board)) continue;
       if (await this.isGeneratedBoardIndexFile(file)) continue;
       files.push(file);
@@ -11773,13 +13084,21 @@ const vaultSyncMethods = {
         id: card.id || cardId,
         boardId: board.id,
         title: parsed.title || file.basename,
+        // Present-but-empty counts as no news, exactly the way labels are read
+        // two lines down. A peer on a version that predates this key writes it
+        // blank, and a blank must never erase a code that lives only in the
+        // note: the cost is that clearing one does not propagate, which is the
+        // trade this file already made for labels.
+        code: parsed.code ? parsed.code : cleanCardCode(card.code),
         listId: targetList.id,
         position: parsed.position !== null ? parsed.position : (card.position != null ? card.position : 0),
         labels: parsed.labels.length ? this.normalizeCardLabels(parsed.labels) : this.normalizeCardLabels(card.labels || []),
         assignees: this.normalizeAssignees(parsed.assignees !== null ? parsed.assignees : card.assignees || []),
         details: parsed.details,
         checklists: normalizeChecklists(parsed.checklists, []),
-        dependencies: normalizeDependencies(parsed.dependencies !== null ? parsed.dependencies : card.dependencies),
+        // Same rule as `code` above: an empty list is what an older peer writes
+        // for a key it does not model, so it cannot be allowed to win.
+        dependencies: normalizeDependencies(parsed.dependencies && parsed.dependencies.length ? parsed.dependencies : card.dependencies),
         completed: parsed.completed !== null ? parsed.completed : !!card.completed,
         startDate: parsed.startDate !== null ? parsed.startDate : cleanDate(card.startDate),
         dueDate: parsed.dueDate !== null ? parsed.dueDate : cleanDate(card.dueDate),
@@ -11999,6 +13318,7 @@ const { boardOpsMethods } = __require("src/core/board-ops.js");
 const { cardDependencyMethods } = __require("src/core/card-dependencies.js");
 const { cardFileMethods } = __require("src/core/card-files.js");
 const { cardOpsMethods } = __require("src/core/card-ops.js");
+const { cardTemplateMethods } = __require("src/core/card-templates.js");
 const { pluginDataMethods } = __require("src/core/plugin-data.js");
 const { syncDeckMethods } = __require("src/core/sync-deck.js");
 const { vaultDecorationMethods } = __require("src/core/vault-decorations.js");
@@ -12111,7 +13431,6 @@ class KanuxPlugin extends Plugin {
 
   async onunload() {
     if (this.explorerColorStyleEl) this.explorerColorStyleEl.remove();
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
 
   recordUndo(inverse) {
@@ -12175,6 +13494,7 @@ Object.assign(
   cardDependencyMethods,
   cardFileMethods,
   cardOpsMethods,
+  cardTemplateMethods,
   pluginDataMethods,
   syncDeckMethods,
   vaultDecorationMethods,
