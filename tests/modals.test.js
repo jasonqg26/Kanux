@@ -25,8 +25,45 @@ Module._load = function load(request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain);
 };
 
-const { CardModal, detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch, splitDetailSegments } = require("../src/modals");
+const { BoardAppearanceModal, CardModal, detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch, splitDetailSegments } = require("../src/modals");
 const { createEmbeddedMarkdownEditor } = require("../src/editor/embedded-editor");
+
+/**
+ * The Customize preview strip is painted by the board view's own painters. An
+ * image background routes through a second helper on that mixin, so the strip
+ * has to be painted with the whole mixin in hand, not a bare object that only
+ * holds the plugin.
+ */
+function testAppearancePreviewPaintsImageBackground() {
+  const properties = {};
+  const root = {
+    style: {
+      setProperty(name, value) { properties[name] = value; },
+      removeProperty(name) { delete properties[name]; },
+    },
+    classList: { toggle() {} },
+    querySelectorAll() { return []; },
+  };
+  const modal = Object.create(BoardAppearanceModal.prototype);
+  modal.codeStyleGroup = null;
+  modal.plugin = { getAppearanceBackgroundResource: (background) => `app://vault/${background.imagePath}` };
+  const appearance = {
+    density: "normal",
+    fontScale: 1,
+    colorScheme: "theme",
+    surfaceScheme: "theme",
+    motion: { enabled: true },
+    cards: { useTheme: true, background: "#25262a", hoverBackground: "#30343b", verticalGap: 8, borderRadius: 8, titleSize: 14, shadow: "medium" },
+    lists: { useTheme: true, background: "#161719", columnGap: 12, topBorderWidth: 3, borderRadius: 8, showColorDot: true },
+    codes: { style: "outline", color: "", placement: "inline" },
+    background: { type: "image", imagePath: "bg.png", imageSource: "vault", imageFit: "cover", overlayOpacity: 0.2 },
+  };
+
+  assert.doesNotThrow(() => modal.paintPreview(appearance, root));
+  assert.ok(properties["background-image"].includes("url(\"app://vault/bg.png\")"));
+  // A theme-coloured card hovers in a theme colour, never in the stored hex.
+  assert.ok(properties["--ot-card-hover-background"].startsWith("color-mix("));
+}
 
 function testEmptyDescriptionCanStayClosed() {
   const modal = Object.create(CardModal.prototype);
@@ -259,6 +296,7 @@ async function run() {
   testInlineAutoformatMatching();
   testEmbeddedEditorFallsBackWithoutInternalApi();
   testDescriptionImageSegmentation();
+  testAppearancePreviewPaintsImageBackground();
   await testExplicitSaveReportsFailureWithoutPoisoningQueue();
   await testDescriptionSaveRollsBackAfterFailure();
   await testAutoSaveKeepsTheEditingSessionOpen();

@@ -6,6 +6,7 @@ const { Menu, setIcon } = require("obsidian");
 const {
   DEPENDENCY_BLOCK_NONE,
   addButtonIcon,
+  cardCodeChip,
   checklistItems,
   checklistStats,
   createElement,
@@ -313,7 +314,7 @@ const tableViewMethods = {
     const nameCell = createElement("td", "ot-td ot-td-name");
     const nameInner = createElement("div", "ot-td-name-inner");
     const title = createElement("span", "ot-td-title");
-    if (card.code) title.append(createElement("span", "ot-card-code", card.code));
+    if (card.code) title.append(cardCodeChip(card.code, this.codeLook));
     title.append(createElement("span", "", card.title));
     nameInner.append(this.buildTableCompletionControl(card, lockHolder), title);
     const hints = this.buildTableCardHints(card);

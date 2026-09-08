@@ -5,8 +5,11 @@ const { Menu, Modal, Notice } = require("obsidian");
 // sidebar, sticky actions — because what you are filling in *is* a card, and
 // two layouts for the same content would only make you learn it twice.
 const {
+  CODE_SEPARATORS,
   LIST_COLORS,
+  MAX_NUMBER_PAD,
   addButtonIcon,
+  cardCodeChip,
   cleanColor,
   clone,
   createElement,
@@ -16,12 +19,13 @@ const {
   textButton,
   textLine,
 } = require("../helpers");
+const { BoardAppearanceModal } = require("./board-appearance-modal");
 const { LabelPickerModal } = require("./label-picker-modal");
 const { ListColorModal } = require("./list-color-modal");
 const { confirmAction } = require("./prompt-modals");
 
 const BLANK_HINT = "Write [ ] wherever the card should be filled in — “As a [ ] I want [ ] so that [ ]”. The editor opens on the first one.";
-const NUMBER_HINT = "Every card made from this template takes the next code and the counter moves on. The code is stored on the card, so renaming it keeps the code. Restart the counter any time from Manage templates.";
+const NUMBER_HINT = "Each card takes the next code as it is made and keeps it through renames. The counter lives in this template; restart it any time from Manage templates. How the chip looks is set for the whole board in Customize.";
 const DEFAULT_PAD = 3;
 
 class CardTemplateModal extends Modal {
@@ -42,7 +46,7 @@ class CardTemplateModal extends Modal {
     };
     // Kept aside from the template so switching numbering off and back on does
     // not throw away the prefix that was already typed.
-    this.numberingDraft = { prefix: "", next: 1, pad: DEFAULT_PAD };
+    this.numberingDraft = { prefix: "", separator: "dash", next: 1, pad: DEFAULT_PAD };
     this.globalLabels = clone(plugin.data.labels || []);
   }
 
@@ -207,48 +211,80 @@ class CardTemplateModal extends Modal {
 
   /**
    * A running code — BUG-014 — stamped on the front of every card this template
-   * makes, so a card can be named out loud.
+   * makes, so a card can be named out loud. The switch reveals the code's parts
+   * and the card it goes on next, drawn the way this board draws every chip:
+   * the look is the board's choice, made in Customize, not the template's.
    */
   buildNumberingField() {
     const field = createElement("div", "ot-field ot-template-numbering");
-    field.append(createElement("span", "", "Numbering"));
 
-    const toggleRow = createElement("label", "ot-template-toggle");
     const toggle = createElement("input", "");
     toggle.type = "checkbox";
+    toggle.name = "numbering";
     toggle.checked = !!this.template.numbering;
-    toggleRow.append(toggle, createElement("span", "", "Number each card"));
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-label", "Number each card");
+    const switchEl = createElement("span", "ot-switch");
+    switchEl.append(toggle, createElement("span", "ot-switch-track"));
 
-    const boxes = createElement("div", "ot-template-number-boxes");
-    boxes.append(
-      this.buildNumberBox("Prefix", "prefix"),
-      this.buildNumberBox("Next", "next"),
-      this.buildNumberBox("Digits", "pad"),
-    );
+    // The heading is the switch's label, so the whole row toggles.
+    const head = createElement("label", "ot-field-row ot-template-numbering-head");
+    head.append(createElement("span", "", "Numbering"), switchEl);
 
-    this.previewEl = createElement("p", "ot-template-number-preview");
-    this.previewEl.setAttribute("aria-live", "polite");
-    const hint = createElement("span", "ot-template-hint", NUMBER_HINT);
+    // Built once: the caption row carries the way to Customize, and a repaint
+    // must neither destroy that button nor re-announce it. Only the name line
+    // is live, and it reads as one phrase.
+    const caption = createElement("div", "ot-template-number-caption-row");
+    const customize = iconButton("palette", "Change the chip look in Customize", () => this.openCustomize());
+    customize.classList.add("ot-template-customize");
+    caption.append(createElement("span", "ot-template-number-caption", "Next card"), customize);
+    this.numberNameEl = createElement("div", "ot-template-number-name");
+    this.numberNameEl.setAttribute("aria-live", "polite");
+    this.numberNameEl.setAttribute("aria-atomic", "true");
+    this.previewEl = createElement("div", "ot-template-number-preview");
+    this.previewEl.append(caption, this.numberNameEl);
+
+    const body = createElement("div", "ot-template-numbering-body");
+    body.append(this.previewEl, this.buildCodeParts(), createElement("span", "ot-template-hint", NUMBER_HINT));
 
     const paint = () => {
       const on = toggle.checked;
       this.template.numbering = on ? { ...this.numberingDraft } : null;
-      boxes.hidden = !on;
-      this.previewEl.hidden = !on;
-      hint.hidden = !on;
+      body.hidden = !on;
       this.paintNumberPreview();
     };
 
     toggle.addEventListener("change", paint);
     paint();
 
-    field.append(toggleRow, boxes, this.previewEl, hint);
+    field.append(head, body);
     return field;
+  }
+
+  /** Prefix beside its separator, then the next number beside its digits: the code, in parts. */
+  buildCodeParts() {
+    const boxes = createElement("div", "ot-template-number-boxes");
+    boxes.append(
+      this.buildNumberBox("Prefix", "prefix"),
+      this.buildChoiceBox("Separator", "separator", CODE_SEPARATORS.map((separator) => ({
+        value: separator.id,
+        text: separator.char || "None",
+        label: separator.label,
+      }))),
+      this.buildNumberBox("Next number", "next"),
+      this.buildChoiceBox("Digits", "pad", Array.from({ length: MAX_NUMBER_PAD }, (_, index) => ({
+        value: String(index + 1),
+        text: String(index + 1),
+      }))),
+    );
+    return boxes;
   }
 
   buildNumberBox(label, key) {
     const wrap = createElement("label", "ot-template-number-box");
-    const input = createElement("input", "ot-input");
+    const input = createElement("input", "");
+    input.name = key;
+    input.autocomplete = "off";
     if (key === "prefix") {
       input.type = "text";
       input.placeholder = "BUG";
@@ -257,35 +293,61 @@ class CardTemplateModal extends Modal {
     } else {
       input.type = "number";
       input.inputMode = "numeric";
-      input.min = key === "pad" ? "1" : "0";
-      if (key === "pad") input.max = "8";
+      input.min = "0";
     }
     input.value = String(this.numberingDraft[key]);
     input.addEventListener("input", () => {
-      this.numberingDraft[key] = key === "prefix" ? input.value : Number(input.value);
-      if (this.template.numbering) this.template.numbering = { ...this.numberingDraft };
-      this.paintNumberPreview();
+      this.updateNumbering({ [key]: key === "prefix" ? input.value : Number(input.value) });
     });
 
     wrap.append(createElement("span", "", label), input);
     return wrap;
   }
 
+  /** A closed list of values — separators, digit counts — as a native select. */
+  buildChoiceBox(label, key, choices) {
+    const wrap = createElement("label", "ot-template-number-box");
+    const select = createElement("select", "dropdown");
+    select.name = key;
+    choices.forEach((choice) => {
+      const option = createElement("option", "", choice.text);
+      option.value = choice.value;
+      if (choice.label) option.setAttribute("aria-label", choice.label);
+      select.append(option);
+    });
+    select.value = String(this.numberingDraft[key]);
+    select.addEventListener("change", () => {
+      this.updateNumbering({ [key]: key === "pad" ? Number(select.value) : select.value });
+    });
+
+    wrap.append(createElement("span", "", label), select);
+    return wrap;
+  }
+
+  updateNumbering(patch) {
+    Object.assign(this.numberingDraft, patch);
+    if (this.template.numbering) this.template.numbering = { ...this.numberingDraft };
+    this.paintNumberPreview();
+  }
+
   paintNumberPreview() {
-    if (!this.previewEl) return;
+    if (!this.numberNameEl) return;
     const code = formatCardCode(this.template.numbering);
     if (!code) {
-      this.previewEl.replaceChildren();
+      this.numberNameEl.replaceChildren();
       return;
     }
     // Shown the way the card will wear it: the code beside the name, in the same
     // chip the board uses — never inside the title, which a rename would take.
-    const name = createElement("span", "ot-template-number-name");
-    name.append(
-      createElement("span", "ot-card-code", code),
+    this.numberNameEl.replaceChildren(
+      cardCodeChip(code, this.plugin.getBoardAppearance(this.board.id).codes),
       createElement("span", "", this.template.title || "Untitled card"),
     );
-    this.previewEl.replaceChildren(createElement("span", "ot-template-number-caption", "Next card"), name);
+  }
+
+  /** The board's appearance, opened on top; the preview follows whatever was chosen there. */
+  openCustomize() {
+    new BoardAppearanceModal(this.app, this.plugin, this.board.id, () => this.paintNumberPreview()).open();
   }
 
   memberAvatar(member) {

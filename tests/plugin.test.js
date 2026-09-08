@@ -259,6 +259,22 @@ async function testTemplateNumberingStampsTheCardAndAdvances() {
   assert.strictEqual(created[1].title, "Bug report");
 }
 
+/**
+ * The chip's look is the board's, not the template's or the card's: one choice
+ * in Customize dresses every code on the board the same way.
+ */
+function testAppearanceHoldsOneCodeLookPerBoard() {
+  const plugin = createPlugin({ boards: [], cards: {} });
+  const fallback = { style: "outline", color: "", placement: "inline" };
+  assert.deepStrictEqual(plugin.normalizeAppearance({}).codes, fallback);
+  assert.deepStrictEqual(
+    plugin.normalizeAppearance({ codes: { style: "soft", color: "#3B82F6", placement: "above" } }).codes,
+    { style: "soft", color: "#3b82f6", placement: "above" },
+  );
+  // Values the board cannot draw fall back rather than breaking the chip.
+  assert.deepStrictEqual(plugin.normalizeAppearance({ codes: { style: "neon", color: "blue", placement: "left" } }).codes, fallback);
+}
+
 async function testAFailedCardDoesNotBurnANumber() {
   const { plugin, list, template } = createTemplateBoard();
   // createCard returns "" when the list is gone; nothing was named, so the
@@ -374,6 +390,7 @@ async function run() {
   await testAFailedCardDoesNotBurnANumber();
   await testAnUnnumberedTemplateHandsOutNoCode();
   await testRestartingNumberingRewindsTheCounter();
+  testAppearanceHoldsOneCodeLookPerBoard();
   await testAnEmptyKeyCannotEraseACodeOrADependency();
   await testARealValueInTheNoteStillWins();
   testRefreshViewsHonorsTemporaryViewGuard();

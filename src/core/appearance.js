@@ -5,6 +5,7 @@ const {
   cleanColor,
   clone,
   isImagePath,
+  normalizeCodeLook,
   textLine,
   uid,
 } = require("../helpers");
@@ -126,6 +127,9 @@ const appearanceMethods = {
       motion: {
         enabled: motion.enabled !== false,
       },
+      // One look for every code chip on the board, so BUG-014 and FEAT-002
+      // read as the same kind of thing wherever they appear.
+      codes: normalizeCodeLook(source.codes),
     };
   },
 

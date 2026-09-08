@@ -28,6 +28,8 @@ const boardAppearanceMethods = {
     this.applyAppearanceVariables(root, appearance);
     this.applyAppearanceClasses(root, appearance);
     this.applyBoardBackground(root, appearance.background);
+    // Read once per render for the chip on every card, rather than once per card.
+    this.codeLook = appearance.codes;
   },
 
   applyAppearanceVariables(root, appearance) {
@@ -38,7 +40,6 @@ const boardAppearanceMethods = {
     root.style.setProperty("--ot-card-padding", density.cardPadding);
     root.style.setProperty("--ot-card-gap", `${appearance.cards.verticalGap}px`);
     root.style.setProperty("--ot-card-radius", `${appearance.cards.borderRadius}px`);
-    root.style.setProperty("--ot-card-hover-background", appearance.cards.hoverBackground);
     root.style.setProperty("--ot-card-title-size", `${appearance.cards.titleSize}px`);
     root.style.setProperty("--ot-column-gap", `${appearance.lists.columnGap}px`);
     root.style.setProperty("--ot-list-top-border-width", `${appearance.lists.topBorderWidth}px`);
@@ -47,6 +48,11 @@ const boardAppearanceMethods = {
     root.style.setProperty("--ot-card-background", appearance.cards.useTheme
       ? "color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 88%, var(--background-modifier-hover) 12%)"
       : appearance.cards.background);
+    // A theme-coloured card hovers in a theme colour too: the stored hover hex
+    // belongs to the custom card colour, and on a light theme it is a dark slab.
+    root.style.setProperty("--ot-card-hover-background", appearance.cards.useTheme
+      ? "color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 60%, var(--background-modifier-hover) 40%)"
+      : appearance.cards.hoverBackground);
     root.style.setProperty("--ot-list-background", appearance.lists.useTheme
       ? "color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%)"
       : appearance.lists.background);

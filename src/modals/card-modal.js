@@ -27,7 +27,7 @@ const { buildChecklistsField } = require("./card-checklist-field");
 
 // Controls that only reveal content, so a read-only viewer keeps them: they
 // expand a panel or open a preview without ever writing to the card.
-const VIEW_ONLY_CONTROL_CLASSES = ["ot-image-tile", "ot-checklist-deps-button", "ot-checklist-note-action"];
+const VIEW_ONLY_CONTROL_CLASSES = ["ot-image-tile", "ot-checklist-deps-button", "ot-checklist-note-action", "ot-checklist-completed-toggle", "ot-checklist-collapse"];
 
 // The card editor modal: state, locking, saving, and field wiring.
 class CardModal extends Modal {
@@ -112,6 +112,9 @@ class CardModal extends Modal {
     // Group ids whose dependency panel is open. Built fresh on every load, which
     // is what makes collapsed the state a card is always reopened in.
     this.openChecklistDependencies = new Set();
+    // Group ids whose completed sub-list is expanded. Also rebuilt on load, so
+    // completed items start tucked away every time a card is opened.
+    this.openChecklistCompleted = new Set();
     this.localAssignees = clone(card.assignees || []);
     await this.setupCardLock();
     this.render();
@@ -304,6 +307,19 @@ class CardModal extends Modal {
     menu.showAtMouseEvent(event);
   }
 
+  /**
+   * The code as a document number above the title: no chip here, because in
+   * the card's own editor it is the heading's eyebrow rather than a tag in a
+   * list. Only the colour of the board's look carries over.
+   */
+  buildCodeEyebrow(card, board) {
+    const eyebrow = createElement("div", "ot-card-modal-code", card.code);
+    eyebrow.setAttribute("translate", "no");
+    const look = board ? this.plugin.getBoardAppearance(board.id).codes : null;
+    if (look && look.color) eyebrow.style.setProperty("--ot-code-color", look.color);
+    return eyebrow;
+  }
+
   render() {
     const card = this.card;
     const previousBody = this.contentEl.querySelector(".ot-card-modal-body");
@@ -337,7 +353,7 @@ class CardModal extends Modal {
     if (list && board) location.append(createElement("span", "ot-card-modal-location-sep", "·"));
     if (board) location.append(createElement("span", "", board.name));
     if (!list && !board) location.append(createElement("span", "", "Kanux card"));
-    if (card.code) header.append(createElement("div", "ot-card-modal-code", card.code));
+    if (card.code) header.append(this.buildCodeEyebrow(card, board));
     header.append(title, location);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
@@ -720,6 +736,7 @@ class CardModal extends Modal {
         id: group.id || uid("checklist"),
         title: textLine(group.title) || `Checklist ${index + 1}`,
         color: cleanColor(group.color) || LIST_COLORS[1],
+        collapsed: !!group.collapsed,
         description: String(group.description || ""),
         dependencies: normalizeDependencies(group.dependencies),
         items: (group.items || [])

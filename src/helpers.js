@@ -30,6 +30,12 @@ const LABEL_COLORS = [
 // Default list-color sequence. Grey → blue → green first so a fresh board's
 // To do / Doing / Done reads the way most people expect.
 const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#ec4899"];
+
+// How a board draws the code chip on its cards. One look for the whole board,
+// chosen in Customize, so every card's identifier reads the same way.
+const CODE_STYLES = ["outline", "filled", "soft", "plain"];
+const CODE_PLACEMENTS = ["inline", "above"];
+const DEFAULT_CODE_LOOK = { style: "outline", color: "", placement: "inline" };
 const DEFAULT_CHECKLIST_TITLE = "Checklist";
 const DEFAULT_CHECKLIST_COLOR = LIST_COLORS[1];
 const DEFAULT_APPEARANCE = {
@@ -72,6 +78,7 @@ const DEFAULT_APPEARANCE = {
   motion: {
     enabled: true,
   },
+  codes: { ...DEFAULT_CODE_LOOK },
 };
 
 /**
@@ -295,11 +302,41 @@ function imageMarkupWithSize(markup, width) {
   return text;
 }
 
+// Moves an entry that lives in `source` so it lands at `insertionIndex` of
+// `target` (which may be the same array). The index is measured before the
+// entry is removed, so drag & drop callers can point at the slot they see.
+function moveArrayEntry(source, target, entry, insertionIndex) {
+  const sourceIndex = source.indexOf(entry);
+  if (sourceIndex < 0) return false;
+  let nextIndex = insertionIndex;
+  source.splice(sourceIndex, 1);
+  if (source === target && sourceIndex < nextIndex) nextIndex -= 1;
+  nextIndex = Math.max(0, Math.min(nextIndex, target.length));
+  target.splice(nextIndex, 0, entry);
+  return true;
+}
+
 function createElement(tag, className, text) {
   const element = document.createElement(tag);
   if (className) element.className = className;
   if (text !== undefined) element.textContent = text;
   return element;
+}
+
+/**
+ * The chip a card's code is drawn in. `look` is the board's `appearance.codes`;
+ * it rides on the element — a class per style and placement, the colour as a
+ * variable — so the board, the table, the library and the template editor's
+ * preview all draw a code the same way.
+ */
+function cardCodeChip(code, look) {
+  const chip = createElement("span", "ot-card-code", code);
+  const clean = normalizeCodeLook(look);
+  chip.classList.add(`is-${clean.style}`, `is-${clean.placement}`);
+  if (clean.color) chip.style.setProperty("--ot-code-color", clean.color);
+  // An identifier, not prose: keep machine translation off it.
+  chip.setAttribute("translate", "no");
+  return chip;
 }
 
 function hasDragType(event, type) {
@@ -553,6 +590,7 @@ function normalizeChecklistGroup(group, index, seenIds) {
     id: uniqueChecklistId(group.id, "checklist", seenIds),
     title: textLine(group.title) || `${DEFAULT_CHECKLIST_TITLE} ${index + 1}`,
     color: cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR,
+    collapsed: !!group.collapsed,
     description: cleanChecklistDescription(group.description),
     dependencies: normalizeDependencies(group.dependencies),
     items: (Array.isArray(group.items) ? group.items : [])
@@ -633,16 +671,17 @@ function parseChecklistHeading(line) {
 }
 
 /**
- * Strips the trailing metadata comments (color, id) that round-trip group
- * data the visible heading text cannot carry. They may appear in any order;
- * values are validated downstream by cleanColor/cleanKanuxId.
+ * Strips the trailing metadata comments (color, id, depends, collapsed) that
+ * round-trip group data the visible heading text cannot carry. They may appear
+ * in any order; values are validated downstream by cleanColor/cleanKanuxId.
  */
 function extractChecklistHeadingMetadata(heading) {
-  const result = { title: heading, color: "", id: "", dependencies: "" };
-  const metadata = /\s*<!--kanux-checklist-(color|id|depends):([^>\s]+)-->\s*$/;
+  const result = { title: heading, color: "", id: "", dependencies: "", collapsed: false };
+  const metadata = /\s*<!--kanux-checklist-(color|id|depends|collapsed):([^>\s]+)-->\s*$/;
   for (let match = result.title.match(metadata); match; match = result.title.match(metadata)) {
     if (match[1] === "color") result.color = match[2];
     else if (match[1] === "id") result.id = match[2];
+    else if (match[1] === "collapsed") result.collapsed = parseBoolean(match[2]);
     else result.dependencies = match[2];
     result.title = result.title.slice(0, match.index).trim();
   }
@@ -656,6 +695,7 @@ function appendParsedChecklist(groups, group) {
     id: cleanKanuxId(group.id) || uid("checklist"),
     title: textLine(group.title) || `${DEFAULT_CHECKLIST_TITLE} ${groups.length + 1}`,
     color: cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR,
+    collapsed: !!group.collapsed,
     description,
     dependencies: parseDependencies(group.dependencies),
     items: parseChecklist(itemLines.join("\n")),
@@ -737,7 +777,9 @@ function checklistsToMarkdown(checklists) {
       const heading = `### ${textLine(group.title) || DEFAULT_CHECKLIST_TITLE}`
         + ` <!--kanux-checklist-color:${cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR}-->`
         + ` <!--kanux-checklist-id:${group.id}-->`
-        + (dependencies ? ` <!--kanux-checklist-depends:${dependencies}-->` : "");
+        + (dependencies ? ` <!--kanux-checklist-depends:${dependencies}-->` : "")
+        // Written only when folded, so notes that never fold never change.
+        + (group.collapsed ? " <!--kanux-checklist-collapsed:true-->" : "");
       const description = group.description.split("\n").map(escapeChecklistDescriptionLine).join("\n");
       const items = checklistToMarkdown(group.items);
       return [heading, description, items].filter(Boolean).join("\n");
@@ -786,8 +828,48 @@ function firstPlaceholderIndex(markdown) {
 // A template can stamp every card it makes with a running code — BUG-014 — so
 // a card can be named out loud. The counter lives in the template note, so it
 // survives a reload and syncs with the vault like everything else.
-const NUMBERING_KEYS = { prefix: "kanux-id-prefix", next: "kanux-id-next", pad: "kanux-id-pad" };
+const NUMBERING_KEYS = {
+  prefix: "kanux-id-prefix",
+  separator: "kanux-id-separator",
+  next: "kanux-id-next",
+  pad: "kanux-id-pad",
+};
 const MAX_NUMBER_PAD = 8;
+
+// What sits between the prefix and the number, stored by name rather than as
+// the character itself: a bare "-" is a YAML list marker and a bare "#" opens
+// a comment, so neither can be written into a note's frontmatter as it is.
+const CODE_SEPARATORS = [
+  { id: "dash", char: "-", label: "Dash" },
+  { id: "dot", char: ".", label: "Dot" },
+  { id: "slash", char: "/", label: "Slash" },
+  { id: "hash", char: "#", label: "Hash" },
+  { id: "underscore", char: "_", label: "Underscore" },
+  { id: "none", char: "", label: "None" },
+];
+const DEFAULT_SEPARATOR = "dash";
+
+/** A separator's id from its name or its literal character; the dash when it is neither. */
+function cleanSeparator(value) {
+  const text = textLine(value);
+  const match = CODE_SEPARATORS.find((separator) => separator.id === text.toLowerCase() || (separator.char && separator.char === text));
+  return match ? match.id : DEFAULT_SEPARATOR;
+}
+
+function separatorChar(id) {
+  const match = CODE_SEPARATORS.find((separator) => separator.id === id);
+  return match ? match.char : "-";
+}
+
+/** The look with every field filled in; anything unknown falls back to the default. */
+function normalizeCodeLook(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    style: CODE_STYLES.includes(source.style) ? source.style : DEFAULT_CODE_LOOK.style,
+    color: cleanColor(source.color).toLowerCase(),
+    placement: CODE_PLACEMENTS.includes(source.placement) ? source.placement : DEFAULT_CODE_LOOK.placement,
+  };
+}
 
 /** Numbering is on when the note carries a next number; nothing else is required. */
 function parseTemplateNumbering(markdown) {
@@ -799,6 +881,7 @@ function parseTemplateNumbering(markdown) {
   if (next === null) return null;
   return normalizeNumbering({
     prefix: read(NUMBERING_KEYS.prefix),
+    separator: read(NUMBERING_KEYS.separator),
     next,
     pad: numberOrNull(read(NUMBERING_KEYS.pad)),
   });
@@ -808,7 +891,14 @@ function normalizeNumbering(numbering) {
   if (!numbering) return null;
   const next = Math.max(0, Math.floor(numberOrNull(numbering.next) || 0));
   const pad = Math.min(MAX_NUMBER_PAD, Math.max(1, Math.floor(numberOrNull(numbering.pad) || 1)));
-  return { prefix: textLine(numbering.prefix), next, pad };
+  // No spaces in a prefix: the code is stored as one token, so a space typed
+  // here would make the preview and the stored code disagree.
+  return {
+    prefix: textLine(numbering.prefix).replace(/\s+/g, ""),
+    separator: cleanSeparator(numbering.separator),
+    next,
+    pad,
+  };
 }
 
 /** The code a card would carry: "BUG-014", or "014" when there is no prefix. */
@@ -818,7 +908,7 @@ function formatCardCode(numbering, value) {
   const number = numberOrNull(value);
   const counter = number === null ? clean.next : Math.max(0, Math.floor(number));
   const digits = String(counter).padStart(clean.pad, "0");
-  return clean.prefix ? `${clean.prefix}-${digits}` : digits;
+  return clean.prefix ? `${clean.prefix}${separatorChar(clean.separator)}${digits}` : digits;
 }
 
 
@@ -844,6 +934,7 @@ function withNumbering(markdown, numbering) {
   const clean = normalizeNumbering(numbering);
   if (clean) {
     kept.push(`${NUMBERING_KEYS.prefix}: ${clean.prefix}`);
+    kept.push(`${NUMBERING_KEYS.separator}: ${clean.separator}`);
     kept.push(`${NUMBERING_KEYS.next}: ${clean.next}`);
     kept.push(`${NUMBERING_KEYS.pad}: ${clean.pad}`);
   }
@@ -867,7 +958,7 @@ function cleanCardCode(value) {
 function cardCodeNumber(code, numbering) {
   const clean = normalizeNumbering(numbering);
   if (clean === null) return -1;
-  const head = clean.prefix ? `${clean.prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-` : "";
+  const head = clean.prefix ? `${clean.prefix}${separatorChar(clean.separator)}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
   const match = cleanCardCode(code).match(new RegExp(`^${head}(\\d+)$`));
   return match ? Number(match[1]) : -1;
 }
@@ -1202,7 +1293,9 @@ module.exports = {
   stripImageEmbeds,
   imageSizeFromMarkup,
   imageMarkupWithSize,
+  moveArrayEntry,
   createElement,
+  cardCodeChip,
   hasDragType,
   renderIcon,
   iconButton,
@@ -1229,7 +1322,15 @@ module.exports = {
   cardCodeNumber,
   cleanCardCode,
   withNumbering,
+  cleanSeparator,
+  separatorChar,
+  normalizeCodeLook,
   NUMBERING_KEYS,
+  MAX_NUMBER_PAD,
+  CODE_SEPARATORS,
+  CODE_STYLES,
+  CODE_PLACEMENTS,
+  DEFAULT_CODE_LOOK,
   dependencyGate,
   normalizeDependencies,
   parseDependencies,

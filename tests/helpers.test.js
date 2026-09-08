@@ -14,6 +14,7 @@ Module._load = function load(request, parent, isMain) {
 };
 
 const {
+  DEFAULT_APPEARANCE,
   blankChecklists,
   checklistItems,
   checklistItemNoteBody,
@@ -28,7 +29,11 @@ const {
   withNumbering,
   cardCodeNumber,
   cleanCardCode,
+  cardCodeChip,
+  cleanSeparator,
+  normalizeCodeLook,
   iconButton,
+  moveArrayEntry,
   normalizeChecklists,
   normalizeDependencies,
   parseCardMarkdown,
@@ -38,15 +43,17 @@ const {
 } = require("../src/helpers");
 
 function createFakeElement(tagName) {
-  return {
+  const element = {
     tagName,
     attributes: {},
     children: [],
-    classList: { add() {} },
+    style: { properties: {}, setProperty(name, value) { this.properties[name] = value; } },
     addEventListener() {},
     setAttribute(name, value) { this.attributes[name] = value; },
     replaceChildren(...children) { this.children = children; },
   };
+  element.classList = { names: [], add: (...names) => element.classList.names.push(...names) };
+  return element;
 }
 
 function testRegisteredIconAndGenericFallback() {
@@ -419,11 +426,11 @@ function testNumberingSurvivesTheNoteRoundTrip() {
   assert.strictEqual(parseTemplateNumbering(note), null);
 
   const on = withNumbering(note, { prefix: "BUG", next: 1, pad: 3 });
-  assert.deepStrictEqual(parseTemplateNumbering(on), { prefix: "BUG", next: 1, pad: 3 });
+  assert.deepStrictEqual(parseTemplateNumbering(on), { prefix: "BUG", separator: "dash", next: 1, pad: 3 });
 
   // Advancing rewrites the key instead of adding a second one.
   const bumped = withNumbering(on, { prefix: "BUG", next: 2, pad: 3 });
-  assert.deepStrictEqual(parseTemplateNumbering(bumped), { prefix: "BUG", next: 2, pad: 3 });
+  assert.deepStrictEqual(parseTemplateNumbering(bumped), { prefix: "BUG", separator: "dash", next: 2, pad: 3 });
   assert.strictEqual((bumped.match(/kanux-id-next/g) || []).length, 1);
 
   // Everything the parser does not model has to come back untouched: a template
@@ -438,11 +445,74 @@ function testNumberingSurvivesTheNoteRoundTrip() {
 }
 
 function testNumberingClampsWhatTheEditorCanType() {
-  assert.deepStrictEqual(normalizeNumbering({ prefix: " BUG ", next: "9", pad: "2" }), { prefix: "BUG", next: 9, pad: 2 });
+  assert.deepStrictEqual(normalizeNumbering({ prefix: " BUG ", next: "9", pad: "2" }), { prefix: "BUG", separator: "dash", next: 9, pad: 2 });
   // Digits below one or past the cap, and a negative counter, cannot be stored.
-  assert.deepStrictEqual(normalizeNumbering({ prefix: "", next: -5, pad: 0 }), { prefix: "", next: 0, pad: 1 });
-  assert.deepStrictEqual(normalizeNumbering({ prefix: "", next: 1, pad: 99 }), { prefix: "", next: 1, pad: 8 });
+  assert.deepStrictEqual(normalizeNumbering({ prefix: "", next: -5, pad: 0 }), { prefix: "", separator: "dash", next: 0, pad: 1 });
+  assert.deepStrictEqual(normalizeNumbering({ prefix: "", next: 1, pad: 99 }), { prefix: "", separator: "dash", next: 1, pad: 8 });
   assert.strictEqual(normalizeNumbering(null), null);
+  // A prefix is one token: a space typed into it would split the stored code.
+  assert.strictEqual(normalizeNumbering({ prefix: "BUG REPORT", next: 1, pad: 1 }).prefix, "BUGREPORT");
+}
+
+function testCodeSeparatorsShapeTheCode() {
+  assert.strictEqual(formatCardCode({ prefix: "BUG", separator: "none", next: 14, pad: 3 }), "BUG014");
+  assert.strictEqual(formatCardCode({ prefix: "BUG", separator: "slash", next: 14, pad: 3 }), "BUG/014");
+  assert.strictEqual(formatCardCode({ prefix: "BUG", separator: "hash", next: 14, pad: 3 }), "BUG#014");
+  // No prefix, no separator: the number stands alone whatever was chosen.
+  assert.strictEqual(formatCardCode({ prefix: "", separator: "hash", next: 14, pad: 3 }), "014");
+  // Read by name or by the character itself; anything else falls back to the dash.
+  assert.strictEqual(cleanSeparator("HASH"), "hash");
+  assert.strictEqual(cleanSeparator("_"), "underscore");
+  assert.strictEqual(cleanSeparator("weird"), "dash");
+  assert.strictEqual(cleanSeparator(""), "dash");
+  // Detection follows the separator, and the dot is literal, not any character.
+  const dotted = { prefix: "BUG", separator: "dot", next: 1, pad: 1 };
+  assert.strictEqual(cardCodeNumber("BUG.014", dotted), 14);
+  assert.strictEqual(cardCodeNumber("BUGX014", dotted), -1);
+  assert.strictEqual(cardCodeNumber("BUG-014", dotted), -1);
+  assert.strictEqual(cardCodeNumber("BUG014", { prefix: "BUG", separator: "none", next: 1, pad: 1 }), 14);
+}
+
+function testCodeLookIsOneChoicePerBoard() {
+  const fallback = { style: "outline", color: "", placement: "inline" };
+  assert.deepStrictEqual(normalizeCodeLook(null), fallback);
+  assert.deepStrictEqual(normalizeCodeLook("filled"), fallback);
+  // Known values are kept, a colour is canonical lowercase, anything else falls back.
+  assert.deepStrictEqual(normalizeCodeLook({ style: "filled", color: "#EF4444", placement: "above" }), { style: "filled", color: "#ef4444", placement: "above" });
+  assert.deepStrictEqual(normalizeCodeLook({ style: "shiny", color: "red", placement: "sideways" }), fallback);
+  // Every board starts on the plain outlined chip.
+  assert.deepStrictEqual(DEFAULT_APPEARANCE.codes, fallback);
+}
+
+function testCardCodeChipWearsTheBoardLook() {
+  global.document = { createElement: createFakeElement };
+  const chip = cardCodeChip("BUG-014", { style: "filled", color: "#EF4444", placement: "above" });
+  // Customize swaps chips by this class and rebuilds them from their text.
+  assert.strictEqual(chip.className, "ot-card-code");
+  assert.strictEqual(chip.textContent, "BUG-014");
+  assert.deepStrictEqual(chip.classList.names, ["is-filled", "is-above"]);
+  assert.strictEqual(chip.style.properties["--ot-code-color"], "#ef4444");
+  // An identifier, not prose: machine translation keeps off it.
+  assert.strictEqual(chip.attributes.translate, "no");
+  // No look at all is the outlined inline chip in the accent, so no colour is set.
+  const plain = cardCodeChip("BUG-014", null);
+  assert.deepStrictEqual(plain.classList.names, ["is-outline", "is-inline"]);
+  assert.strictEqual(plain.style.properties["--ot-code-color"], undefined);
+}
+
+function testSeparatorTravelsWithTheTemplate() {
+  const note = "---\nkanux-template: true\n---\n\n# Bug report\n";
+  const numbering = { prefix: "BUG", separator: "hash", next: 4, pad: 2 };
+  const on = withNumbering(note, numbering);
+  // Stored by name: a bare \"#\" opens a YAML comment and a bare \"-\" a list.
+  assert.match(on, /kanux-id-separator: hash\n/);
+  assert.deepStrictEqual(parseTemplateNumbering(on), numbering);
+  assert.strictEqual(formatCardCode(parseTemplateNumbering(on)), "BUG#04");
+
+  // A character typed by hand still reads, and switching numbering off leaves the note as it was.
+  const plain = withNumbering(note, { prefix: "BUG", next: 1, pad: 3 });
+  assert.strictEqual(parseTemplateNumbering(plain.replace("kanux-id-separator: dash", "kanux-id-separator: .")).separator, "dot");
+  assert.strictEqual(withNumbering(on, null), note);
 }
 
 function testCodeDetectionIsPrefixExact() {
@@ -456,6 +526,45 @@ function testCodeDetectionIsPrefixExact() {
   // A prefix is matched literally, not as a pattern.
   assert.strictEqual(cardCodeNumber("A.B-7", { prefix: "A.B", next: 1, pad: 1 }), 7);
   assert.strictEqual(cardCodeNumber("AXB-7", { prefix: "A.B", next: 1, pad: 1 }), -1);
+}
+
+function testChecklistCollapseSurvivesTheMarkdownRoundTrip() {
+  const markdown = checklistsToMarkdown([
+    { title: "Folded", color: "#22c55e", collapsed: true, items: [{ text: "One", done: false }] },
+    { title: "Open", color: "#3b82f6", items: [{ text: "Two", done: true }] },
+  ]);
+  // Written only when folded, so notes that never fold never gain the marker.
+  assert.strictEqual((markdown.match(/kanux-checklist-collapsed/g) || []).length, 1);
+  assert.ok(markdown.includes("<!--kanux-checklist-collapsed:true-->"));
+
+  const parsed = normalizeChecklists(parseChecklists(markdown), []);
+  assert.strictEqual(parsed[0].collapsed, true);
+  assert.strictEqual(parsed[0].title, "Folded");
+  assert.strictEqual(parsed[1].collapsed, false);
+
+  // Reusing groups as a template starts every copy unfolded.
+  assert.strictEqual(!!blankChecklists(parsed)[0].collapsed, false);
+}
+
+function testMoveArrayEntryPointsAtTheSlotTheDragSaw() {
+  const items = ["a", "b", "c", "d"];
+  // Moving down: the index was measured with the entry still in place.
+  assert.strictEqual(moveArrayEntry(items, items, "a", 3), true);
+  assert.deepStrictEqual(items, ["b", "c", "a", "d"]);
+  // Moving up needs no adjustment.
+  assert.strictEqual(moveArrayEntry(items, items, "d", 0), true);
+  assert.deepStrictEqual(items, ["d", "b", "c", "a"]);
+
+  // Across arrays the index is clamped to what the target can hold.
+  const target = ["x"];
+  assert.strictEqual(moveArrayEntry(items, target, "b", 99), true);
+  assert.deepStrictEqual(items, ["d", "c", "a"]);
+  assert.deepStrictEqual(target, ["x", "b"]);
+
+  // An entry the source does not hold moves nothing.
+  assert.strictEqual(moveArrayEntry(items, target, "missing", 0), false);
+  assert.deepStrictEqual(items, ["d", "c", "a"]);
+  assert.deepStrictEqual(target, ["x", "b"]);
 }
 
 function testCardCodeSurvivesTheFrontmatterRoundTrip() {
@@ -493,5 +602,11 @@ testCardCodesPadAndCarryTheirPrefix();
 testNumberingSurvivesTheNoteRoundTrip();
 testNumberingClampsWhatTheEditorCanType();
 testCodeDetectionIsPrefixExact();
+testCodeSeparatorsShapeTheCode();
+testCodeLookIsOneChoicePerBoard();
+testCardCodeChipWearsTheBoardLook();
+testSeparatorTravelsWithTheTemplate();
+testChecklistCollapseSurvivesTheMarkdownRoundTrip();
+testMoveArrayEntryPointsAtTheSlotTheDragSaw();
 testCardCodeSurvivesTheFrontmatterRoundTrip();
 console.log("helpers tests passed");
