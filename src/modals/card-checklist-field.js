@@ -9,6 +9,8 @@ const {
   cleanColor,
   createElement,
   iconButton,
+  moveArrayEntry,
+  renderIcon,
   textButton,
   textLine,
   uid,
@@ -19,14 +21,18 @@ const { ListColorModal } = require("./list-color-modal");
 const { buildDependenciesField } = require("./card-dependencies-field");
 
 // Builds the card checklists field: groups with description, collapsed
-// dependencies, drag & drop, per-item notes and member assignment.
+// dependencies, drag & drop of items and whole checklists, per-item notes
+// and member assignment.
 /**
  * Renders every named checklist as an independent progress bar.
  */
 function buildChecklistsField(modal) {
   const field = createElement("div", "ot-checklists-field");
+  const groupsArea = createElement("div", "ot-checklist-groups");
   const checklistRenderers = new Map();
+  const groupSections = new Map();
   let draggedChecklistItem = null;
+  let draggedChecklistGroup = null;
 
   const clearChecklistDropState = () => {
     field.querySelectorAll(".is-checklist-drop-before, .is-checklist-drop-after, .is-checklist-drop-end, .is-checklist-dragging")
@@ -42,14 +48,7 @@ function buildChecklistsField(modal) {
     if (!draggedChecklistItem || !targetGroup) return;
     const sourceGroup = modal.localChecklists.find((candidate) => candidate.id === draggedChecklistItem.groupId);
     if (!sourceGroup) return;
-    const sourceIndex = sourceGroup.items.indexOf(draggedChecklistItem.item);
-    if (sourceIndex < 0) return;
-
-    let nextIndex = insertionIndex;
-    sourceGroup.items.splice(sourceIndex, 1);
-    if (sourceGroup === targetGroup && sourceIndex < nextIndex) nextIndex -= 1;
-    nextIndex = Math.max(0, Math.min(nextIndex, targetGroup.items.length));
-    targetGroup.items.splice(nextIndex, 0, draggedChecklistItem.item);
+    if (!moveArrayEntry(sourceGroup.items, targetGroup.items, draggedChecklistItem.item, insertionIndex)) return;
 
     const sourceRenderer = checklistRenderers.get(sourceGroup.id);
     const targetRenderer = checklistRenderers.get(targetGroup.id);
@@ -58,13 +57,181 @@ function buildChecklistsField(modal) {
     await modal.saveNow();
   };
 
+  // "End of the list" is the end of the dragged item's own partition: pending
+  // rows render before the completed section, so a pending item dropped on the
+  // list background must not land between completed entries in the array.
+  const endInsertionIndex = (targetGroup, draggedItem) => {
+    if (draggedItem.done) return targetGroup.items.length;
+    let insertionIndex = 0;
+    targetGroup.items.forEach((entry, position) => {
+      if (!entry.done) insertionIndex = position + 1;
+    });
+    return insertionIndex;
+  };
+
+  const clearGroupDropState = () => {
+    groupsArea.classList.remove("is-checklist-drag-compact");
+    groupsArea.querySelectorAll(".is-checklist-group-drop-before, .is-checklist-group-drop-after, .is-checklist-group-dragging")
+      .forEach((element) => element.classList.remove(
+        "is-checklist-group-drop-before",
+        "is-checklist-group-drop-after",
+        "is-checklist-group-dragging",
+      ));
+  };
+
+  // Which checklist the pointer would drop the dragged one next to: the first
+  // group whose upper half the pointer is above, otherwise after the last one.
+  const groupDropTarget = (clientY) => {
+    const candidates = modal.localChecklists
+      .filter((group) => group !== draggedChecklistGroup)
+      .map((group) => ({ group, section: groupSections.get(group.id) }))
+      .filter((candidate) => candidate.section && candidate.section.isConnected);
+    const hit = candidates.find(({ section }) => {
+      const rect = section.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    if (hit) return { ...hit, after: false };
+    const last = candidates[candidates.length - 1];
+    return last ? { ...last, after: true } : null;
+  };
+
+  const paintGroupDropTarget = (target) => {
+    groupsArea.querySelectorAll(".is-checklist-group-drop-before, .is-checklist-group-drop-after").forEach((element) => {
+      if (!target || element !== target.section) {
+        element.classList.remove("is-checklist-group-drop-before", "is-checklist-group-drop-after");
+      }
+    });
+    if (!target) return;
+    target.section.classList.toggle("is-checklist-group-drop-before", !target.after);
+    target.section.classList.toggle("is-checklist-group-drop-after", target.after);
+  };
+
+  // Reorders the checklists and moves the already-rendered sections in place,
+  // so open notes, editors and focus survive the drop without a re-render.
+  const moveChecklistGroup = async (target) => {
+    if (!draggedChecklistGroup || !target || target.group === draggedChecklistGroup) return;
+    const insertionIndex = modal.localChecklists.indexOf(target.group) + (target.after ? 1 : 0);
+    if (!moveArrayEntry(modal.localChecklists, modal.localChecklists, draggedChecklistGroup, insertionIndex)) return;
+    modal.localChecklists.forEach((group) => {
+      const section = groupSections.get(group.id);
+      if (section) groupsArea.append(section);
+    });
+    await modal.saveNow();
+  };
+
+  groupsArea.addEventListener("dragover", (event) => {
+    if (!draggedChecklistGroup || modal.readOnly) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    paintGroupDropTarget(groupDropTarget(event.clientY));
+  });
+  groupsArea.addEventListener("dragleave", (event) => {
+    if (!draggedChecklistGroup) return;
+    if (!groupsArea.contains(event.relatedTarget)) paintGroupDropTarget(null);
+  });
+  groupsArea.addEventListener("drop", (event) => {
+    if (!draggedChecklistGroup || modal.readOnly) return;
+    event.preventDefault();
+    // The reorder itself is synchronous; only the save inside is awaited.
+    // Cleaning up before that await resolves keeps this handler's tail from
+    // clobbering a new drag the user starts while the drop is still saving.
+    const commit = moveChecklistGroup(groupDropTarget(event.clientY));
+    draggedChecklistGroup = null;
+    clearGroupDropState();
+    commit.catch(console.error);
+  });
+
+  // A drag ghost the size of the collapsed header: dragging a checklist with
+  // dozens of items must not tow a screenful of rows under the pointer.
+  const appendGroupDragPreview = (group) => {
+    if (!document.body) return null;
+    const preview = createElement("div", "ot-checklist-drag-preview");
+    preview.style.setProperty("--ot-checklist-color", cleanColor(group.color) || LIST_COLORS[1]);
+    const icon = createElement("span", "ot-checklist-heading-icon");
+    setIconSafe(icon, "check-square", "");
+    const stats = checklistStats(group.items);
+    preview.append(
+      icon,
+      createElement("span", "ot-checklist-drag-preview-title", group.title || "Checklist"),
+      createElement("span", "ot-checklist-drag-preview-count", `${stats.done}/${stats.total}`),
+    );
+    preview.setAttribute("aria-hidden", "true");
+    document.body.append(preview);
+    return preview;
+  };
+
+  const groupDragHandle = (group, section) => {
+    const handle = createElement("span", "ot-checklist-drag-handle ot-checklist-group-handle");
+    handle.draggable = !modal.readOnly;
+    handle.title = "Drag to reorder checklist";
+    handle.setAttribute("aria-label", "Drag to reorder checklist");
+    setIconSafe(handle, "grip-vertical", "⋮⋮");
+    let dragPreview = null;
+    handle.addEventListener("dragstart", (event) => {
+      if (modal.readOnly) {
+        event.preventDefault();
+        return;
+      }
+      draggedChecklistGroup = group;
+      dragPreview = appendGroupDragPreview(group);
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", group.title || "Checklist");
+        if (event.dataTransfer.setDragImage && dragPreview) event.dataTransfer.setDragImage(dragPreview, 18, 18);
+      }
+      // Collapse and dim only after the browser has begun the drag, so the
+      // source keeps its geometry while the drag image is taken.
+      requestAnimationFrame(() => {
+        if (draggedChecklistGroup !== group) return;
+        section.classList.add("is-checklist-group-dragging");
+        groupsArea.classList.add("is-checklist-drag-compact");
+      });
+    });
+    handle.addEventListener("dragend", () => {
+      draggedChecklistGroup = null;
+      if (dragPreview) {
+        dragPreview.remove();
+        dragPreview = null;
+      }
+      clearGroupDropState();
+    });
+    return handle;
+  };
+
   const renderGroup = (group) => {
     if (!Array.isArray(group.dependencies)) group.dependencies = [];
     const section = createElement("div", "ot-field ot-checklist-group");
+    groupSections.set(group.id, section);
     const groupColor = cleanColor(group.color) || LIST_COLORS[1];
     section.style.setProperty("--ot-checklist-color", groupColor);
     section.style.setProperty("border", `1px solid ${groupColor}`, "important");
     const header = createElement("div", "ot-checklist-header");
+
+    // Folded is card data (it round-trips through the note's heading comment),
+    // so a checklist stays folded across reopens and syncs, not just renders.
+    const collapseToggle = createElement("button", "ot-icon-button ot-checklist-collapse");
+    collapseToggle.type = "button";
+    const paintCollapseToggle = () => {
+      const collapsed = !!group.collapsed;
+      section.classList.toggle("is-checklist-collapsed", collapsed);
+      renderIcon(collapseToggle, collapsed ? "chevron-right" : "chevron-down");
+      collapseToggle.title = collapsed ? "Expand checklist" : "Collapse checklist";
+      collapseToggle.setAttribute("aria-label", collapseToggle.title);
+      collapseToggle.setAttribute("aria-expanded", String(!collapsed));
+    };
+    paintCollapseToggle();
+    collapseToggle.addEventListener("click", () => {
+      group.collapsed = !group.collapsed;
+      paintCollapseToggle();
+      modal.saveNow().catch(console.error);
+    });
+    const expandCollapsedGroup = () => {
+      if (!group.collapsed) return;
+      group.collapsed = false;
+      paintCollapseToggle();
+      modal.saveNow().catch(console.error);
+    };
+
     const heading = createElement("div", "ot-checklist-heading");
     const headingIcon = createElement("span", "ot-checklist-heading-icon");
     headingIcon.style.setProperty("color", groupColor, "important");
@@ -84,7 +251,8 @@ function buildChecklistsField(modal) {
       modal.saveNow().catch(console.error);
     });
     heading.append(headingIcon, name);
-    header.append(heading);
+    if (modal.localChecklists.length > 1) header.append(groupDragHandle(group, section));
+    header.append(collapseToggle, heading);
 
     const hasDescription = !!textLine(group.description || "");
     const descriptionOpen = () => hasDescription || modal.openChecklistDescriptions.has(group.id);
@@ -106,7 +274,11 @@ function buildChecklistsField(modal) {
     // gate that warns or blocks colours the count to say so from the header.
     const dependenciesOpen = () => modal.openChecklistDependencies.has(group.id);
     const dependenciesToggle = iconButton("link", "Show dependencies", () => {
-      if (dependenciesOpen()) modal.openChecklistDependencies.delete(group.id);
+      // On a folded checklist the panel has nowhere to show: unfold first and
+      // make sure the click opens the panel instead of toggling it shut.
+      const wasCollapsed = !!group.collapsed;
+      expandCollapsedGroup();
+      if (!wasCollapsed && dependenciesOpen()) modal.openChecklistDependencies.delete(group.id);
       else modal.openChecklistDependencies.add(group.id);
       paintDependenciesToggle();
     });
@@ -235,13 +407,14 @@ function buildChecklistsField(modal) {
     list.addEventListener("dragleave", (event) => {
       if (!list.contains(event.relatedTarget)) list.classList.remove("is-checklist-drop-end");
     });
-    list.addEventListener("drop", async (event) => {
+    list.addEventListener("drop", (event) => {
       if (!draggedChecklistItem || modal.readOnly) return;
       event.preventDefault();
       list.classList.remove("is-checklist-drop-end");
-      await moveChecklistItem(group, group.items.length);
+      const commit = moveChecklistItem(group, endInsertionIndex(group, draggedChecklistItem.item));
       draggedChecklistItem = null;
       clearChecklistDropState();
+      commit.catch(console.error);
     });
     const updateProgress = () => {
       const stats = checklistStats(group.items);
@@ -249,12 +422,49 @@ function buildChecklistsField(modal) {
       progressFill.style.width = `${stats.percent}%`;
     };
 
+    const completedOpen = () => modal.openChecklistCompleted.has(group.id);
+
+    // Completed rows sit behind their own toggle so a long checklist reads as
+    // what is still pending; the count keeps the hidden rows accounted for.
+    const buildCompletedSection = (doneCount, completedItemsArea) => {
+      const wrap = createElement("div", "ot-checklist-completed");
+      const open = completedOpen();
+      const toggle = textButton(open ? "chevron-down" : "chevron-right", `Completed (${doneCount})`, () => {
+        if (completedOpen()) modal.openChecklistCompleted.delete(group.id);
+        else modal.openChecklistCompleted.add(group.id);
+        renderItems();
+        // The rebuild replaced the button under the keyboard user's focus.
+        const nextToggle = list.querySelector(".ot-checklist-completed-toggle");
+        if (nextToggle) nextToggle.focus();
+      }, "ot-checklist-completed-toggle");
+      toggle.title = open ? "Hide completed items" : "Show completed items";
+      toggle.setAttribute("aria-expanded", String(open));
+      wrap.append(toggle);
+      if (completedItemsArea) wrap.append(completedItemsArea);
+      return wrap;
+    };
+
+    // Re-rendering replaces the node that held keyboard focus; put it back on
+    // the same item's checkbox, or on the Completed toggle it moved behind.
+    const restoreItemFocus = (item) => {
+      const checkbox = item.id ? list.querySelector(`[data-item-id="${item.id}"] input[type="checkbox"]`) : null;
+      const target = checkbox || list.querySelector(".ot-checklist-completed-toggle");
+      if (target && !target.disabled) target.focus();
+    };
+
     const renderItems = () => {
       list.replaceChildren();
       if (!group.items.length) list.append(createElement("span", "ot-empty-text", "No checklist items"));
 
-      group.items.forEach((item, index) => {
+      // Collapsed completed rows are not even built: a checklist with dozens
+      // of ticked items should not pay their Markdown wiring to stay hidden.
+      const doneCount = group.items.filter((item) => item.done).length;
+      const completedItemsArea = completedOpen() ? createElement("div", "ot-checklist-completed-items") : null;
+
+      group.items.forEach((item) => {
+        if (item.done && !completedItemsArea) return;
         const itemWrap = createElement("div", "ot-checklist-item");
+        itemWrap.dataset.itemId = item.id || "";
         const row = createElement("div", "ot-checklist-row");
         const dragHandle = createElement("span", "ot-checklist-drag-handle");
         dragHandle.draggable = !modal.readOnly;
@@ -279,6 +489,13 @@ function buildChecklistsField(modal) {
         });
         itemWrap.addEventListener("dragover", (event) => {
           if (!draggedChecklistItem || modal.readOnly) return;
+          // Rows only host neighbours from their own partition: a pending item
+          // can never visually sit between completed rows, so accepting the
+          // drop would paint a seam the re-render then contradicts.
+          if (!!draggedChecklistItem.item.done !== !!item.done) {
+            event.stopPropagation();
+            return;
+          }
           event.preventDefault();
           event.stopPropagation();
           if (draggedChecklistItem.item === item) return;
@@ -290,20 +507,21 @@ function buildChecklistsField(modal) {
         itemWrap.addEventListener("dragleave", () => {
           itemWrap.classList.remove("is-checklist-drop-before", "is-checklist-drop-after");
         });
-        itemWrap.addEventListener("drop", async (event) => {
+        itemWrap.addEventListener("drop", (event) => {
           if (!draggedChecklistItem || modal.readOnly) return;
           event.preventDefault();
           event.stopPropagation();
-          if (draggedChecklistItem.item === item) {
+          if (draggedChecklistItem.item === item || !!draggedChecklistItem.item.done !== !!item.done) {
             clearChecklistDropState();
             return;
           }
           const targetIndex = group.items.indexOf(item);
           const after = itemWrap.classList.contains("is-checklist-drop-after");
           itemWrap.classList.remove("is-checklist-drop-before", "is-checklist-drop-after");
-          await moveChecklistItem(group, targetIndex + (after ? 1 : 0));
+          const commit = moveChecklistItem(group, targetIndex + (after ? 1 : 0));
           draggedChecklistItem = null;
           clearChecklistDropState();
+          commit.catch(console.error);
         });
         const checkbox = createElement("input");
         checkbox.type = "checkbox";
@@ -464,7 +682,8 @@ function buildChecklistsField(modal) {
               modal.finishChecklistNoteEdit(item.filePath);
               modal.expandedChecklistNotes.delete(item.filePath);
             }
-            group.items.splice(index, 1);
+            const itemIndex = group.items.indexOf(item);
+            if (itemIndex >= 0) group.items.splice(itemIndex, 1);
             renderItems();
             await modal.saveNow();
           } catch (error) {
@@ -484,7 +703,17 @@ function buildChecklistsField(modal) {
             }
           }
           item.done = checkbox.checked;
-          updateProgress();
+          // A ticked item whose note is open on screen would otherwise vanish
+          // into the collapsed completed section mid-edit; reveal the section
+          // so the row (and the editor it hosts) stays visible.
+          if (item.done && item.filePath && !completedOpen()
+            && (modal.expandedChecklistNotes.has(item.filePath) || modal.editingChecklistNotes.has(item.filePath))) {
+            modal.openChecklistCompleted.add(group.id);
+          }
+          // Re-render so the row crosses between the pending list and the
+          // completed section instead of only repainting the progress bar.
+          renderItems();
+          restoreItemFocus(item);
           modal.saveNow().catch(console.error);
         });
         input.addEventListener("input", () => {
@@ -547,8 +776,14 @@ function buildChecklistsField(modal) {
             showNoteBody();
           }
         }
-        list.append(itemWrap);
+        (item.done ? completedItemsArea : list).append(itemWrap);
       });
+
+      if (doneCount) list.append(buildCompletedSection(doneCount, completedItemsArea));
+      // A re-render rebuilds rows after the modal's one-time read-only sweep,
+      // so the fresh controls must be frozen again (the Completed toggle stays
+      // usable: it only reveals content).
+      if (modal.readOnly) modal.disableEditing([list]);
       updateProgress();
     };
     checklistRenderers.set(group.id, renderItems);
@@ -605,7 +840,8 @@ function buildChecklistsField(modal) {
     return section;
   };
 
-  modal.localChecklists.forEach((group) => field.append(renderGroup(group)));
+  modal.localChecklists.forEach((group) => groupsArea.append(renderGroup(group)));
+  field.append(groupsArea);
   const addChecklist = textButton("plus", "Add checklist", () => {
     new TextPromptModal(modal.app, "Add checklist", "Checklist name", "", (title) => {
       const color = LIST_COLORS[modal.localChecklists.length % LIST_COLORS.length] || LIST_COLORS[1];

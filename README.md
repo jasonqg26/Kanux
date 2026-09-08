@@ -103,10 +103,10 @@ Sync Deck adds shared vaults, member assignment, card locks, and live presence w
 - **Labels and dates:** Use reusable colored labels, flexible display modes, start dates, due dates, ranges, and overdue indicators.
 - **Rich Markdown descriptions:** Write and render formatted descriptions with links, lists, quotes, code, Obsidian note references, and collapsible long content. Typing is saved as you go, so a closed modal never costs you a paragraph.
 - **Images and attachments:** Add, paste, resize, arrange, reorder, copy, and manage images while keeping attachments organized inside the vault.
-- **Checklists and tasks:** Build multiple colored checklists, reorder tasks, track independent progress, assign members, and associate individual tasks with their own Markdown notes.
+- **Checklists and tasks:** Build multiple colored checklists, reorder tasks or whole checklists with drag and drop — every checklist collapses to its header while one is on the move — track independent progress, assign members, and associate individual tasks with their own Markdown notes. Completed tasks fold into a per-checklist **Completed** section you can show or hide, and a whole checklist can be folded down to its header and progress bar; the fold travels with the note, so it stays folded the next time the card opens.
 - **Card templates:** Save any card as a template — title, labels, members, description and colored checklists — and start new cards from it in one click, with the caret waiting in the first blank. Give a template a running code (BUG-014) and every card it makes carries its own identifier, kept through renames and searchable. Review, edit and delete them from one place.
 - **Dependencies and blocking:** Make a card — or a single checklist — depend on other cards, and pick per dependency whether an unfinished one blocks nothing, asks for confirmation, or blocks the action completely.
-- **Per-board appearance:** Customize backgrounds, colors, spacing, typography, density, borders, shadows, animations, labels, and image fitting; save presets or copy an appearance from another board.
+- **Per-board appearance:** Customize backgrounds, colors, spacing, typography, density, borders, shadows, animations, labels, image fitting and the look of card codes, with a live preview strip that shows the result as you change it; save presets or copy an appearance from another board.
 - **Native Obsidian storage:** Keep cards as normal Markdown notes with frontmatter, graph connections, automatic file discovery, external-change synchronization, and migration support.
 - **Productivity and accessibility:** Use commands, undo supported changes, keyboard navigation, responsive layouts, visible focus states, and reduced-motion support.
 - **Offline-first operation:** Use local boards without an account, permanent connection, or dependency on Sync Deck.
@@ -146,7 +146,7 @@ The board index keeps list order and graph links connected. Card metadata lives 
 | Key | Holds |
 | --- | --- |
 | `kanban-card-id`, `kanban-board-id`, `kanban-list-id` | Identity and placement, so a card survives a rename or a move on another device |
-| `kanux-card-code` | The running code a template gave it (`BUG-014`), shown as a chip in front of the name |
+| `kanux-card-code` | The running code a template gave it (`BUG-014`), shown as a chip beside the name |
 | `position` | Order inside its list — the only place card order is persisted to a synced file |
 | `tags` | The `kanux/board/list` hierarchy, for Obsidian search and the graph |
 | `kanux-board`, `kanux-list`, `kanux-list-color` | Readable names and the list color, so the note makes sense on its own |
@@ -154,13 +154,13 @@ The board index keeps list order and graph links connected. Card metadata lives 
 | `depends-on` | Dependencies as `card-id\|none\|warn\|block` |
 | `completed`, `start`, `due` | Progress and dates |
 
-A checklist keeps its own metadata in hidden comments on its heading (`kanux-checklist-id`, `kanux-checklist-color`, `kanux-checklist-depends`) and one per item (`kanux-item-id`), so groups, colors and dependencies all survive a sync to another device.
+A checklist keeps its own metadata in hidden comments on its heading (`kanux-checklist-id`, `kanux-checklist-color`, `kanux-checklist-depends`, `kanux-checklist-collapsed`) and one per item (`kanux-item-id`), so groups, colors, dependencies and folded state all survive a sync to another device.
 
 ### The other two note types
 
 Two more kinds of note live in a board folder, and both are marked so the board's sync never mistakes them for cards:
 
-- **Templates** carry `kanux-template: true` and no card id. A template that numbers its cards also keeps `kanux-id-prefix`, `kanux-id-next` and `kanux-id-pad`.
+- **Templates** carry `kanux-template: true` and no card id. A template that numbers its cards also keeps `kanux-id-prefix`, `kanux-id-separator`, `kanux-id-next` and `kanux-id-pad`.
 - **Checklist-item notes** carry `kanux-checklist-item: true` and `kanux-card-id` pointing back at their card, plus a `Card:` wikilink so the graph connects both ways. One is created the first time you open a checklist task as a note.
 
 ## Card templates
@@ -173,9 +173,11 @@ A list's menu offers **New card from template**, with the same two actions at th
 
 ### Incremental codes
 
-Turn on **Number each card** and the template stamps a running code on every card it makes — `BUG-001`, then `BUG-002`, and so on. Set the prefix, the next number and how many digits it pads to; the editor shows the code the next card will get.
+Turn on **Numbering** and the template stamps a running code on every card it makes — `BUG-001`, then `BUG-002`, and so on. Set the prefix, the separator between them (`BUG-001`, `BUG.001`, `BUG/001`, `BUG#001`, `BUG_001` or none at all), the next number and how many digits it pads to. The editor previews the next card the way the board will draw it.
 
-The code is stored on the card as `kanux-card-code` and shown as a chip in front of its name — on the board, in the table and in the card itself. It is not part of the title, so **renaming a card keeps its code**, and the table's search box finds a card by typing its code.
+How the chip looks is a decision of the board, not the template, so every code on a board reads the same way. The **Card codes** section of **Customize** chooses the style — **outlined**, **filled**, **soft** or **plain** text — the color, in the theme's accent or one of eight palette colors, and whether the chip sits in front of the title or on its own line above it. The template editor's preview draws the next card with that look and opens Customize, where the **Card codes** section holds the setting.
+
+The code is stored on the card as `kanux-card-code` and shown on the board, in the table and in the card itself. It is not part of the title, so **renaming a card keeps its code**, and the table's search box finds a card by typing its code.
 
 The counter lives in the template note as `kanux-id-next`, so it survives a reload and travels with the vault. **Manage templates** shows each template's next code and restarts the counter from there — the confirmation tells you how many cards already carry codes from that point on, because a restart is what hands the same number out twice.
 
@@ -218,7 +220,7 @@ Sync Deck carries the board index, cards, and attachments across your devices. N
 
 ## Custom CSS
 
-**Customize** covers backgrounds, colors, spacing and typography per board, and everything it controls is written as a CSS variable on the board root. Those are Kanux's own to set — overriding them by hand fights the picker.
+**Customize** covers backgrounds, colors, spacing, typography and the card-code look per board. Backgrounds, colors, spacing and typography are written as CSS variables on the board root; the code look rides on each chip as `is-*` classes and `--ot-code-color`. Those are Kanux's own to set — overriding them by hand fights the picker.
 
 Six variables are never set by Kanux, only read. They exist for a CSS snippet to override, and they are the supported way to recolor the parts the appearance panel does not reach:
 

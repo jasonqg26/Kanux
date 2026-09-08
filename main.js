@@ -33,6 +33,12 @@ const LABEL_COLORS = [
 // Default list-color sequence. Grey → blue → green first so a fresh board's
 // To do / Doing / Done reads the way most people expect.
 const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#ec4899"];
+
+// How a board draws the code chip on its cards. One look for the whole board,
+// chosen in Customize, so every card's identifier reads the same way.
+const CODE_STYLES = ["outline", "filled", "soft", "plain"];
+const CODE_PLACEMENTS = ["inline", "above"];
+const DEFAULT_CODE_LOOK = { style: "outline", color: "", placement: "inline" };
 const DEFAULT_CHECKLIST_TITLE = "Checklist";
 const DEFAULT_CHECKLIST_COLOR = LIST_COLORS[1];
 const DEFAULT_APPEARANCE = {
@@ -75,6 +81,7 @@ const DEFAULT_APPEARANCE = {
   motion: {
     enabled: true,
   },
+  codes: { ...DEFAULT_CODE_LOOK },
 };
 
 /**
@@ -298,11 +305,41 @@ function imageMarkupWithSize(markup, width) {
   return text;
 }
 
+// Moves an entry that lives in `source` so it lands at `insertionIndex` of
+// `target` (which may be the same array). The index is measured before the
+// entry is removed, so drag & drop callers can point at the slot they see.
+function moveArrayEntry(source, target, entry, insertionIndex) {
+  const sourceIndex = source.indexOf(entry);
+  if (sourceIndex < 0) return false;
+  let nextIndex = insertionIndex;
+  source.splice(sourceIndex, 1);
+  if (source === target && sourceIndex < nextIndex) nextIndex -= 1;
+  nextIndex = Math.max(0, Math.min(nextIndex, target.length));
+  target.splice(nextIndex, 0, entry);
+  return true;
+}
+
 function createElement(tag, className, text) {
   const element = document.createElement(tag);
   if (className) element.className = className;
   if (text !== undefined) element.textContent = text;
   return element;
+}
+
+/**
+ * The chip a card's code is drawn in. `look` is the board's `appearance.codes`;
+ * it rides on the element — a class per style and placement, the colour as a
+ * variable — so the board, the table, the library and the template editor's
+ * preview all draw a code the same way.
+ */
+function cardCodeChip(code, look) {
+  const chip = createElement("span", "ot-card-code", code);
+  const clean = normalizeCodeLook(look);
+  chip.classList.add(`is-${clean.style}`, `is-${clean.placement}`);
+  if (clean.color) chip.style.setProperty("--ot-code-color", clean.color);
+  // An identifier, not prose: keep machine translation off it.
+  chip.setAttribute("translate", "no");
+  return chip;
 }
 
 function hasDragType(event, type) {
@@ -556,6 +593,7 @@ function normalizeChecklistGroup(group, index, seenIds) {
     id: uniqueChecklistId(group.id, "checklist", seenIds),
     title: textLine(group.title) || `${DEFAULT_CHECKLIST_TITLE} ${index + 1}`,
     color: cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR,
+    collapsed: !!group.collapsed,
     description: cleanChecklistDescription(group.description),
     dependencies: normalizeDependencies(group.dependencies),
     items: (Array.isArray(group.items) ? group.items : [])
@@ -636,16 +674,17 @@ function parseChecklistHeading(line) {
 }
 
 /**
- * Strips the trailing metadata comments (color, id) that round-trip group
- * data the visible heading text cannot carry. They may appear in any order;
- * values are validated downstream by cleanColor/cleanKanuxId.
+ * Strips the trailing metadata comments (color, id, depends, collapsed) that
+ * round-trip group data the visible heading text cannot carry. They may appear
+ * in any order; values are validated downstream by cleanColor/cleanKanuxId.
  */
 function extractChecklistHeadingMetadata(heading) {
-  const result = { title: heading, color: "", id: "", dependencies: "" };
-  const metadata = /\s*<!--kanux-checklist-(color|id|depends):([^>\s]+)-->\s*$/;
+  const result = { title: heading, color: "", id: "", dependencies: "", collapsed: false };
+  const metadata = /\s*<!--kanux-checklist-(color|id|depends|collapsed):([^>\s]+)-->\s*$/;
   for (let match = result.title.match(metadata); match; match = result.title.match(metadata)) {
     if (match[1] === "color") result.color = match[2];
     else if (match[1] === "id") result.id = match[2];
+    else if (match[1] === "collapsed") result.collapsed = parseBoolean(match[2]);
     else result.dependencies = match[2];
     result.title = result.title.slice(0, match.index).trim();
   }
@@ -659,6 +698,7 @@ function appendParsedChecklist(groups, group) {
     id: cleanKanuxId(group.id) || uid("checklist"),
     title: textLine(group.title) || `${DEFAULT_CHECKLIST_TITLE} ${groups.length + 1}`,
     color: cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR,
+    collapsed: !!group.collapsed,
     description,
     dependencies: parseDependencies(group.dependencies),
     items: parseChecklist(itemLines.join("\n")),
@@ -740,7 +780,9 @@ function checklistsToMarkdown(checklists) {
       const heading = `### ${textLine(group.title) || DEFAULT_CHECKLIST_TITLE}`
         + ` <!--kanux-checklist-color:${cleanColor(group.color) || DEFAULT_CHECKLIST_COLOR}-->`
         + ` <!--kanux-checklist-id:${group.id}-->`
-        + (dependencies ? ` <!--kanux-checklist-depends:${dependencies}-->` : "");
+        + (dependencies ? ` <!--kanux-checklist-depends:${dependencies}-->` : "")
+        // Written only when folded, so notes that never fold never change.
+        + (group.collapsed ? " <!--kanux-checklist-collapsed:true-->" : "");
       const description = group.description.split("\n").map(escapeChecklistDescriptionLine).join("\n");
       const items = checklistToMarkdown(group.items);
       return [heading, description, items].filter(Boolean).join("\n");
@@ -789,8 +831,48 @@ function firstPlaceholderIndex(markdown) {
 // A template can stamp every card it makes with a running code — BUG-014 — so
 // a card can be named out loud. The counter lives in the template note, so it
 // survives a reload and syncs with the vault like everything else.
-const NUMBERING_KEYS = { prefix: "kanux-id-prefix", next: "kanux-id-next", pad: "kanux-id-pad" };
+const NUMBERING_KEYS = {
+  prefix: "kanux-id-prefix",
+  separator: "kanux-id-separator",
+  next: "kanux-id-next",
+  pad: "kanux-id-pad",
+};
 const MAX_NUMBER_PAD = 8;
+
+// What sits between the prefix and the number, stored by name rather than as
+// the character itself: a bare "-" is a YAML list marker and a bare "#" opens
+// a comment, so neither can be written into a note's frontmatter as it is.
+const CODE_SEPARATORS = [
+  { id: "dash", char: "-", label: "Dash" },
+  { id: "dot", char: ".", label: "Dot" },
+  { id: "slash", char: "/", label: "Slash" },
+  { id: "hash", char: "#", label: "Hash" },
+  { id: "underscore", char: "_", label: "Underscore" },
+  { id: "none", char: "", label: "None" },
+];
+const DEFAULT_SEPARATOR = "dash";
+
+/** A separator's id from its name or its literal character; the dash when it is neither. */
+function cleanSeparator(value) {
+  const text = textLine(value);
+  const match = CODE_SEPARATORS.find((separator) => separator.id === text.toLowerCase() || (separator.char && separator.char === text));
+  return match ? match.id : DEFAULT_SEPARATOR;
+}
+
+function separatorChar(id) {
+  const match = CODE_SEPARATORS.find((separator) => separator.id === id);
+  return match ? match.char : "-";
+}
+
+/** The look with every field filled in; anything unknown falls back to the default. */
+function normalizeCodeLook(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    style: CODE_STYLES.includes(source.style) ? source.style : DEFAULT_CODE_LOOK.style,
+    color: cleanColor(source.color).toLowerCase(),
+    placement: CODE_PLACEMENTS.includes(source.placement) ? source.placement : DEFAULT_CODE_LOOK.placement,
+  };
+}
 
 /** Numbering is on when the note carries a next number; nothing else is required. */
 function parseTemplateNumbering(markdown) {
@@ -802,6 +884,7 @@ function parseTemplateNumbering(markdown) {
   if (next === null) return null;
   return normalizeNumbering({
     prefix: read(NUMBERING_KEYS.prefix),
+    separator: read(NUMBERING_KEYS.separator),
     next,
     pad: numberOrNull(read(NUMBERING_KEYS.pad)),
   });
@@ -811,7 +894,14 @@ function normalizeNumbering(numbering) {
   if (!numbering) return null;
   const next = Math.max(0, Math.floor(numberOrNull(numbering.next) || 0));
   const pad = Math.min(MAX_NUMBER_PAD, Math.max(1, Math.floor(numberOrNull(numbering.pad) || 1)));
-  return { prefix: textLine(numbering.prefix), next, pad };
+  // No spaces in a prefix: the code is stored as one token, so a space typed
+  // here would make the preview and the stored code disagree.
+  return {
+    prefix: textLine(numbering.prefix).replace(/\s+/g, ""),
+    separator: cleanSeparator(numbering.separator),
+    next,
+    pad,
+  };
 }
 
 /** The code a card would carry: "BUG-014", or "014" when there is no prefix. */
@@ -821,7 +911,7 @@ function formatCardCode(numbering, value) {
   const number = numberOrNull(value);
   const counter = number === null ? clean.next : Math.max(0, Math.floor(number));
   const digits = String(counter).padStart(clean.pad, "0");
-  return clean.prefix ? `${clean.prefix}-${digits}` : digits;
+  return clean.prefix ? `${clean.prefix}${separatorChar(clean.separator)}${digits}` : digits;
 }
 
 
@@ -847,6 +937,7 @@ function withNumbering(markdown, numbering) {
   const clean = normalizeNumbering(numbering);
   if (clean) {
     kept.push(`${NUMBERING_KEYS.prefix}: ${clean.prefix}`);
+    kept.push(`${NUMBERING_KEYS.separator}: ${clean.separator}`);
     kept.push(`${NUMBERING_KEYS.next}: ${clean.next}`);
     kept.push(`${NUMBERING_KEYS.pad}: ${clean.pad}`);
   }
@@ -870,7 +961,7 @@ function cleanCardCode(value) {
 function cardCodeNumber(code, numbering) {
   const clean = normalizeNumbering(numbering);
   if (clean === null) return -1;
-  const head = clean.prefix ? `${clean.prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-` : "";
+  const head = clean.prefix ? `${clean.prefix}${separatorChar(clean.separator)}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
   const match = cleanCardCode(code).match(new RegExp(`^${head}(\\d+)$`));
   return match ? Number(match[1]) : -1;
 }
@@ -1205,7 +1296,9 @@ module.exports = {
   stripImageEmbeds,
   imageSizeFromMarkup,
   imageMarkupWithSize,
+  moveArrayEntry,
   createElement,
+  cardCodeChip,
   hasDragType,
   renderIcon,
   iconButton,
@@ -1232,7 +1325,15 @@ module.exports = {
   cardCodeNumber,
   cleanCardCode,
   withNumbering,
+  cleanSeparator,
+  separatorChar,
+  normalizeCodeLook,
   NUMBERING_KEYS,
+  MAX_NUMBER_PAD,
+  CODE_SEPARATORS,
+  CODE_STYLES,
+  CODE_PLACEMENTS,
+  DEFAULT_CODE_LOOK,
   dependencyGate,
   normalizeDependencies,
   parseDependencies,
@@ -1491,6 +1592,71 @@ function colorSwatchGrid(colors, selectedColor, onPick) {
   return swatches;
 }
 
+/**
+ * One choice out of a few, drawn as a row of buttons: a radio group. The
+ * arrow keys move the choice the way native radios do, and only the chosen
+ * button sits in the tab order, so the whole group costs one tab stop.
+ *
+ * `options` are `{ value, label, render? }`; `render(button)` fills a button
+ * with something other than its label — a sample chip, a colour dot — while
+ * the label still names it for assistive tech. `group.setValue(value)`
+ * repaints the group when the choice changes from outside.
+ */
+function choiceGroup(className, groupLabel, options, value, onChange) {
+  const group = createElement("div", className);
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-label", groupLabel);
+  let current = value;
+
+  const paint = () => {
+    const chosen = options.findIndex((option) => option.value === current);
+    Array.from(group.children).forEach((button, index) => {
+      const on = index === chosen;
+      button.setAttribute("aria-checked", on ? "true" : "false");
+      // With nothing chosen the first button keeps the group reachable.
+      button.tabIndex = on || (chosen < 0 && index === 0) ? 0 : -1;
+    });
+  };
+
+  const choose = (next) => {
+    if (next === current) return;
+    current = next;
+    paint();
+    onChange(next);
+  };
+
+  options.forEach((option, index) => {
+    const button = createElement("button", "");
+    button.type = "button";
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-label", option.label);
+    if (option.render) {
+      option.render(button);
+      button.title = option.label;
+    } else {
+      button.textContent = option.label;
+    }
+    button.addEventListener("click", () => choose(option.value));
+    button.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      const next = (index + step + options.length) % options.length;
+      choose(options[next].value);
+      group.children[next].focus();
+    });
+    group.append(button);
+  });
+
+  group.setValue = (next) => {
+    current = next;
+    paint();
+  };
+  paint();
+  return group;
+}
+
 // The run of consecutive image entries around `index` (entries matching isGap
 // between images don't break the run) — the group a grid layout applies to.
 function imageRunAround(items, index, isGap) {
@@ -1556,6 +1722,7 @@ module.exports = {
   setIconSafe,
   fillMiniCard,
   colorSwatchGrid,
+  choiceGroup,
   imageRunAround,
   imageFilesFromTransfer,
   imageStamp,
@@ -1904,6 +2071,112 @@ module.exports = {
 };
 
   },
+  "src/board/board-appearance.js": function(module, exports, __require) {
+// Applies the active appearance (density, colors, background, motion) to the
+// board root element as CSS variables, classes, and background properties.
+
+const BOARD_DENSITY = {
+  compact: { listWidth: 258, listMinWidth: 244, cardPadding: "7px 8px" },
+  normal: { listWidth: 292, listMinWidth: 272, cardPadding: "9px 10px" },
+  comfortable: { listWidth: 326, listMinWidth: 300, cardPadding: "12px" },
+};
+const CARD_SHADOWS = {
+  none: "none",
+  small: "0 1px 2px rgb(0 0 0 / 16%)",
+  medium: "0 2px 4px rgb(0 0 0 / 24%), 0 1px 1px rgb(0 0 0 / 16%)",
+  large: "0 6px 16px rgb(0 0 0 / 32%), 0 2px 4px rgb(0 0 0 / 22%)",
+};
+const BOARD_BACKGROUND_PROPERTIES = [
+  "background-image",
+  "background-color",
+  "background-size",
+  "background-position",
+  "background-repeat",
+  "background-attachment",
+];
+
+const boardAppearanceMethods = {
+  applyAppearance() {
+    const root = this.contentEl;
+    const appearance = this.plugin.getAppearance();
+    this.applyAppearanceVariables(root, appearance);
+    this.applyAppearanceClasses(root, appearance);
+    this.applyBoardBackground(root, appearance.background);
+    // Read once per render for the chip on every card, rather than once per card.
+    this.codeLook = appearance.codes;
+  },
+
+  applyAppearanceVariables(root, appearance) {
+    const density = BOARD_DENSITY[appearance.density] || BOARD_DENSITY.normal;
+    root.style.setProperty("--ot-font-scale", String(appearance.fontScale));
+    root.style.setProperty("--ot-list-width", `${density.listWidth}px`);
+    root.style.setProperty("--ot-list-min-width", `${density.listMinWidth}px`);
+    root.style.setProperty("--ot-card-padding", density.cardPadding);
+    root.style.setProperty("--ot-card-gap", `${appearance.cards.verticalGap}px`);
+    root.style.setProperty("--ot-card-radius", `${appearance.cards.borderRadius}px`);
+    root.style.setProperty("--ot-card-title-size", `${appearance.cards.titleSize}px`);
+    root.style.setProperty("--ot-column-gap", `${appearance.lists.columnGap}px`);
+    root.style.setProperty("--ot-list-top-border-width", `${appearance.lists.topBorderWidth}px`);
+    root.style.setProperty("--ot-list-radius", `${appearance.lists.borderRadius}px`);
+    root.style.setProperty("--ot-card-shadow", CARD_SHADOWS[appearance.cards.shadow] || CARD_SHADOWS.medium);
+    root.style.setProperty("--ot-card-background", appearance.cards.useTheme
+      ? "color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 88%, var(--background-modifier-hover) 12%)"
+      : appearance.cards.background);
+    // A theme-coloured card hovers in a theme colour too: the stored hover hex
+    // belongs to the custom card colour, and on a light theme it is a dark slab.
+    root.style.setProperty("--ot-card-hover-background", appearance.cards.useTheme
+      ? "color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 60%, var(--background-modifier-hover) 40%)"
+      : appearance.cards.hoverBackground);
+    root.style.setProperty("--ot-list-background", appearance.lists.useTheme
+      ? "color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%)"
+      : appearance.lists.background);
+  },
+
+  applyAppearanceClasses(root, appearance) {
+    root.classList.toggle("is-motion-disabled", !appearance.motion.enabled);
+    root.classList.toggle("is-appearance-dark", appearance.colorScheme === "dark");
+    root.classList.toggle("is-appearance-light", appearance.colorScheme === "light");
+    root.classList.toggle("is-surfaces-dark", appearance.surfaceScheme === "dark");
+    root.classList.toggle("is-surfaces-light", appearance.surfaceScheme === "light");
+    root.classList.toggle("is-list-color-dot-hidden", !appearance.lists.showColorDot);
+  },
+
+  applyBoardBackground(root, background) {
+    BOARD_BACKGROUND_PROPERTIES.forEach((property) => root.style.removeProperty(property));
+    if (background.type === "solid") {
+      root.style.setProperty("background-color", background.color, "important");
+      return;
+    }
+    if (background.type === "gradient") {
+      root.style.setProperty("background-color", background.gradientEnd, "important");
+      root.style.setProperty("background-image", `linear-gradient(135deg, ${background.gradientStart}, ${background.gradientEnd})`);
+      return;
+    }
+    if (background.type === "image" && background.imagePath) {
+      this.applyImageBoardBackground(root, background);
+      return;
+    }
+    root.style.setProperty("background-color", "var(--background-primary)", "important");
+  },
+
+  applyImageBoardBackground(root, background) {
+    const resourcePath = this.plugin.getAppearanceBackgroundResource(background);
+    root.style.setProperty("background-color", "var(--background-primary)", "important");
+    if (!resourcePath) return;
+    const resource = resourcePath.replace(/"/g, "\\\"");
+    const imageSize = ["repeat", "original"].includes(background.imageFit) ? "auto" : background.imageFit;
+    const overlay = `linear-gradient(rgb(0 0 0 / ${background.overlayOpacity}), rgb(0 0 0 / ${background.overlayOpacity}))`;
+    root.style.setProperty("background-image", `${overlay}, url("${resource}")`);
+    root.style.setProperty("background-position", "center, center");
+    root.style.setProperty("background-size", `auto, ${imageSize}`);
+    root.style.setProperty("background-repeat", background.imageFit === "repeat" ? "no-repeat, repeat" : "no-repeat, no-repeat");
+    root.style.setProperty("background-attachment", "local");
+  },
+};
+
+module.exports = { boardAppearanceMethods };
+
+  },
   "src/modals/vault-suggest-modals.js": function(module, exports, __require) {
 const { FuzzySuggestModal } = require("obsidian");
 const { isImagePath } = __require("src/helpers.js");
@@ -1957,25 +2230,126 @@ module.exports = {
   },
   "src/modals/board-appearance-modal.js": function(module, exports, __require) {
 const { Modal, Notice, Setting } = require("obsidian");
-const { createElement } = __require("src/helpers.js");
+
+// Customize: a board's appearance, changed live. Every control ends up as a CSS
+// variable or class on the board root; the strip at the top is a slice of the
+// board drawn by those same rules, so what it shows is what the board gets.
+const {
+  CODE_PLACEMENTS,
+  CODE_STYLES,
+  LIST_COLORS,
+  cardCodeChip,
+  clone,
+  createElement,
+} = __require("src/helpers.js");
+const { boardAppearanceMethods } = __require("src/board/board-appearance.js");
+const { choiceGroup } = __require("src/modals/modal-ui.js");
 const { TextPromptModal, confirmAction } = __require("src/modals/prompt-modals.js");
 const { VaultBackgroundSuggestModal } = __require("src/modals/vault-suggest-modals.js");
 
-// Board appearance (colors, background, density) settings dialog.
+// A slider or colour picker fires on every tick of a drag. The preview follows
+// every tick; the board and data.json wait until the hand pauses this long.
+const COMMIT_DELAY_MS = 140;
+const BUILTIN_PRESETS = [
+  ["obsidian", "Obsidian theme"],
+  ["trello-dark", "Trello dark"],
+  ["trello-light", "Trello light"],
+  ["transparent", "Transparent"],
+  ["high-contrast", "High contrast"],
+  ["custom", "Custom"],
+];
+const CODE_STYLE_LABELS = { outline: "Outline", filled: "Filled", soft: "Soft", plain: "Plain" };
+const CODE_PLACEMENT_LABELS = { inline: "Before title", above: "Above title" };
+// The palette by name, in its order, so a colour dot is announced as more than a hex code.
+const COLOR_NAMES = ["Slate", "Blue", "Green", "Amber", "Red", "Violet", "Teal", "Pink"];
+// The style options are drawn as chips; this is the text inside them.
+const SAMPLE_CODE = "01";
+const PREVIEW_CODE = "BUG-014";
+// Where keyboard focus can land inside a settings row.
+const FOCUSABLE = "button, input, select, [tabindex]:not([tabindex=\"-1\"])";
+
+const px = (value) => `${Math.round(value)}px`;
+const percent = (value) => `${Math.round(value * 100)}%`;
+const times = (value) => `${Number(value).toFixed(2)}×`;
+
+/** Merges one level deep, the way the plugin does: a section is an object, the rest is replaced. */
+function mergeAppearancePatch(target, patch) {
+  Object.entries(patch || {}).forEach(([key, value]) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) target[key] = Object.assign({}, target[key] || {}, value);
+    else target[key] = value;
+  });
+  return target;
+}
+
 class BoardAppearanceModal extends Modal {
-  constructor(app, plugin, boardId) {
+  /**
+   * `onClosed` lets whoever opened this on top of their own dialog repaint
+   * once the user is done here; the template editor's preview relies on it.
+   */
+  constructor(app, plugin, boardId, onClosed = null) {
     super(app);
     this.plugin = plugin;
     this.boardId = boardId;
+    this.onClosed = onClosed;
+    this.bodyEl = null;
+    this.previewRoot = null;
+    this.presetDropdown = null;
+    this.codeStyleGroup = null;
+    // Edits not written yet, merged into one patch and committed together.
+    this.pendingPatch = null;
+    this.commitTimer = null;
   }
 
   onOpen() {
     this.render(false);
   }
 
-  async update(patch, rerender = false) {
-    await this.plugin.updateBoardAppearance(this.boardId, patch);
+  onClose() {
+    this.flushCommit();
+    this.contentEl.replaceChildren();
+    if (this.onClosed) this.onClosed();
+  }
+
+  /** The appearance as the user sees it: what is stored plus what still waits to be written. */
+  draftAppearance() {
+    const draft = clone(this.plugin.getBoardAppearance(this.boardId));
+    return this.plugin.normalizeAppearance(mergeAppearancePatch(draft, this.pendingPatch));
+  }
+
+  /**
+   * Applies a change. The preview answers at once; the board and data.json
+   * follow now or, for a control mid-drag, once the hand pauses.
+   */
+  update(patch, options = {}) {
+    this.pendingPatch = mergeAppearancePatch(this.pendingPatch || {}, patch);
+    this.paintPreview(this.draftAppearance());
+    if (options.debounce) {
+      window.clearTimeout(this.commitTimer);
+      this.commitTimer = window.setTimeout(() => { this.commit().catch(console.error); }, COMMIT_DELAY_MS);
+      return Promise.resolve();
+    }
+    return this.commit(options.rerender);
+  }
+
+  async commit(rerender = false) {
+    window.clearTimeout(this.commitTimer);
+    this.commitTimer = null;
+    const patch = this.pendingPatch;
+    this.pendingPatch = null;
+    if (patch) await this.plugin.updateBoardAppearance(this.boardId, patch);
     if (rerender) this.render();
+    else this.syncPreset();
+  }
+
+  flushCommit() {
+    if (this.pendingPatch) this.commit().catch(console.error);
+  }
+
+  /** Any edit turns a built-in preset into this board's own; the dropdown says so at once. */
+  syncPreset() {
+    if (!this.presetDropdown) return;
+    const preset = this.plugin.getBoardAppearance(this.boardId).preset;
+    if (this.presetDropdown.getValue() !== preset) this.presetDropdown.setValue(preset);
   }
 
   chooseComputerImage() {
@@ -1993,10 +2367,12 @@ class BoardAppearanceModal extends Modal {
         const imagePath = await this.plugin.importAppearanceBackground(file);
         await this.update({
           background: { type: "image", imageSource: "plugin", imagePath, imageFit: "original" },
-        }, true);
+        }, { rerender: true });
         new Notice("Background image imported into Kanux's private data folder.");
       } catch (error) {
-        new Notice(error && error.message ? error.message : "The background image could not be imported.");
+        new Notice(error && error.message
+          ? error.message
+          : "The background image could not be imported. Try a PNG, JPG or WebP file, or pick one from the vault.");
       } finally {
         cleanup();
       }
@@ -2012,232 +2388,406 @@ class BoardAppearanceModal extends Modal {
   render(preserveScroll = true) {
     const board = this.plugin.findBoard(this.boardId);
     if (!board) { this.close(); return; }
-    const appearance = this.plugin.getBoardAppearance(this.boardId);
-    const scrollTop = preserveScroll ? this.contentEl.scrollTop : 0;
+    const appearance = this.draftAppearance();
+    // A redraw must not cost the user their place: scroll and focus come back.
+    const focus = preserveScroll ? this.captureFocus() : null;
+    const scrollTop = preserveScroll && this.bodyEl ? this.bodyEl.scrollTop : 0;
+
     this.contentEl.replaceChildren();
     this.modalEl.addClass("ot-appearance-modal-shell");
     this.contentEl.addClass("ot-appearance-modal");
-    this.contentEl.append(createElement("h2", "", `${board.name} appearance`));
-    this.contentEl.append(createElement("p", "ot-appearance-modal-intro", "These settings apply only to this board."));
 
-    new Setting(this.contentEl)
-      .setName("Visual preset")
-      .addDropdown((dropdown) => dropdown
-        .addOption("obsidian", "Obsidian theme")
-        .addOption("trello-dark", "Trello dark")
-        .addOption("trello-light", "Trello light")
-        .addOption("transparent", "Transparent")
-        .addOption("high-contrast", "High contrast")
-        .addOption("custom", "Custom")
-        .setValue(appearance.preset)
-        .onChange(async (value) => {
-          if (value === "custom") await this.update({ preset: "custom" });
-          else {
-            await this.plugin.applyBoardAppearancePreset(this.boardId, value);
-            this.render();
+    const intro = createElement("p", "ot-appearance-modal-intro", "Only this board changes, and it changes as you go. The strip shows what the board gets.");
+    this.previewRoot = this.buildPreview(board, appearance);
+    this.bodyEl = createElement("div", "ot-appearance-modal-body");
+    this.contentEl.append(createElement("h2", "", `Customize ${board.name}`), intro, this.previewRoot, this.bodyEl, this.buildActions());
+
+    this.renderPreset(appearance);
+    this.renderBackground(appearance);
+    this.renderCards(appearance);
+    this.renderCodes(appearance);
+    this.renderColumns(appearance);
+    this.renderLayout(appearance);
+    this.renderReuse(board);
+
+    if (!preserveScroll) return;
+    requestAnimationFrame(() => {
+      this.bodyEl.scrollTop = scrollTop;
+      this.restoreFocus(focus);
+    });
+  }
+
+  captureFocus() {
+    const active = document.activeElement;
+    const row = active && this.contentEl.contains(active) ? active.closest("[data-ot-setting]") : null;
+    if (!row) return null;
+    return { key: row.dataset.otSetting, index: Array.from(row.querySelectorAll(FOCUSABLE)).indexOf(active) };
+  }
+
+  restoreFocus(focus) {
+    if (!focus) return;
+    const row = this.contentEl.querySelector(`[data-ot-setting="${focus.key}"]`);
+    const controls = row ? Array.from(row.querySelectorAll(FOCUSABLE)) : [];
+    const target = controls[Math.max(0, focus.index)] || controls[0];
+    if (target) target.focus({ preventScroll: true });
+  }
+
+  /** A settings row with a stable key, so focus can find it again after a redraw. */
+  row(key, name, desc = "") {
+    const setting = new Setting(this.bodyEl).setName(name);
+    if (desc) setting.setDesc(desc);
+    setting.settingEl.dataset.otSetting = key;
+    return setting;
+  }
+
+  heading(title, intro = "") {
+    new Setting(this.bodyEl).setName(title).setHeading();
+    if (intro) this.bodyEl.append(createElement("p", "ot-appearance-section-intro", intro));
+  }
+
+  /** A slider that says its value: the tooltip alone shows nothing on touch. */
+  slider(setting, { min, max, step, value, format, patch }) {
+    const readout = createElement("span", "ot-appearance-value", format(value));
+    setting.addSlider((slider) => slider.setLimits(min, max, step).setValue(value).setDynamicTooltip()
+      .onChange((next) => {
+        readout.textContent = format(next);
+        this.update(patch(next), { debounce: true });
+      }));
+    setting.controlEl.prepend(readout);
+    return setting;
+  }
+
+  /**
+   * A slice of the board drawn by the board's own rules: the root's variables
+   * and classes, one column, two cards, one wearing a code. Decorative, so it
+   * is hidden from assistive tech; the controls below carry the meaning.
+   */
+  buildPreview(board, appearance) {
+    const root = createElement("div", "ot-board-root ot-appearance-preview");
+    root.setAttribute("aria-hidden", "true");
+    const first = board.lists[0];
+
+    const list = createElement("div", "ot-list ot-appearance-preview-list");
+    list.style.setProperty("--ot-list-color", (first && first.color) || "var(--interactive-accent)");
+    const title = createElement("div", "ot-appearance-preview-list-title");
+    title.append(createElement("span", "ot-mini-card-dot"), createElement("span", "", (first && first.title) || "To do"));
+    const cards = createElement("div", "ot-appearance-preview-cards");
+    cards.append(this.previewCard(PREVIEW_CODE, "Fix the login redirect"), this.previewCard("", "Write the release notes"));
+    list.append(title, cards);
+
+    root.append(list);
+    this.paintPreview(appearance, root);
+    return root;
+  }
+
+  previewCard(code, text) {
+    const card = createElement("div", "ot-card ot-appearance-preview-card");
+    const title = createElement("div", "ot-card-title");
+    if (code) title.append(cardCodeChip(code, null));
+    title.append(createElement("span", "ot-card-title-text", text));
+    card.append(title);
+    return card;
+  }
+
+  paintPreview(appearance, root = this.previewRoot) {
+    if (!root) return;
+    // The board view's own painters, pointed at the strip instead of a view:
+    // the whole mixin, so an image background can reach its own helper, and
+    // the plugin, so that helper can resolve the image.
+    const view = Object.assign(Object.create(boardAppearanceMethods), { plugin: this.plugin });
+    view.applyAppearanceVariables(root, appearance);
+    view.applyAppearanceClasses(root, appearance);
+    view.applyBoardBackground(root, appearance.background);
+    // The chip is rebuilt so style, colour and placement follow the choice.
+    root.querySelectorAll(".ot-card-code").forEach((chip) => chip.replaceWith(cardCodeChip(chip.textContent, appearance.codes)));
+    if (this.codeStyleGroup) {
+      if (appearance.codes.color) this.codeStyleGroup.style.setProperty("--ot-code-color", appearance.codes.color);
+      else this.codeStyleGroup.style.removeProperty("--ot-code-color");
+    }
+  }
+
+  renderPreset(appearance) {
+    this.heading("Preset");
+    this.row("preset", "Visual preset", "Start from a built-in look. Any change below makes it this board's own.")
+      .addDropdown((dropdown) => {
+        this.presetDropdown = dropdown;
+        BUILTIN_PRESETS.forEach(([value, label]) => dropdown.addOption(value, label));
+        dropdown.setValue(appearance.preset).onChange(async (value) => {
+          if (value === "custom") {
+            await this.update({ preset: "custom" });
+            return;
           }
-        }));
+          await this.plugin.applyBoardAppearancePreset(this.boardId, value);
+          this.render();
+        });
+      });
+  }
 
-    new Setting(this.contentEl).setName("Saved appearances").setHeading();
+  renderBackground(appearance) {
+    const background = appearance.background;
+    this.heading("Background");
+    this.row("background.type", "Background type").addDropdown((dropdown) => dropdown
+      .addOption("theme", "Obsidian theme")
+      .addOption("solid", "Solid color")
+      .addOption("gradient", "Gradient")
+      .addOption("image", "Image")
+      .setValue(background.type)
+      .onChange((value) => this.update({ background: { type: value } }, { rerender: true })));
+
+    if (background.type === "solid") {
+      this.row("background.color", "Background color").addColorPicker((picker) => picker
+        .setValue(background.color)
+        .onChange((value) => this.update({ background: { color: value } }, { debounce: true })));
+    }
+    if (background.type === "gradient") {
+      this.row("background.gradientStart", "Gradient start").addColorPicker((picker) => picker
+        .setValue(background.gradientStart)
+        .onChange((value) => this.update({ background: { gradientStart: value } }, { debounce: true })));
+      this.row("background.gradientEnd", "Gradient end").addColorPicker((picker) => picker
+        .setValue(background.gradientEnd)
+        .onChange((value) => this.update({ background: { gradientEnd: value } }, { debounce: true })));
+    }
+    if (background.type === "image") this.renderBackgroundImage(background);
+  }
+
+  renderBackgroundImage(background) {
+    const source = background.imageSource === "plugin" ? "Kanux data" : "Vault";
+    const image = this.row("background.image", "Background image", background.imagePath
+      ? `${source}: ${background.imagePath.split("/").pop()}`
+      : "No image chosen yet.")
+      .addButton((button) => button.setButtonText("From vault").onClick(() => {
+        new VaultBackgroundSuggestModal(this.app, (file) => {
+          this.update({ background: { imageSource: "vault", imagePath: file.path, imageFit: "original" } }, { rerender: true }).catch(console.error);
+        }).open();
+      }))
+      .addButton((button) => button.setButtonText("From this device").setCta().onClick(() => this.chooseComputerImage()));
+    if (background.imagePath) {
+      image.addButton((button) => button.setButtonText("Clear").onClick(() => this.update({ background: { imagePath: "" } }, { rerender: true })));
+    }
+
+    this.row("background.imageFit", "Image fit", "Cover fills the board without stretching the image; its edges may be cropped.")
+      .addDropdown((dropdown) => dropdown
+        .addOption("original", "Original size, no enlargement")
+        .addOption("cover", "Cover: fill the board, crop the edges")
+        .addOption("contain", "Contain: show the whole image")
+        .addOption("repeat", "Repeat at original size")
+        .setValue(background.imageFit)
+        .onChange((value) => this.update({ background: { imageFit: value } })));
+    this.slider(this.row("background.overlayOpacity", "Image darkening", "A dark layer over the image, so text stays readable."), {
+      min: 0, max: 0.85, step: 0.05, value: background.overlayOpacity, format: percent,
+      patch: (value) => ({ background: { overlayOpacity: value } }),
+    });
+  }
+
+  renderCards(appearance) {
+    const cards = appearance.cards;
+    this.heading("Cards");
+    this.row("cards.useTheme", "Use theme card color", cards.useTheme
+      ? "Cards follow the Obsidian theme. Turn off to choose their color and hover color."
+      : "Cards use the two colors below.")
+      .addToggle((toggle) => toggle.setValue(cards.useTheme)
+        .onChange((value) => this.update({ cards: { useTheme: value } }, { rerender: true })));
+    this.row("cards.background", "Card color").addColorPicker((picker) => picker
+      .setValue(cards.background).setDisabled(cards.useTheme)
+      .onChange((value) => this.update({ cards: { background: value } }, { debounce: true })));
+    this.row("cards.hoverBackground", "Hover color", "The card while the pointer rests on it.").addColorPicker((picker) => picker
+      .setValue(cards.hoverBackground).setDisabled(cards.useTheme)
+      .onChange((value) => this.update({ cards: { hoverBackground: value } }, { debounce: true })));
+    this.slider(this.row("cards.borderRadius", "Corners"), {
+      min: 0, max: 24, step: 1, value: cards.borderRadius, format: px,
+      patch: (value) => ({ cards: { borderRadius: value } }),
+    });
+    this.row("cards.shadow", "Shadow").addDropdown((dropdown) => dropdown
+      .addOption("none", "None").addOption("small", "Small").addOption("medium", "Medium").addOption("large", "Large")
+      .setValue(cards.shadow)
+      .onChange((value) => this.update({ cards: { shadow: value } })));
+    this.slider(this.row("cards.verticalGap", "Space between cards"), {
+      min: 0, max: 28, step: 1, value: cards.verticalGap, format: px,
+      patch: (value) => ({ cards: { verticalGap: value } }),
+    });
+    this.slider(this.row("cards.titleSize", "Title size"), {
+      min: 12, max: 30, step: 1, value: cards.titleSize, format: px,
+      patch: (value) => ({ cards: { titleSize: value } }),
+    });
+    this.row("labels.displayMode", "Label display", "When a card's labels show their names.").addDropdown((dropdown) => dropdown
+      .addOption("compact", "Always compact")
+      .addOption("expanded", "Always expanded")
+      .addOption("hover", "Expand the hovered label")
+      .addOption("card-hover", "Expand while the card is hovered")
+      .setValue(appearance.labels.displayMode)
+      .onChange((value) => this.update({ labels: { displayMode: value } })));
+  }
+
+  /**
+   * One look for every code chip on the board, so BUG-014 and FEAT-002 read as
+   * the same kind of thing. The style options are the chips themselves, and the
+   * group carries the chosen colour so every sample follows it.
+   */
+  renderCodes(appearance) {
+    const codes = appearance.codes;
+    this.heading("Card codes", "A template that numbers its cards stamps each one with a code like BUG-014. Every code on this board is drawn the same way.");
+
+    this.codeStyleGroup = choiceGroup("ot-segmented ot-appearance-choice", "Code style", CODE_STYLES.map((style) => ({
+      value: style,
+      label: CODE_STYLE_LABELS[style],
+      render: (button) => button.append(cardCodeChip(SAMPLE_CODE, { style })),
+    })), codes.style, (style) => this.update({ codes: { style } }));
+    if (codes.color) this.codeStyleGroup.style.setProperty("--ot-code-color", codes.color);
+    this.row("codes.style", "Style", "Outlined, filled, softly tinted, or plain text.").controlEl.append(this.codeStyleGroup);
+
+    const colors = choiceGroup("ot-code-colors", "Code color", [
+      // The accent dot is painted by the stylesheet, so it has nothing to render.
+      { value: "", label: "Accent (theme color)", render: () => {} },
+      ...LIST_COLORS.map((color, index) => ({
+        value: color,
+        label: COLOR_NAMES[index] || color,
+        render: (button) => button.style.setProperty("--ot-swatch", color),
+      })),
+    ], codes.color, (color) => this.update({ codes: { color } }));
+    this.row("codes.color", "Color", "The theme's accent, or one of the palette.").controlEl.append(colors);
+
+    const placement = choiceGroup("ot-segmented ot-appearance-choice", "Code placement", CODE_PLACEMENTS.map((value) => ({
+      value,
+      label: CODE_PLACEMENT_LABELS[value],
+    })), codes.placement, (value) => this.update({ codes: { placement: value } }));
+    this.row("codes.placement", "Placement", "In front of the title, or on a line of its own above it.").controlEl.append(placement);
+  }
+
+  renderColumns(appearance) {
+    const lists = appearance.lists;
+    this.heading("Columns");
+    this.row("lists.useTheme", "Use theme column color", lists.useTheme
+      ? "Columns follow the Obsidian theme. Turn off to choose their color."
+      : "Columns use the color below.")
+      .addToggle((toggle) => toggle.setValue(lists.useTheme)
+        .onChange((value) => this.update({ lists: { useTheme: value } }, { rerender: true })));
+    this.row("lists.background", "Column color").addColorPicker((picker) => picker
+      .setValue(lists.background).setDisabled(lists.useTheme)
+      .onChange((value) => this.update({ lists: { background: value } }, { debounce: true })));
+    this.slider(this.row("lists.borderRadius", "Corners"), {
+      min: 0, max: 24, step: 1, value: lists.borderRadius, format: px,
+      patch: (value) => ({ lists: { borderRadius: value } }),
+    });
+    this.slider(this.row("lists.columnGap", "Space between columns"), {
+      min: 0, max: 40, step: 1, value: lists.columnGap, format: px,
+      patch: (value) => ({ lists: { columnGap: value } }),
+    });
+    this.slider(this.row("lists.topBorderWidth", "Top border", "A band in the column's color along its top edge."), {
+      min: 0, max: 12, step: 1, value: lists.topBorderWidth, format: px,
+      patch: (value) => ({ lists: { topBorderWidth: value } }),
+    });
+    this.row("lists.showColorDot", "Show color dot", "A dot in the column's color beside its name.").addToggle((toggle) => toggle
+      .setValue(lists.showColorDot)
+      .onChange((value) => this.update({ lists: { showColorDot: value } })));
+  }
+
+  renderLayout(appearance) {
+    this.heading("Layout and typography");
+    this.row("colorScheme", "Content contrast", "The board's text colors, independent of the Obsidian theme.").addDropdown((dropdown) => dropdown
+      .addOption("theme", "Follow Obsidian theme")
+      .addOption("dark", "Light text on dark surfaces")
+      .addOption("light", "Dark text on light surfaces")
+      .setValue(appearance.colorScheme)
+      .onChange((value) => this.update({ colorScheme: value })));
+    this.row("density", "Density", "How much room columns and cards take.").addDropdown((dropdown) => dropdown
+      .addOption("compact", "Compact").addOption("normal", "Normal").addOption("comfortable", "Comfortable")
+      .setValue(appearance.density)
+      .onChange((value) => this.update({ density: value })));
+    this.slider(this.row("fontScale", "Text scale"), {
+      min: 0.85, max: 1.4, step: 0.05, value: appearance.fontScale, format: times,
+      patch: (value) => ({ fontScale: value }),
+    });
+    this.row("motion.enabled", "Animations", "Movement when cards and columns change.").addToggle((toggle) => toggle
+      .setValue(appearance.motion.enabled)
+      .onChange((value) => this.update({ motion: { enabled: value } })));
+  }
+
+  /** Saving, applying and copying whole looks: the rare actions, kept at the end. */
+  renderReuse(board) {
+    this.heading("Save and reuse");
     const presets = this.plugin.getAppearancePresets();
     let selectedPresetId = presets[0] ? presets[0].id : "";
-    const presetSetting = new Setting(this.contentEl)
-      .setName("Custom preset")
-      .setDesc(presets.length ? "Apply or delete a saved appearance." : "No custom appearances saved yet.")
-      .addDropdown((dropdown) => {
-        if (!presets.length) dropdown.addOption("", "No saved presets");
+    const saved = this.row("presets", "Saved presets", presets.length
+      ? "Apply a look you saved, or save this board's look to use it on other boards."
+      : "Save this board's look to use it on other boards.");
+    if (presets.length) {
+      saved.addDropdown((dropdown) => {
         presets.forEach((preset) => dropdown.addOption(preset.id, preset.name));
         dropdown.setValue(selectedPresetId).onChange((value) => { selectedPresetId = value; });
-      })
-      .addButton((button) => button.setButtonText("Apply").setDisabled(!presets.length).onClick(async () => {
-        if (!selectedPresetId) return;
-        await this.plugin.applyCustomAppearancePreset(this.boardId, selectedPresetId);
-        this.render();
-      }))
-      .addButton((button) => button.setButtonText("Delete").setWarning().setDisabled(!presets.length).onClick(async () => {
-        if (!selectedPresetId) return;
-        const selected = presets.find((preset) => preset.id === selectedPresetId);
-        if (!selected) return;
-        const confirmed = await confirmAction(this.app, "Delete appearance preset", `Delete appearance preset "${selected.name}"?`);
-        if (!confirmed) return;
-        await this.plugin.deleteAppearancePreset(selectedPresetId);
-        this.render();
-      }));
-    presetSetting.addButton((button) => {
-      button.setButtonText("Save current").setCta();
-      button.buttonEl.addClass("ot-save-button");
-      button.onClick(() => {
-        new TextPromptModal(this.app, "Save appearance", "Preset name", "", async (name) => {
-          const saved = await this.plugin.saveAppearancePreset(name, this.plugin.getBoardAppearance(this.boardId));
-          if (saved) {
-            new Notice(`Appearance preset "${saved.name}" saved.`);
-            this.render();
-          }
-        }).open();
       });
-    });
-
-    const sourceBoards = this.plugin.data.boards.filter((item) => item.id !== this.boardId);
-    let sourceBoardId = sourceBoards[0] ? sourceBoards[0].id : "";
-    new Setting(this.contentEl)
-      .setName("Copy from another board")
-      .setDesc(sourceBoards.length ? "Replace this board's appearance with another board's settings." : "Create another board to use this option.")
-      .addDropdown((dropdown) => {
-        if (!sourceBoards.length) dropdown.addOption("", "No other boards");
-        sourceBoards.forEach((item) => dropdown.addOption(item.id, item.name));
-        dropdown.setValue(sourceBoardId).onChange((value) => { sourceBoardId = value; });
-      })
-      .addButton((button) => button.setButtonText("Copy appearance").setDisabled(!sourceBoards.length).onClick(async () => {
-        if (!sourceBoardId) return;
-        await this.plugin.copyBoardAppearance(this.boardId, sourceBoardId);
+      saved.addButton((button) => button.setButtonText("Apply").onClick(async () => {
+        const preset = presets.find((item) => item.id === selectedPresetId);
+        if (!preset) return;
+        if (!await this.confirmReplace(`Apply the preset "${preset.name}" to this board?`)) return;
+        await this.plugin.applyCustomAppearancePreset(this.boardId, preset.id);
         this.render();
       }));
-
-    new Setting(this.contentEl).setName("Background").setHeading();
-    new Setting(this.contentEl)
-      .setName("Background type")
-      .addDropdown((dropdown) => dropdown
-        .addOption("theme", "Obsidian theme")
-        .addOption("solid", "Solid color")
-        .addOption("gradient", "Gradient")
-        .addOption("image", "Image")
-        .setValue(appearance.background.type)
-        .onChange((value) => this.update({ background: { type: value } }, true)));
-
-    if (appearance.background.type === "solid") {
-      new Setting(this.contentEl).setName("Background color").addColorPicker((picker) => picker
-        .setValue(appearance.background.color)
-        .onChange((value) => this.update({ background: { color: value } })));
-    }
-    if (appearance.background.type === "gradient") {
-      new Setting(this.contentEl).setName("Gradient start").addColorPicker((picker) => picker
-        .setValue(appearance.background.gradientStart)
-        .onChange((value) => this.update({ background: { gradientStart: value } })));
-      new Setting(this.contentEl).setName("Gradient end").addColorPicker((picker) => picker
-        .setValue(appearance.background.gradientEnd)
-        .onChange((value) => this.update({ background: { gradientEnd: value } })));
-    }
-    if (appearance.background.type === "image") {
-      const imageSetting = new Setting(this.contentEl)
-        .setName("Background image")
-        .setDesc(appearance.background.imagePath ? appearance.background.imagePath.split("/").pop() : "No image selected")
-        .addButton((button) => button.setButtonText("From vault").onClick(() => {
-          new VaultBackgroundSuggestModal(this.app, async (file) => {
-            await this.update({ background: { imageSource: "vault", imagePath: file.path, imageFit: "original" } }, true);
-          }).open();
-        }))
-        .addButton((button) => button.setButtonText("From computer").setCta().onClick(() => this.chooseComputerImage()));
-      if (appearance.background.imagePath) {
-        imageSetting.addButton((button) => button.setButtonText("Clear").onClick(() => this.update({ background: { imagePath: "" } }, true)));
-      }
-      new Setting(this.contentEl)
-        .setName("Image fit")
-        .setDesc("Cover fills the board without stretching the image; edges may be cropped.")
-        .addDropdown((dropdown) => dropdown
-          .addOption("original", "Original size — no enlargement")
-          .addOption("cover", "Cover — fill board and crop edges")
-          .addOption("contain", "Contain — show complete image")
-          .addOption("repeat", "Repeat at original size")
-          .setValue(appearance.background.imageFit)
-          .onChange((value) => this.update({ background: { imageFit: value } })));
-      new Setting(this.contentEl)
-        .setName("Image darkening")
-        .addSlider((slider) => slider.setLimits(0, 0.85, 0.05)
-          .setValue(appearance.background.overlayOpacity).setDynamicTooltip()
-          .onChange((value) => this.update({ background: { overlayOpacity: value } })));
-    }
-
-    new Setting(this.contentEl).setName("Cards").setHeading();
-    let cardColor = null;
-    new Setting(this.contentEl).setName("Use theme card color").addToggle((toggle) => toggle
-      .setValue(appearance.cards.useTheme).onChange(async (value) => {
-        await this.update({ cards: { useTheme: value } });
-        if (cardColor) cardColor.setDisabled(value);
+      saved.addButton((button) => button.setButtonText("Delete").setWarning().onClick(async () => {
+        const preset = presets.find((item) => item.id === selectedPresetId);
+        if (!preset) return;
+        const confirmed = await confirmAction(this.app, "Delete appearance preset", `Delete the preset "${preset.name}"? Boards that used it keep their look.`);
+        if (!confirmed) return;
+        await this.plugin.deleteAppearancePreset(preset.id);
+        this.render();
       }));
-    new Setting(this.contentEl).setName("Card color").addColorPicker((picker) => {
-      cardColor = picker;
-      picker.setValue(appearance.cards.background).setDisabled(appearance.cards.useTheme)
-        .onChange((value) => this.update({ cards: { background: value } }));
+    }
+    saved.addButton((button) => button.setButtonText("Save as preset…").onClick(() => {
+      new TextPromptModal(this.app, "Save appearance", "Preset name", "", async (name) => {
+        const preset = await this.plugin.saveAppearancePreset(name, this.plugin.getBoardAppearance(this.boardId));
+        if (!preset) return;
+        new Notice(`Appearance preset "${preset.name}" saved.`);
+        this.render();
+      }).open();
+    }));
+
+    const others = this.plugin.data.boards.filter((item) => item.id !== board.id);
+    let sourceBoardId = others[0] ? others[0].id : "";
+    const copy = this.row("copy", "Copy from another board", others.length
+      ? "Replace this board's appearance with another board's."
+      : "Create another board to copy its appearance.");
+    if (!others.length) return;
+    copy.addDropdown((dropdown) => {
+      others.forEach((item) => dropdown.addOption(item.id, item.name));
+      dropdown.setValue(sourceBoardId).onChange((value) => { sourceBoardId = value; });
     });
-    new Setting(this.contentEl).setName("Hover color").setDesc("Card color while the pointer is over it.")
-      .addColorPicker((picker) => picker.setValue(appearance.cards.hoverBackground)
-        .onChange((value) => this.update({ cards: { hoverBackground: value } })));
-    new Setting(this.contentEl).setName("Vertical spacing").setDesc("Space between cards inside each list.")
-      .addSlider((slider) => slider.setLimits(0, 28, 1).setValue(appearance.cards.verticalGap).setDynamicTooltip()
-        .onChange((value) => this.update({ cards: { verticalGap: value } })));
-    new Setting(this.contentEl).setName("Title size").addSlider((slider) => slider
-      .setLimits(12, 30, 1).setValue(appearance.cards.titleSize).setDynamicTooltip()
-      .onChange((value) => this.update({ cards: { titleSize: value } })));
+    copy.addButton((button) => button.setButtonText("Copy appearance").onClick(async () => {
+      const source = others.find((item) => item.id === sourceBoardId);
+      if (!source) return;
+      if (!await this.confirmReplace(`Copy the appearance of "${source.name}" onto this board?`)) return;
+      await this.plugin.copyBoardAppearance(this.boardId, source.id);
+      this.render();
+    }));
+  }
 
-    new Setting(this.contentEl).setName("Labels").setHeading();
-    new Setting(this.contentEl)
-      .setName("Label display")
-      .setDesc("Choose when card labels reveal their names.")
-      .addDropdown((dropdown) => dropdown
-        .addOption("compact", "Always compact")
-        .addOption("expanded", "Always expanded")
-        .addOption("hover", "Expand hovered label")
-        .addOption("card-hover", "Expand when card is hovered")
-        .setValue(appearance.labels.displayMode)
-        .onChange((value) => this.update({ labels: { displayMode: value } })));
-
-    new Setting(this.contentEl).setName("Columns").setHeading();
-    let columnColor = null;
-    new Setting(this.contentEl).setName("Use theme list color").addToggle((toggle) => toggle
-      .setValue(appearance.lists.useTheme).onChange(async (value) => {
-        await this.update({ lists: { useTheme: value } });
-        if (columnColor) columnColor.setDisabled(value);
-      }));
-    new Setting(this.contentEl).setName("Column color").addColorPicker((picker) => {
-      columnColor = picker;
-      picker.setValue(appearance.lists.background).setDisabled(appearance.lists.useTheme)
-        .onChange((value) => this.update({ lists: { background: value } }));
+  /** Replacing a look is one click and has no undo, so it asks first. */
+  confirmReplace(question) {
+    return confirmAction(this.app, "Replace this board's appearance", `${question} The current look is replaced; save it as a preset first if you want it back.`, {
+      confirmText: "Replace",
+      confirmIcon: "palette",
+      warning: "",
     });
-    new Setting(this.contentEl).setName("Column spacing").addSlider((slider) => slider
-      .setLimits(0, 40, 1).setValue(appearance.lists.columnGap).setDynamicTooltip()
-      .onChange((value) => this.update({ lists: { columnGap: value } })));
-    new Setting(this.contentEl).setName("Top border thickness").addSlider((slider) => slider
-      .setLimits(0, 12, 1).setValue(appearance.lists.topBorderWidth).setDynamicTooltip()
-      .onChange((value) => this.update({ lists: { topBorderWidth: value } })));
-    new Setting(this.contentEl).setName("Show color dot").addToggle((toggle) => toggle
-      .setValue(appearance.lists.showColorDot)
-      .onChange((value) => this.update({ lists: { showColorDot: value } })));
+  }
 
-    new Setting(this.contentEl).setName("Layout and typography").setHeading();
-    new Setting(this.contentEl).setName("Content contrast").addDropdown((dropdown) => dropdown
-      .addOption("theme", "Follow Obsidian theme").addOption("dark", "Light text").addOption("light", "Neutral dark text")
-      .setValue(appearance.colorScheme).onChange((value) => this.update({ colorScheme: value })));
-    new Setting(this.contentEl).setName("Density").addDropdown((dropdown) => dropdown
-      .addOption("compact", "Compact").addOption("normal", "Normal").addOption("comfortable", "Comfortable")
-      .setValue(appearance.density).onChange((value) => this.update({ density: value })));
-    new Setting(this.contentEl).setName("Text scale").addSlider((slider) => slider
-      .setLimits(0.85, 1.4, 0.05).setValue(appearance.fontScale).setDynamicTooltip()
-      .onChange((value) => this.update({ fontScale: value })));
-    new Setting(this.contentEl).setName("Card corners").addSlider((slider) => slider
-      .setLimits(0, 24, 1).setValue(appearance.cards.borderRadius).setDynamicTooltip()
-      .onChange((value) => this.update({ cards: { borderRadius: value } })));
-    new Setting(this.contentEl).setName("Column corners").addSlider((slider) => slider
-      .setLimits(0, 24, 1).setValue(appearance.lists.borderRadius).setDynamicTooltip()
-      .onChange((value) => this.update({ lists: { borderRadius: value } })));
-    new Setting(this.contentEl).setName("Card shadow").addDropdown((dropdown) => dropdown
-      .addOption("none", "None").addOption("small", "Small").addOption("medium", "Medium").addOption("large", "Large")
-      .setValue(appearance.cards.shadow).onChange((value) => this.update({ cards: { shadow: value } })));
-    new Setting(this.contentEl).setName("Animations").addToggle((toggle) => toggle
-      .setValue(appearance.motion.enabled).onChange((value) => this.update({ motion: { enabled: value } })));
-
+  buildActions() {
     const actions = createElement("div", "ot-modal-actions");
+    // Keyed like a settings row, so focus comes back to Reset after it redraws.
+    actions.dataset.otSetting = "actions";
     const reset = createElement("button", "mod-warning", "Reset this board");
-    const close = createElement("button", "mod-cta", "Done");
+    const done = createElement("button", "mod-cta", "Done");
     reset.type = "button";
-    close.type = "button";
+    done.type = "button";
     reset.addEventListener("click", async () => {
+      const confirmed = await confirmAction(this.app, "Reset this board", "Reset every appearance setting of this board to the Obsidian theme look? Saved presets are kept.", {
+        confirmText: "Reset",
+        confirmIcon: "rotate-ccw",
+      });
+      if (!confirmed) return;
       await this.plugin.applyBoardAppearancePreset(this.boardId, "obsidian");
       this.render();
     });
-    close.addEventListener("click", () => this.close());
-    actions.append(reset, close);
-    this.contentEl.append(actions);
-    if (preserveScroll) requestAnimationFrame(() => { this.contentEl.scrollTop = scrollTop; });
+    done.addEventListener("click", () => this.close());
+    actions.append(reset, done);
+    return actions;
   }
 }
 
@@ -5255,6 +5805,8 @@ const {
   cleanColor,
   createElement,
   iconButton,
+  moveArrayEntry,
+  renderIcon,
   textButton,
   textLine,
   uid,
@@ -5265,14 +5817,18 @@ const { ListColorModal } = __require("src/modals/list-color-modal.js");
 const { buildDependenciesField } = __require("src/modals/card-dependencies-field.js");
 
 // Builds the card checklists field: groups with description, collapsed
-// dependencies, drag & drop, per-item notes and member assignment.
+// dependencies, drag & drop of items and whole checklists, per-item notes
+// and member assignment.
 /**
  * Renders every named checklist as an independent progress bar.
  */
 function buildChecklistsField(modal) {
   const field = createElement("div", "ot-checklists-field");
+  const groupsArea = createElement("div", "ot-checklist-groups");
   const checklistRenderers = new Map();
+  const groupSections = new Map();
   let draggedChecklistItem = null;
+  let draggedChecklistGroup = null;
 
   const clearChecklistDropState = () => {
     field.querySelectorAll(".is-checklist-drop-before, .is-checklist-drop-after, .is-checklist-drop-end, .is-checklist-dragging")
@@ -5288,14 +5844,7 @@ function buildChecklistsField(modal) {
     if (!draggedChecklistItem || !targetGroup) return;
     const sourceGroup = modal.localChecklists.find((candidate) => candidate.id === draggedChecklistItem.groupId);
     if (!sourceGroup) return;
-    const sourceIndex = sourceGroup.items.indexOf(draggedChecklistItem.item);
-    if (sourceIndex < 0) return;
-
-    let nextIndex = insertionIndex;
-    sourceGroup.items.splice(sourceIndex, 1);
-    if (sourceGroup === targetGroup && sourceIndex < nextIndex) nextIndex -= 1;
-    nextIndex = Math.max(0, Math.min(nextIndex, targetGroup.items.length));
-    targetGroup.items.splice(nextIndex, 0, draggedChecklistItem.item);
+    if (!moveArrayEntry(sourceGroup.items, targetGroup.items, draggedChecklistItem.item, insertionIndex)) return;
 
     const sourceRenderer = checklistRenderers.get(sourceGroup.id);
     const targetRenderer = checklistRenderers.get(targetGroup.id);
@@ -5304,13 +5853,181 @@ function buildChecklistsField(modal) {
     await modal.saveNow();
   };
 
+  // "End of the list" is the end of the dragged item's own partition: pending
+  // rows render before the completed section, so a pending item dropped on the
+  // list background must not land between completed entries in the array.
+  const endInsertionIndex = (targetGroup, draggedItem) => {
+    if (draggedItem.done) return targetGroup.items.length;
+    let insertionIndex = 0;
+    targetGroup.items.forEach((entry, position) => {
+      if (!entry.done) insertionIndex = position + 1;
+    });
+    return insertionIndex;
+  };
+
+  const clearGroupDropState = () => {
+    groupsArea.classList.remove("is-checklist-drag-compact");
+    groupsArea.querySelectorAll(".is-checklist-group-drop-before, .is-checklist-group-drop-after, .is-checklist-group-dragging")
+      .forEach((element) => element.classList.remove(
+        "is-checklist-group-drop-before",
+        "is-checklist-group-drop-after",
+        "is-checklist-group-dragging",
+      ));
+  };
+
+  // Which checklist the pointer would drop the dragged one next to: the first
+  // group whose upper half the pointer is above, otherwise after the last one.
+  const groupDropTarget = (clientY) => {
+    const candidates = modal.localChecklists
+      .filter((group) => group !== draggedChecklistGroup)
+      .map((group) => ({ group, section: groupSections.get(group.id) }))
+      .filter((candidate) => candidate.section && candidate.section.isConnected);
+    const hit = candidates.find(({ section }) => {
+      const rect = section.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    if (hit) return { ...hit, after: false };
+    const last = candidates[candidates.length - 1];
+    return last ? { ...last, after: true } : null;
+  };
+
+  const paintGroupDropTarget = (target) => {
+    groupsArea.querySelectorAll(".is-checklist-group-drop-before, .is-checklist-group-drop-after").forEach((element) => {
+      if (!target || element !== target.section) {
+        element.classList.remove("is-checklist-group-drop-before", "is-checklist-group-drop-after");
+      }
+    });
+    if (!target) return;
+    target.section.classList.toggle("is-checklist-group-drop-before", !target.after);
+    target.section.classList.toggle("is-checklist-group-drop-after", target.after);
+  };
+
+  // Reorders the checklists and moves the already-rendered sections in place,
+  // so open notes, editors and focus survive the drop without a re-render.
+  const moveChecklistGroup = async (target) => {
+    if (!draggedChecklistGroup || !target || target.group === draggedChecklistGroup) return;
+    const insertionIndex = modal.localChecklists.indexOf(target.group) + (target.after ? 1 : 0);
+    if (!moveArrayEntry(modal.localChecklists, modal.localChecklists, draggedChecklistGroup, insertionIndex)) return;
+    modal.localChecklists.forEach((group) => {
+      const section = groupSections.get(group.id);
+      if (section) groupsArea.append(section);
+    });
+    await modal.saveNow();
+  };
+
+  groupsArea.addEventListener("dragover", (event) => {
+    if (!draggedChecklistGroup || modal.readOnly) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    paintGroupDropTarget(groupDropTarget(event.clientY));
+  });
+  groupsArea.addEventListener("dragleave", (event) => {
+    if (!draggedChecklistGroup) return;
+    if (!groupsArea.contains(event.relatedTarget)) paintGroupDropTarget(null);
+  });
+  groupsArea.addEventListener("drop", (event) => {
+    if (!draggedChecklistGroup || modal.readOnly) return;
+    event.preventDefault();
+    // The reorder itself is synchronous; only the save inside is awaited.
+    // Cleaning up before that await resolves keeps this handler's tail from
+    // clobbering a new drag the user starts while the drop is still saving.
+    const commit = moveChecklistGroup(groupDropTarget(event.clientY));
+    draggedChecklistGroup = null;
+    clearGroupDropState();
+    commit.catch(console.error);
+  });
+
+  // A drag ghost the size of the collapsed header: dragging a checklist with
+  // dozens of items must not tow a screenful of rows under the pointer.
+  const appendGroupDragPreview = (group) => {
+    if (!document.body) return null;
+    const preview = createElement("div", "ot-checklist-drag-preview");
+    preview.style.setProperty("--ot-checklist-color", cleanColor(group.color) || LIST_COLORS[1]);
+    const icon = createElement("span", "ot-checklist-heading-icon");
+    setIconSafe(icon, "check-square", "");
+    const stats = checklistStats(group.items);
+    preview.append(
+      icon,
+      createElement("span", "ot-checklist-drag-preview-title", group.title || "Checklist"),
+      createElement("span", "ot-checklist-drag-preview-count", `${stats.done}/${stats.total}`),
+    );
+    preview.setAttribute("aria-hidden", "true");
+    document.body.append(preview);
+    return preview;
+  };
+
+  const groupDragHandle = (group, section) => {
+    const handle = createElement("span", "ot-checklist-drag-handle ot-checklist-group-handle");
+    handle.draggable = !modal.readOnly;
+    handle.title = "Drag to reorder checklist";
+    handle.setAttribute("aria-label", "Drag to reorder checklist");
+    setIconSafe(handle, "grip-vertical", "⋮⋮");
+    let dragPreview = null;
+    handle.addEventListener("dragstart", (event) => {
+      if (modal.readOnly) {
+        event.preventDefault();
+        return;
+      }
+      draggedChecklistGroup = group;
+      dragPreview = appendGroupDragPreview(group);
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", group.title || "Checklist");
+        if (event.dataTransfer.setDragImage && dragPreview) event.dataTransfer.setDragImage(dragPreview, 18, 18);
+      }
+      // Collapse and dim only after the browser has begun the drag, so the
+      // source keeps its geometry while the drag image is taken.
+      requestAnimationFrame(() => {
+        if (draggedChecklistGroup !== group) return;
+        section.classList.add("is-checklist-group-dragging");
+        groupsArea.classList.add("is-checklist-drag-compact");
+      });
+    });
+    handle.addEventListener("dragend", () => {
+      draggedChecklistGroup = null;
+      if (dragPreview) {
+        dragPreview.remove();
+        dragPreview = null;
+      }
+      clearGroupDropState();
+    });
+    return handle;
+  };
+
   const renderGroup = (group) => {
     if (!Array.isArray(group.dependencies)) group.dependencies = [];
     const section = createElement("div", "ot-field ot-checklist-group");
+    groupSections.set(group.id, section);
     const groupColor = cleanColor(group.color) || LIST_COLORS[1];
     section.style.setProperty("--ot-checklist-color", groupColor);
     section.style.setProperty("border", `1px solid ${groupColor}`, "important");
     const header = createElement("div", "ot-checklist-header");
+
+    // Folded is card data (it round-trips through the note's heading comment),
+    // so a checklist stays folded across reopens and syncs, not just renders.
+    const collapseToggle = createElement("button", "ot-icon-button ot-checklist-collapse");
+    collapseToggle.type = "button";
+    const paintCollapseToggle = () => {
+      const collapsed = !!group.collapsed;
+      section.classList.toggle("is-checklist-collapsed", collapsed);
+      renderIcon(collapseToggle, collapsed ? "chevron-right" : "chevron-down");
+      collapseToggle.title = collapsed ? "Expand checklist" : "Collapse checklist";
+      collapseToggle.setAttribute("aria-label", collapseToggle.title);
+      collapseToggle.setAttribute("aria-expanded", String(!collapsed));
+    };
+    paintCollapseToggle();
+    collapseToggle.addEventListener("click", () => {
+      group.collapsed = !group.collapsed;
+      paintCollapseToggle();
+      modal.saveNow().catch(console.error);
+    });
+    const expandCollapsedGroup = () => {
+      if (!group.collapsed) return;
+      group.collapsed = false;
+      paintCollapseToggle();
+      modal.saveNow().catch(console.error);
+    };
+
     const heading = createElement("div", "ot-checklist-heading");
     const headingIcon = createElement("span", "ot-checklist-heading-icon");
     headingIcon.style.setProperty("color", groupColor, "important");
@@ -5330,7 +6047,8 @@ function buildChecklistsField(modal) {
       modal.saveNow().catch(console.error);
     });
     heading.append(headingIcon, name);
-    header.append(heading);
+    if (modal.localChecklists.length > 1) header.append(groupDragHandle(group, section));
+    header.append(collapseToggle, heading);
 
     const hasDescription = !!textLine(group.description || "");
     const descriptionOpen = () => hasDescription || modal.openChecklistDescriptions.has(group.id);
@@ -5352,7 +6070,11 @@ function buildChecklistsField(modal) {
     // gate that warns or blocks colours the count to say so from the header.
     const dependenciesOpen = () => modal.openChecklistDependencies.has(group.id);
     const dependenciesToggle = iconButton("link", "Show dependencies", () => {
-      if (dependenciesOpen()) modal.openChecklistDependencies.delete(group.id);
+      // On a folded checklist the panel has nowhere to show: unfold first and
+      // make sure the click opens the panel instead of toggling it shut.
+      const wasCollapsed = !!group.collapsed;
+      expandCollapsedGroup();
+      if (!wasCollapsed && dependenciesOpen()) modal.openChecklistDependencies.delete(group.id);
       else modal.openChecklistDependencies.add(group.id);
       paintDependenciesToggle();
     });
@@ -5481,13 +6203,14 @@ function buildChecklistsField(modal) {
     list.addEventListener("dragleave", (event) => {
       if (!list.contains(event.relatedTarget)) list.classList.remove("is-checklist-drop-end");
     });
-    list.addEventListener("drop", async (event) => {
+    list.addEventListener("drop", (event) => {
       if (!draggedChecklistItem || modal.readOnly) return;
       event.preventDefault();
       list.classList.remove("is-checklist-drop-end");
-      await moveChecklistItem(group, group.items.length);
+      const commit = moveChecklistItem(group, endInsertionIndex(group, draggedChecklistItem.item));
       draggedChecklistItem = null;
       clearChecklistDropState();
+      commit.catch(console.error);
     });
     const updateProgress = () => {
       const stats = checklistStats(group.items);
@@ -5495,12 +6218,49 @@ function buildChecklistsField(modal) {
       progressFill.style.width = `${stats.percent}%`;
     };
 
+    const completedOpen = () => modal.openChecklistCompleted.has(group.id);
+
+    // Completed rows sit behind their own toggle so a long checklist reads as
+    // what is still pending; the count keeps the hidden rows accounted for.
+    const buildCompletedSection = (doneCount, completedItemsArea) => {
+      const wrap = createElement("div", "ot-checklist-completed");
+      const open = completedOpen();
+      const toggle = textButton(open ? "chevron-down" : "chevron-right", `Completed (${doneCount})`, () => {
+        if (completedOpen()) modal.openChecklistCompleted.delete(group.id);
+        else modal.openChecklistCompleted.add(group.id);
+        renderItems();
+        // The rebuild replaced the button under the keyboard user's focus.
+        const nextToggle = list.querySelector(".ot-checklist-completed-toggle");
+        if (nextToggle) nextToggle.focus();
+      }, "ot-checklist-completed-toggle");
+      toggle.title = open ? "Hide completed items" : "Show completed items";
+      toggle.setAttribute("aria-expanded", String(open));
+      wrap.append(toggle);
+      if (completedItemsArea) wrap.append(completedItemsArea);
+      return wrap;
+    };
+
+    // Re-rendering replaces the node that held keyboard focus; put it back on
+    // the same item's checkbox, or on the Completed toggle it moved behind.
+    const restoreItemFocus = (item) => {
+      const checkbox = item.id ? list.querySelector(`[data-item-id="${item.id}"] input[type="checkbox"]`) : null;
+      const target = checkbox || list.querySelector(".ot-checklist-completed-toggle");
+      if (target && !target.disabled) target.focus();
+    };
+
     const renderItems = () => {
       list.replaceChildren();
       if (!group.items.length) list.append(createElement("span", "ot-empty-text", "No checklist items"));
 
-      group.items.forEach((item, index) => {
+      // Collapsed completed rows are not even built: a checklist with dozens
+      // of ticked items should not pay their Markdown wiring to stay hidden.
+      const doneCount = group.items.filter((item) => item.done).length;
+      const completedItemsArea = completedOpen() ? createElement("div", "ot-checklist-completed-items") : null;
+
+      group.items.forEach((item) => {
+        if (item.done && !completedItemsArea) return;
         const itemWrap = createElement("div", "ot-checklist-item");
+        itemWrap.dataset.itemId = item.id || "";
         const row = createElement("div", "ot-checklist-row");
         const dragHandle = createElement("span", "ot-checklist-drag-handle");
         dragHandle.draggable = !modal.readOnly;
@@ -5525,6 +6285,13 @@ function buildChecklistsField(modal) {
         });
         itemWrap.addEventListener("dragover", (event) => {
           if (!draggedChecklistItem || modal.readOnly) return;
+          // Rows only host neighbours from their own partition: a pending item
+          // can never visually sit between completed rows, so accepting the
+          // drop would paint a seam the re-render then contradicts.
+          if (!!draggedChecklistItem.item.done !== !!item.done) {
+            event.stopPropagation();
+            return;
+          }
           event.preventDefault();
           event.stopPropagation();
           if (draggedChecklistItem.item === item) return;
@@ -5536,20 +6303,21 @@ function buildChecklistsField(modal) {
         itemWrap.addEventListener("dragleave", () => {
           itemWrap.classList.remove("is-checklist-drop-before", "is-checklist-drop-after");
         });
-        itemWrap.addEventListener("drop", async (event) => {
+        itemWrap.addEventListener("drop", (event) => {
           if (!draggedChecklistItem || modal.readOnly) return;
           event.preventDefault();
           event.stopPropagation();
-          if (draggedChecklistItem.item === item) {
+          if (draggedChecklistItem.item === item || !!draggedChecklistItem.item.done !== !!item.done) {
             clearChecklistDropState();
             return;
           }
           const targetIndex = group.items.indexOf(item);
           const after = itemWrap.classList.contains("is-checklist-drop-after");
           itemWrap.classList.remove("is-checklist-drop-before", "is-checklist-drop-after");
-          await moveChecklistItem(group, targetIndex + (after ? 1 : 0));
+          const commit = moveChecklistItem(group, targetIndex + (after ? 1 : 0));
           draggedChecklistItem = null;
           clearChecklistDropState();
+          commit.catch(console.error);
         });
         const checkbox = createElement("input");
         checkbox.type = "checkbox";
@@ -5710,7 +6478,8 @@ function buildChecklistsField(modal) {
               modal.finishChecklistNoteEdit(item.filePath);
               modal.expandedChecklistNotes.delete(item.filePath);
             }
-            group.items.splice(index, 1);
+            const itemIndex = group.items.indexOf(item);
+            if (itemIndex >= 0) group.items.splice(itemIndex, 1);
             renderItems();
             await modal.saveNow();
           } catch (error) {
@@ -5730,7 +6499,17 @@ function buildChecklistsField(modal) {
             }
           }
           item.done = checkbox.checked;
-          updateProgress();
+          // A ticked item whose note is open on screen would otherwise vanish
+          // into the collapsed completed section mid-edit; reveal the section
+          // so the row (and the editor it hosts) stays visible.
+          if (item.done && item.filePath && !completedOpen()
+            && (modal.expandedChecklistNotes.has(item.filePath) || modal.editingChecklistNotes.has(item.filePath))) {
+            modal.openChecklistCompleted.add(group.id);
+          }
+          // Re-render so the row crosses between the pending list and the
+          // completed section instead of only repainting the progress bar.
+          renderItems();
+          restoreItemFocus(item);
           modal.saveNow().catch(console.error);
         });
         input.addEventListener("input", () => {
@@ -5793,8 +6572,14 @@ function buildChecklistsField(modal) {
             showNoteBody();
           }
         }
-        list.append(itemWrap);
+        (item.done ? completedItemsArea : list).append(itemWrap);
       });
+
+      if (doneCount) list.append(buildCompletedSection(doneCount, completedItemsArea));
+      // A re-render rebuilds rows after the modal's one-time read-only sweep,
+      // so the fresh controls must be frozen again (the Completed toggle stays
+      // usable: it only reveals content).
+      if (modal.readOnly) modal.disableEditing([list]);
       updateProgress();
     };
     checklistRenderers.set(group.id, renderItems);
@@ -5851,7 +6636,8 @@ function buildChecklistsField(modal) {
     return section;
   };
 
-  modal.localChecklists.forEach((group) => field.append(renderGroup(group)));
+  modal.localChecklists.forEach((group) => groupsArea.append(renderGroup(group)));
+  field.append(groupsArea);
   const addChecklist = textButton("plus", "Add checklist", () => {
     new TextPromptModal(modal.app, "Add checklist", "Checklist name", "", (title) => {
       const color = LIST_COLORS[modal.localChecklists.length % LIST_COLORS.length] || LIST_COLORS[1];
@@ -5907,7 +6693,7 @@ const { buildChecklistsField } = __require("src/modals/card-checklist-field.js")
 
 // Controls that only reveal content, so a read-only viewer keeps them: they
 // expand a panel or open a preview without ever writing to the card.
-const VIEW_ONLY_CONTROL_CLASSES = ["ot-image-tile", "ot-checklist-deps-button", "ot-checklist-note-action"];
+const VIEW_ONLY_CONTROL_CLASSES = ["ot-image-tile", "ot-checklist-deps-button", "ot-checklist-note-action", "ot-checklist-completed-toggle", "ot-checklist-collapse"];
 
 // The card editor modal: state, locking, saving, and field wiring.
 class CardModal extends Modal {
@@ -5992,6 +6778,9 @@ class CardModal extends Modal {
     // Group ids whose dependency panel is open. Built fresh on every load, which
     // is what makes collapsed the state a card is always reopened in.
     this.openChecklistDependencies = new Set();
+    // Group ids whose completed sub-list is expanded. Also rebuilt on load, so
+    // completed items start tucked away every time a card is opened.
+    this.openChecklistCompleted = new Set();
     this.localAssignees = clone(card.assignees || []);
     await this.setupCardLock();
     this.render();
@@ -6184,6 +6973,19 @@ class CardModal extends Modal {
     menu.showAtMouseEvent(event);
   }
 
+  /**
+   * The code as a document number above the title: no chip here, because in
+   * the card's own editor it is the heading's eyebrow rather than a tag in a
+   * list. Only the colour of the board's look carries over.
+   */
+  buildCodeEyebrow(card, board) {
+    const eyebrow = createElement("div", "ot-card-modal-code", card.code);
+    eyebrow.setAttribute("translate", "no");
+    const look = board ? this.plugin.getBoardAppearance(board.id).codes : null;
+    if (look && look.color) eyebrow.style.setProperty("--ot-code-color", look.color);
+    return eyebrow;
+  }
+
   render() {
     const card = this.card;
     const previousBody = this.contentEl.querySelector(".ot-card-modal-body");
@@ -6217,7 +7019,7 @@ class CardModal extends Modal {
     if (list && board) location.append(createElement("span", "ot-card-modal-location-sep", "·"));
     if (board) location.append(createElement("span", "", board.name));
     if (!list && !board) location.append(createElement("span", "", "Kanux card"));
-    if (card.code) header.append(createElement("div", "ot-card-modal-code", card.code));
+    if (card.code) header.append(this.buildCodeEyebrow(card, board));
     header.append(title, location);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
@@ -6600,6 +7402,7 @@ class CardModal extends Modal {
         id: group.id || uid("checklist"),
         title: textLine(group.title) || `Checklist ${index + 1}`,
         color: cleanColor(group.color) || LIST_COLORS[1],
+        collapsed: !!group.collapsed,
         description: String(group.description || ""),
         dependencies: normalizeDependencies(group.dependencies),
         items: (group.items || [])
@@ -6662,8 +7465,11 @@ const { Menu, Modal, Notice } = require("obsidian");
 // sidebar, sticky actions — because what you are filling in *is* a card, and
 // two layouts for the same content would only make you learn it twice.
 const {
+  CODE_SEPARATORS,
   LIST_COLORS,
+  MAX_NUMBER_PAD,
   addButtonIcon,
+  cardCodeChip,
   cleanColor,
   clone,
   createElement,
@@ -6673,12 +7479,13 @@ const {
   textButton,
   textLine,
 } = __require("src/helpers.js");
+const { BoardAppearanceModal } = __require("src/modals/board-appearance-modal.js");
 const { LabelPickerModal } = __require("src/modals/label-picker-modal.js");
 const { ListColorModal } = __require("src/modals/list-color-modal.js");
 const { confirmAction } = __require("src/modals/prompt-modals.js");
 
 const BLANK_HINT = "Write [ ] wherever the card should be filled in — “As a [ ] I want [ ] so that [ ]”. The editor opens on the first one.";
-const NUMBER_HINT = "Every card made from this template takes the next code and the counter moves on. The code is stored on the card, so renaming it keeps the code. Restart the counter any time from Manage templates.";
+const NUMBER_HINT = "Each card takes the next code as it is made and keeps it through renames. The counter lives in this template; restart it any time from Manage templates. How the chip looks is set for the whole board in Customize.";
 const DEFAULT_PAD = 3;
 
 class CardTemplateModal extends Modal {
@@ -6699,7 +7506,7 @@ class CardTemplateModal extends Modal {
     };
     // Kept aside from the template so switching numbering off and back on does
     // not throw away the prefix that was already typed.
-    this.numberingDraft = { prefix: "", next: 1, pad: DEFAULT_PAD };
+    this.numberingDraft = { prefix: "", separator: "dash", next: 1, pad: DEFAULT_PAD };
     this.globalLabels = clone(plugin.data.labels || []);
   }
 
@@ -6864,48 +7671,80 @@ class CardTemplateModal extends Modal {
 
   /**
    * A running code — BUG-014 — stamped on the front of every card this template
-   * makes, so a card can be named out loud.
+   * makes, so a card can be named out loud. The switch reveals the code's parts
+   * and the card it goes on next, drawn the way this board draws every chip:
+   * the look is the board's choice, made in Customize, not the template's.
    */
   buildNumberingField() {
     const field = createElement("div", "ot-field ot-template-numbering");
-    field.append(createElement("span", "", "Numbering"));
 
-    const toggleRow = createElement("label", "ot-template-toggle");
     const toggle = createElement("input", "");
     toggle.type = "checkbox";
+    toggle.name = "numbering";
     toggle.checked = !!this.template.numbering;
-    toggleRow.append(toggle, createElement("span", "", "Number each card"));
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-label", "Number each card");
+    const switchEl = createElement("span", "ot-switch");
+    switchEl.append(toggle, createElement("span", "ot-switch-track"));
 
-    const boxes = createElement("div", "ot-template-number-boxes");
-    boxes.append(
-      this.buildNumberBox("Prefix", "prefix"),
-      this.buildNumberBox("Next", "next"),
-      this.buildNumberBox("Digits", "pad"),
-    );
+    // The heading is the switch's label, so the whole row toggles.
+    const head = createElement("label", "ot-field-row ot-template-numbering-head");
+    head.append(createElement("span", "", "Numbering"), switchEl);
 
-    this.previewEl = createElement("p", "ot-template-number-preview");
-    this.previewEl.setAttribute("aria-live", "polite");
-    const hint = createElement("span", "ot-template-hint", NUMBER_HINT);
+    // Built once: the caption row carries the way to Customize, and a repaint
+    // must neither destroy that button nor re-announce it. Only the name line
+    // is live, and it reads as one phrase.
+    const caption = createElement("div", "ot-template-number-caption-row");
+    const customize = iconButton("palette", "Change the chip look in Customize", () => this.openCustomize());
+    customize.classList.add("ot-template-customize");
+    caption.append(createElement("span", "ot-template-number-caption", "Next card"), customize);
+    this.numberNameEl = createElement("div", "ot-template-number-name");
+    this.numberNameEl.setAttribute("aria-live", "polite");
+    this.numberNameEl.setAttribute("aria-atomic", "true");
+    this.previewEl = createElement("div", "ot-template-number-preview");
+    this.previewEl.append(caption, this.numberNameEl);
+
+    const body = createElement("div", "ot-template-numbering-body");
+    body.append(this.previewEl, this.buildCodeParts(), createElement("span", "ot-template-hint", NUMBER_HINT));
 
     const paint = () => {
       const on = toggle.checked;
       this.template.numbering = on ? { ...this.numberingDraft } : null;
-      boxes.hidden = !on;
-      this.previewEl.hidden = !on;
-      hint.hidden = !on;
+      body.hidden = !on;
       this.paintNumberPreview();
     };
 
     toggle.addEventListener("change", paint);
     paint();
 
-    field.append(toggleRow, boxes, this.previewEl, hint);
+    field.append(head, body);
     return field;
+  }
+
+  /** Prefix beside its separator, then the next number beside its digits: the code, in parts. */
+  buildCodeParts() {
+    const boxes = createElement("div", "ot-template-number-boxes");
+    boxes.append(
+      this.buildNumberBox("Prefix", "prefix"),
+      this.buildChoiceBox("Separator", "separator", CODE_SEPARATORS.map((separator) => ({
+        value: separator.id,
+        text: separator.char || "None",
+        label: separator.label,
+      }))),
+      this.buildNumberBox("Next number", "next"),
+      this.buildChoiceBox("Digits", "pad", Array.from({ length: MAX_NUMBER_PAD }, (_, index) => ({
+        value: String(index + 1),
+        text: String(index + 1),
+      }))),
+    );
+    return boxes;
   }
 
   buildNumberBox(label, key) {
     const wrap = createElement("label", "ot-template-number-box");
-    const input = createElement("input", "ot-input");
+    const input = createElement("input", "");
+    input.name = key;
+    input.autocomplete = "off";
     if (key === "prefix") {
       input.type = "text";
       input.placeholder = "BUG";
@@ -6914,35 +7753,61 @@ class CardTemplateModal extends Modal {
     } else {
       input.type = "number";
       input.inputMode = "numeric";
-      input.min = key === "pad" ? "1" : "0";
-      if (key === "pad") input.max = "8";
+      input.min = "0";
     }
     input.value = String(this.numberingDraft[key]);
     input.addEventListener("input", () => {
-      this.numberingDraft[key] = key === "prefix" ? input.value : Number(input.value);
-      if (this.template.numbering) this.template.numbering = { ...this.numberingDraft };
-      this.paintNumberPreview();
+      this.updateNumbering({ [key]: key === "prefix" ? input.value : Number(input.value) });
     });
 
     wrap.append(createElement("span", "", label), input);
     return wrap;
   }
 
+  /** A closed list of values — separators, digit counts — as a native select. */
+  buildChoiceBox(label, key, choices) {
+    const wrap = createElement("label", "ot-template-number-box");
+    const select = createElement("select", "dropdown");
+    select.name = key;
+    choices.forEach((choice) => {
+      const option = createElement("option", "", choice.text);
+      option.value = choice.value;
+      if (choice.label) option.setAttribute("aria-label", choice.label);
+      select.append(option);
+    });
+    select.value = String(this.numberingDraft[key]);
+    select.addEventListener("change", () => {
+      this.updateNumbering({ [key]: key === "pad" ? Number(select.value) : select.value });
+    });
+
+    wrap.append(createElement("span", "", label), select);
+    return wrap;
+  }
+
+  updateNumbering(patch) {
+    Object.assign(this.numberingDraft, patch);
+    if (this.template.numbering) this.template.numbering = { ...this.numberingDraft };
+    this.paintNumberPreview();
+  }
+
   paintNumberPreview() {
-    if (!this.previewEl) return;
+    if (!this.numberNameEl) return;
     const code = formatCardCode(this.template.numbering);
     if (!code) {
-      this.previewEl.replaceChildren();
+      this.numberNameEl.replaceChildren();
       return;
     }
     // Shown the way the card will wear it: the code beside the name, in the same
     // chip the board uses — never inside the title, which a rename would take.
-    const name = createElement("span", "ot-template-number-name");
-    name.append(
-      createElement("span", "ot-card-code", code),
+    this.numberNameEl.replaceChildren(
+      cardCodeChip(code, this.plugin.getBoardAppearance(this.board.id).codes),
       createElement("span", "", this.template.title || "Untitled card"),
     );
-    this.previewEl.replaceChildren(createElement("span", "ot-template-number-caption", "Next card"), name);
+  }
+
+  /** The board's appearance, opened on top; the preview follows whatever was chosen there. */
+  openCustomize() {
+    new BoardAppearanceModal(this.app, this.plugin, this.board.id, () => this.paintNumberPreview()).open();
   }
 
   memberAvatar(member) {
@@ -7185,7 +8050,7 @@ const { Modal } = require("obsidian");
 // The board's card templates, listed so they can be read, edited and removed.
 // Making a card from a template belongs to the board (the Add card menu, the
 // list menus); what has no home there is managing the templates themselves.
-const { addButtonIcon, createElement, formatCardCode, iconButton } = __require("src/helpers.js");
+const { addButtonIcon, cardCodeChip, createElement, formatCardCode, iconButton } = __require("src/helpers.js");
 const { CardTemplateModal } = __require("src/modals/card-template-modal.js");
 const { fillMiniCard } = __require("src/modals/modal-ui.js");
 
@@ -7250,7 +8115,7 @@ class CardTemplateLibraryModal extends Modal {
       title: template.title,
       listTitle: (list && list.title) || "",
       listColor: (list && list.color) || "",
-    }, code ? createElement("span", "ot-card-code", code) : null);
+    }, code ? cardCodeChip(code, this.plugin.getBoardAppearance(this.board.id).codes) : null);
     open.addEventListener("click", () => {
       this.close();
       this.plugin.openCardTemplate(template).catch(console.error);
@@ -7331,106 +8196,6 @@ module.exports = {
   inlineAutoformatMatch,
   splitDetailSegments,
 };
-
-  },
-  "src/board/board-appearance.js": function(module, exports, __require) {
-// Applies the active appearance (density, colors, background, motion) to the
-// board root element as CSS variables, classes, and background properties.
-
-const BOARD_DENSITY = {
-  compact: { listWidth: 258, listMinWidth: 244, cardPadding: "7px 8px" },
-  normal: { listWidth: 292, listMinWidth: 272, cardPadding: "9px 10px" },
-  comfortable: { listWidth: 326, listMinWidth: 300, cardPadding: "12px" },
-};
-const CARD_SHADOWS = {
-  none: "none",
-  small: "0 1px 2px rgb(0 0 0 / 16%)",
-  medium: "0 2px 4px rgb(0 0 0 / 24%), 0 1px 1px rgb(0 0 0 / 16%)",
-  large: "0 6px 16px rgb(0 0 0 / 32%), 0 2px 4px rgb(0 0 0 / 22%)",
-};
-const BOARD_BACKGROUND_PROPERTIES = [
-  "background-image",
-  "background-color",
-  "background-size",
-  "background-position",
-  "background-repeat",
-  "background-attachment",
-];
-
-const boardAppearanceMethods = {
-  applyAppearance() {
-    const root = this.contentEl;
-    const appearance = this.plugin.getAppearance();
-    this.applyAppearanceVariables(root, appearance);
-    this.applyAppearanceClasses(root, appearance);
-    this.applyBoardBackground(root, appearance.background);
-  },
-
-  applyAppearanceVariables(root, appearance) {
-    const density = BOARD_DENSITY[appearance.density] || BOARD_DENSITY.normal;
-    root.style.setProperty("--ot-font-scale", String(appearance.fontScale));
-    root.style.setProperty("--ot-list-width", `${density.listWidth}px`);
-    root.style.setProperty("--ot-list-min-width", `${density.listMinWidth}px`);
-    root.style.setProperty("--ot-card-padding", density.cardPadding);
-    root.style.setProperty("--ot-card-gap", `${appearance.cards.verticalGap}px`);
-    root.style.setProperty("--ot-card-radius", `${appearance.cards.borderRadius}px`);
-    root.style.setProperty("--ot-card-hover-background", appearance.cards.hoverBackground);
-    root.style.setProperty("--ot-card-title-size", `${appearance.cards.titleSize}px`);
-    root.style.setProperty("--ot-column-gap", `${appearance.lists.columnGap}px`);
-    root.style.setProperty("--ot-list-top-border-width", `${appearance.lists.topBorderWidth}px`);
-    root.style.setProperty("--ot-list-radius", `${appearance.lists.borderRadius}px`);
-    root.style.setProperty("--ot-card-shadow", CARD_SHADOWS[appearance.cards.shadow] || CARD_SHADOWS.medium);
-    root.style.setProperty("--ot-card-background", appearance.cards.useTheme
-      ? "color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 88%, var(--background-modifier-hover) 12%)"
-      : appearance.cards.background);
-    root.style.setProperty("--ot-list-background", appearance.lists.useTheme
-      ? "color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%)"
-      : appearance.lists.background);
-  },
-
-  applyAppearanceClasses(root, appearance) {
-    root.classList.toggle("is-motion-disabled", !appearance.motion.enabled);
-    root.classList.toggle("is-appearance-dark", appearance.colorScheme === "dark");
-    root.classList.toggle("is-appearance-light", appearance.colorScheme === "light");
-    root.classList.toggle("is-surfaces-dark", appearance.surfaceScheme === "dark");
-    root.classList.toggle("is-surfaces-light", appearance.surfaceScheme === "light");
-    root.classList.toggle("is-list-color-dot-hidden", !appearance.lists.showColorDot);
-  },
-
-  applyBoardBackground(root, background) {
-    BOARD_BACKGROUND_PROPERTIES.forEach((property) => root.style.removeProperty(property));
-    if (background.type === "solid") {
-      root.style.setProperty("background-color", background.color, "important");
-      return;
-    }
-    if (background.type === "gradient") {
-      root.style.setProperty("background-color", background.gradientEnd, "important");
-      root.style.setProperty("background-image", `linear-gradient(135deg, ${background.gradientStart}, ${background.gradientEnd})`);
-      return;
-    }
-    if (background.type === "image" && background.imagePath) {
-      this.applyImageBoardBackground(root, background);
-      return;
-    }
-    root.style.setProperty("background-color", "var(--background-primary)", "important");
-  },
-
-  applyImageBoardBackground(root, background) {
-    const resourcePath = this.plugin.getAppearanceBackgroundResource(background);
-    root.style.setProperty("background-color", "var(--background-primary)", "important");
-    if (!resourcePath) return;
-    const resource = resourcePath.replace(/"/g, "\\\"");
-    const imageSize = ["repeat", "original"].includes(background.imageFit) ? "auto" : background.imageFit;
-    const overlay = `linear-gradient(rgb(0 0 0 / ${background.overlayOpacity}), rgb(0 0 0 / ${background.overlayOpacity}))`;
-    root.style.setProperty("background-image", `${overlay}, url("${resource}")`);
-    root.style.setProperty("background-position", "center, center");
-    root.style.setProperty("background-size", `auto, ${imageSize}`);
-    root.style.setProperty("background-repeat", background.imageFit === "repeat" ? "no-repeat, repeat" : "no-repeat, no-repeat");
-    root.style.setProperty("background-attachment", "local");
-  },
-};
-
-module.exports = { boardAppearanceMethods };
 
   },
   "src/board/card-drag.js": function(module, exports, __require) {
@@ -7670,6 +8435,7 @@ const {
   DEPENDENCY_BLOCK_NONE,
   LIST_DRAG_TYPE,
   addButtonIcon,
+  cardCodeChip,
   checklistItems,
   checklistStats,
   createElement,
@@ -7893,12 +8659,13 @@ const listCardMethods = {
   },
 
   /**
-   * The code reads as a chip in front of the name. It lives in the card's own
-   * frontmatter, so renaming the card does not take its identifier with it.
+   * The code reads as a chip beside the name, drawn the way this board's
+   * appearance says. It lives in the card's own frontmatter, so renaming the
+   * card does not take its identifier with it.
    */
   buildCardTitle(card) {
     const title = createElement("div", "ot-card-title");
-    if (card.code) title.append(createElement("span", "ot-card-code", card.code));
+    if (card.code) title.append(cardCodeChip(card.code, this.codeLook));
     title.append(createElement("span", "ot-card-title-text", card.title));
     return title;
   },
@@ -8871,6 +9638,7 @@ const { Menu, setIcon } = require("obsidian");
 const {
   DEPENDENCY_BLOCK_NONE,
   addButtonIcon,
+  cardCodeChip,
   checklistItems,
   checklistStats,
   createElement,
@@ -9178,7 +9946,7 @@ const tableViewMethods = {
     const nameCell = createElement("td", "ot-td ot-td-name");
     const nameInner = createElement("div", "ot-td-name-inner");
     const title = createElement("span", "ot-td-title");
-    if (card.code) title.append(createElement("span", "ot-card-code", card.code));
+    if (card.code) title.append(cardCodeChip(card.code, this.codeLook));
     title.append(createElement("span", "", card.title));
     nameInner.append(this.buildTableCompletionControl(card, lockHolder), title);
     const hints = this.buildTableCardHints(card);
@@ -10181,6 +10949,7 @@ const {
   cleanColor,
   clone,
   isImagePath,
+  normalizeCodeLook,
   textLine,
   uid,
 } = __require("src/helpers.js");
@@ -10302,6 +11071,9 @@ const appearanceMethods = {
       motion: {
         enabled: motion.enabled !== false,
       },
+      // One look for every code chip on the board, so BUG-014 and FEAT-002
+      // read as the same kind of thing wherever they appear.
+      codes: normalizeCodeLook(source.codes),
     };
   },
 

@@ -3,7 +3,7 @@ const { Modal } = require("obsidian");
 // The board's card templates, listed so they can be read, edited and removed.
 // Making a card from a template belongs to the board (the Add card menu, the
 // list menus); what has no home there is managing the templates themselves.
-const { addButtonIcon, createElement, formatCardCode, iconButton } = require("../helpers");
+const { addButtonIcon, cardCodeChip, createElement, formatCardCode, iconButton } = require("../helpers");
 const { CardTemplateModal } = require("./card-template-modal");
 const { fillMiniCard } = require("./modal-ui");
 
@@ -68,7 +68,7 @@ class CardTemplateLibraryModal extends Modal {
       title: template.title,
       listTitle: (list && list.title) || "",
       listColor: (list && list.color) || "",
-    }, code ? createElement("span", "ot-card-code", code) : null);
+    }, code ? cardCodeChip(code, this.plugin.getBoardAppearance(this.board.id).codes) : null);
     open.addEventListener("click", () => {
       this.close();
       this.plugin.openCardTemplate(template).catch(console.error);

@@ -70,6 +70,71 @@ function colorSwatchGrid(colors, selectedColor, onPick) {
   return swatches;
 }
 
+/**
+ * One choice out of a few, drawn as a row of buttons: a radio group. The
+ * arrow keys move the choice the way native radios do, and only the chosen
+ * button sits in the tab order, so the whole group costs one tab stop.
+ *
+ * `options` are `{ value, label, render? }`; `render(button)` fills a button
+ * with something other than its label — a sample chip, a colour dot — while
+ * the label still names it for assistive tech. `group.setValue(value)`
+ * repaints the group when the choice changes from outside.
+ */
+function choiceGroup(className, groupLabel, options, value, onChange) {
+  const group = createElement("div", className);
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-label", groupLabel);
+  let current = value;
+
+  const paint = () => {
+    const chosen = options.findIndex((option) => option.value === current);
+    Array.from(group.children).forEach((button, index) => {
+      const on = index === chosen;
+      button.setAttribute("aria-checked", on ? "true" : "false");
+      // With nothing chosen the first button keeps the group reachable.
+      button.tabIndex = on || (chosen < 0 && index === 0) ? 0 : -1;
+    });
+  };
+
+  const choose = (next) => {
+    if (next === current) return;
+    current = next;
+    paint();
+    onChange(next);
+  };
+
+  options.forEach((option, index) => {
+    const button = createElement("button", "");
+    button.type = "button";
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-label", option.label);
+    if (option.render) {
+      option.render(button);
+      button.title = option.label;
+    } else {
+      button.textContent = option.label;
+    }
+    button.addEventListener("click", () => choose(option.value));
+    button.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      const next = (index + step + options.length) % options.length;
+      choose(options[next].value);
+      group.children[next].focus();
+    });
+    group.append(button);
+  });
+
+  group.setValue = (next) => {
+    current = next;
+    paint();
+  };
+  paint();
+  return group;
+}
+
 // The run of consecutive image entries around `index` (entries matching isGap
 // between images don't break the run) — the group a grid layout applies to.
 function imageRunAround(items, index, isGap) {
@@ -135,6 +200,7 @@ module.exports = {
   setIconSafe,
   fillMiniCard,
   colorSwatchGrid,
+  choiceGroup,
   imageRunAround,
   imageFilesFromTransfer,
   imageStamp,

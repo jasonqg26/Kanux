@@ -71,22 +71,22 @@ Mezclados en `BoardView.prototype` desde `board/board-view.js`:
 | `card-modal.js` | Shell del editor de card: estado local, lock colaborativo, ciclo de guardado y cableado de campos. |
 | `card-details-field.js` | Campo de descripción de card: WYSIWYG, autoformato y adjuntos. |
 | `card-detail-images.js` | Imágenes del campo de detalles: tamaño, resize interactivo, portapapeles e inserción de archivos. |
-| `card-checklist-field.js` | Campo de checklists: grupos con descripción, dependencias plegadas, drag & drop, notas por item y miembros. |
+| `card-checklist-field.js` | Campo de checklists: grupos plegables con descripción, dependencias plegadas, drag & drop de items y de grupos (con vista compacta durante el arrastre), sub-lista plegable de completados, notas por item y miembros. |
 | `card-dependencies-field.js` | Editor de dependencias compartido por la card y cada grupo de checklist. Avisa a su dueño de cada cambio para que un resumen dibujado fuera del campo siga siendo cierto. |
 | `dependency-level-picker.js` | Los tres niveles de bloqueo: cómo se presentan y el popover que los intercambia. |
 | `card-picker-modal.js` | Selector de una card del vault, con búsqueda por título y ubicación. |
-| `card-template-modal.js` | Editor de plantillas de card, con el chrome del modal de card: título, lista destino, etiquetas, miembros, numeración, descripción rellenable y checklists. |
+| `card-template-modal.js` | Editor de plantillas de card, con el chrome del modal de card: título, lista destino, etiquetas, miembros, numeración (prefijo, separador, contador y dígitos, con vista previa de la próxima card dibujada con el aspecto del tablero), descripción rellenable y checklists. |
 | `card-template-library-modal.js` | Las plantillas del tablero: abrir su nota, reiniciar su numeración, borrarlas y crear una nueva. |
 | `card-pdf-export.js` | Export de la card a PDF seguro para el vault. |
 | `card-dates-modal.js` | Selector de fechas de inicio/vencimiento. |
 | `label-picker-modal.js` | Selección y edición de etiquetas. |
 | `list-color-modal.js` | Selector de color compartido por listas y checklists. |
-| `board-appearance-modal.js` | Ajustes de apariencia del tablero. |
+| `board-appearance-modal.js` | Customize: ajustes de apariencia del tablero con una franja de vista previa dibujada por las mismas reglas que el tablero (variables y clases de `board-appearance.js`), secciones por superficie (fondo, cards, códigos de card, columnas, tipografía), commits con debounce para los sliders, foco y scroll conservados al redibujar, y confirmación antes de reemplazar o reiniciar el aspecto. |
 | `prompt-modals.js` | Prompts de texto y confirmaciones reutilizables. |
 | `vault-suggest-modals.js` | Pickers difusos sobre archivos del vault. |
 | `about-modal.js` | Panel de créditos. |
 | `details-markdown.js` | Conversión Markdown ↔ HTML del subconjunto WYSIWYG, autoformato y segmentación de detalles (funciones puras). |
-| `modal-ui.js` | Utilidades pequeñas de DOM/imagen y constantes de timing compartidas por los modales. |
+| `modal-ui.js` | Utilidades pequeñas de DOM/imagen y constantes de timing compartidas por los modales; incluye `choiceGroup`, un grupo de opciones excluyentes dibujado como botones con semántica y teclado de radio. |
 
 ## Editor y ajustes
 

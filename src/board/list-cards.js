@@ -6,6 +6,7 @@ const {
   DEPENDENCY_BLOCK_NONE,
   LIST_DRAG_TYPE,
   addButtonIcon,
+  cardCodeChip,
   checklistItems,
   checklistStats,
   createElement,
@@ -229,12 +230,13 @@ const listCardMethods = {
   },
 
   /**
-   * The code reads as a chip in front of the name. It lives in the card's own
-   * frontmatter, so renaming the card does not take its identifier with it.
+   * The code reads as a chip beside the name, drawn the way this board's
+   * appearance says. It lives in the card's own frontmatter, so renaming the
+   * card does not take its identifier with it.
    */
   buildCardTitle(card) {
     const title = createElement("div", "ot-card-title");
-    if (card.code) title.append(createElement("span", "ot-card-code", card.code));
+    if (card.code) title.append(cardCodeChip(card.code, this.codeLook));
     title.append(createElement("span", "ot-card-title-text", card.title));
     return title;
   },
