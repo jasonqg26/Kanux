@@ -25,6 +25,10 @@ Open a card to manage its labels, dates, Markdown description, checklists, and p
 
 ![Complete Kanux card editor](<docs/images/View of the card.png>)
 
+Descriptions are written in an embedded Obsidian editor with Live Preview, a formatting toolbar, and note and tag autocompletion. On wide screens it opens as a side panel beside the card, and everything saves as you type.
+
+![Card description open in the embedded Markdown editor side panel](<docs/images/Native Markdown Editor.png>)
+
 <details>
 <summary>More card details</summary>
 
@@ -32,15 +36,37 @@ Open a card to manage its labels, dates, Markdown description, checklists, and p
 
 ![Start and due dates displayed on a card](<docs/images/View of the date on a card.png>)
 
-#### Labels
+#### Checklist descriptions
 
-![Colored labels displayed on cards](<docs/images/View of the tags on the cards.png>)
+Each checklist can carry its own line of context above its items.
+
+![Description written for a single checklist](<docs/images/Description for a checklist.png>)
 
 #### Markdown linked to a checklist task
 
 ![Expanded Markdown document linked to a checklist task](<docs/images/View of the document linked to a check-list-item.png>)
 
 </details>
+
+### Card templates and running codes
+
+Save any card as a template, or build one from scratch, and start a new card from it in any list. Templates live as ordinary notes inside the board folder and never appear on the board itself.
+
+![Add card menu listing the board's card templates](<docs/images/Templates for the cards.png>)
+
+A template can also number the cards it makes: pick a prefix, the separator between prefix and number, the next number, and how many digits it pads to. The code is stored on the card instead of in its title, so renaming a card keeps its identifier and Table search still finds it.
+
+![Template editor with incremental numbering enabled](<docs/images/Modal for creating new templates.png>)
+
+### Dependencies and blocking
+
+A card, and each of its checklists, can depend on other cards. Every dependency picks how hard an unmet one gates the work: **linked** for information only, **warning** to ask before continuing, or **blocking** to stop the action outright.
+
+![Card sidebar showing blocking, warning, and linked dependencies](<docs/images/Card modality with dependencies.png>)
+
+Card dependencies gate moving the card to another list, while checklist dependencies gate ticking that checklist's items. The strongest unmet level wins, and a dependency whose card was deleted never blocks.
+
+![Dependencies attached to a single checklist](<docs/images/Checklists with dependencies.png>)
 
 ### Filters and multiple boards
 
@@ -59,11 +85,9 @@ Use searchable label filters on large boards and move between independent boards
 
 ### Per-board customization
 
-Customize each board independently without changing the active Obsidian theme. Backgrounds support solid colors, gradients, and local images with adjustable fitting and darkening.
+Customize each board independently without changing the active Obsidian theme. Backgrounds support solid colors, gradients, and local images with adjustable fitting and darkening, and a preview strip at the top shows what the board will get — including how card codes are drawn — as you change it.
 
-![Kanux per-board customization window](<docs/images/Customization window.png>)
-
-![Customized Kanux appearance without modifying the Obsidian theme](<docs/images/Customization without touching the theme.png>)
+![Kanux per-board customization window with its live preview strip](<docs/images/View to customize your Kanux dashboard..png>)
 
 <details>
 <summary>Background customization examples</summary>
@@ -87,8 +111,6 @@ Sync Deck adds shared vaults, member assignment, card locks, and live presence w
 
 ![Assigning specific checklist tasks to team members](<docs/images/Assign specific tasks to members of your team.png>)
 
-![Card displaying an assigned member](<docs/images/View with a member assigned to a card.png>)
-
 ![Multiple people collaborating through Sync Deck](<docs/images/Ability to work with multiple people tacks to Sync Deck.png>)
 
 </details>
@@ -102,8 +124,9 @@ Sync Deck adds shared vaults, member assignment, card locks, and live presence w
 - **Complete card management:** Create, edit, complete, move, export, or delete cards with titles, dates, labels, members, descriptions, images, and progress information.
 - **Labels and dates:** Use reusable colored labels, flexible display modes, start dates, due dates, ranges, and overdue indicators.
 - **Rich Markdown descriptions:** Write and render formatted descriptions with links, lists, quotes, code, Obsidian note references, and collapsible long content. Typing is saved as you go, so a closed modal never costs you a paragraph.
+- **Embedded Obsidian editor:** Write descriptions and checklist notes in a real Live Preview editor, with a formatting toolbar for headings, emphasis, lists, quotes, links, vault links, dividers and inline code, plus note and tag autocompletion. On wide screens it opens as a side panel beside the card, and `Mod+S` or `Esc` closes the field instead of escaping to Obsidian.
 - **Images and attachments:** Add, paste, resize, arrange, reorder, copy, and manage images while keeping attachments organized inside the vault.
-- **Checklists and tasks:** Build multiple colored checklists, reorder tasks or whole checklists with drag and drop — every checklist collapses to its header while one is on the move — track independent progress, assign members, and associate individual tasks with their own Markdown notes. Completed tasks fold into a per-checklist **Completed** section you can show or hide, and a whole checklist can be folded down to its header and progress bar; the fold travels with the note, so it stays folded the next time the card opens.
+- **Checklists and tasks:** Build multiple colored checklists, reorder tasks or whole checklists with drag and drop — every checklist collapses to its header while one is on the move — track independent progress, assign members, and associate individual tasks with their own Markdown notes. Every checklist can carry its own description above its items. Completed tasks fold into a per-checklist **Completed** section you can show or hide, and a whole checklist can be folded down to its header and progress bar; the fold travels with the note, so it stays folded the next time the card opens.
 - **Card templates:** Save any card as a template — title, labels, members, description and colored checklists — and start new cards from it in one click, with the caret waiting in the first blank. Give a template a running code (BUG-014) and every card it makes carries its own identifier, kept through renames and searchable. Review, edit and delete them from one place.
 - **Dependencies and blocking:** Make a card — or a single checklist — depend on other cards, and pick per dependency whether an unfinished one blocks nothing, asks for confirmation, or blocks the action completely.
 - **Per-board appearance:** Customize backgrounds, colors, spacing, typography, density, borders, shadows, animations, labels, image fitting and the look of card codes, with a live preview strip that shows the result as you change it; save presets or copy an appearance from another board.
