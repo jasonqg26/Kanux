@@ -1,0 +1,210 @@
+const { setIcon } = require("obsidian");
+const { cardFileBaseName, createElement, textLine } = require("../helpers");
+
+// Small shared UI utilities and timing constants for the modal modules.
+const IMG_BLOCK_DRAG_TYPE = "application/x-kanux-image-block";
+
+// Debounce for keystroke-driven card saves.
+const SAVE_DEBOUNCE_MS = 350;
+// Longer for descriptions: a save there rewrites the whole note, so it waits
+// for a real pause in the writing rather than chasing every word.
+const DETAILS_AUTOSAVE_MS = 900;
+// Re-acquire the card lock well within its server TTL so it never lapses mid-edit.
+const LOCK_HEARTBEAT_MS = 5000;
+
+// setIcon throws when an icon name is unknown to the running Obsidian version;
+// fall back to plain text so the control still reads.
+function setIconSafe(el, icon, fallbackText = "") {
+  try {
+    setIcon(el, icon);
+  } catch (error) {
+    el.textContent = fallbackText;
+  }
+}
+
+/**
+ * Fills a surface with the compact stand-in for a board card, used wherever a
+ * card is referenced instead of opened: the title as it wraps, an optional
+ * leading badge, and the list it sits in painted with that list's color.
+ *
+ * `summary` comes from KanuxPlugin#dependencyCardSummary, which already hides
+ * the board name while the card lives on the board being looked at.
+ */
+function fillMiniCard(surface, summary, badge) {
+  surface.classList.add("ot-mini-card");
+  if (summary.completed) surface.classList.add("is-done");
+
+  const meta = createElement("div", "ot-mini-card-meta");
+  if (badge) meta.append(badge);
+  if (summary.listTitle) meta.append(miniCardListPill(summary));
+  if (summary.boardName) meta.append(createElement("span", "ot-mini-card-board", summary.boardName));
+
+  surface.append(createElement("span", "ot-mini-card-title", summary.title));
+  if (meta.childElementCount) surface.append(meta);
+  return surface;
+}
+
+function miniCardListPill(summary) {
+  const pill = createElement("span", "ot-mini-card-list");
+  const dot = createElement("span", "ot-mini-card-dot");
+  if (summary.listColor) dot.style.setProperty("--ot-mini-card-color", summary.listColor);
+  pill.append(dot, createElement("span", "", summary.listTitle));
+  return pill;
+}
+
+// Grid of clickable color swatches; the selected color is marked with a check.
+function colorSwatchGrid(colors, selectedColor, onPick) {
+  const swatches = createElement("div", "ot-label-color-grid");
+  colors.forEach((color) => {
+    const swatch = createElement("button", "ot-label-color-swatch");
+    swatch.type = "button";
+    swatch.style.backgroundColor = color;
+    swatch.setAttribute("aria-label", color);
+    if (color === selectedColor) {
+      swatch.classList.add("is-selected");
+      setIconSafe(swatch, "check", "✓");
+    }
+    swatch.addEventListener("click", () => onPick(color));
+    swatches.append(swatch);
+  });
+  return swatches;
+}
+
+/**
+ * One choice out of a few, drawn as a row of buttons: a radio group. The
+ * arrow keys move the choice the way native radios do, and only the chosen
+ * button sits in the tab order, so the whole group costs one tab stop.
+ *
+ * `options` are `{ value, label, render? }`; `render(button)` fills a button
+ * with something other than its label — a sample chip, a colour dot — while
+ * the label still names it for assistive tech. `group.setValue(value)`
+ * repaints the group when the choice changes from outside.
+ */
+function choiceGroup(className, groupLabel, options, value, onChange) {
+  const group = createElement("div", className);
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-label", groupLabel);
+  let current = value;
+
+  const paint = () => {
+    const chosen = options.findIndex((option) => option.value === current);
+    Array.from(group.children).forEach((button, index) => {
+      const on = index === chosen;
+      button.setAttribute("aria-checked", on ? "true" : "false");
+      // With nothing chosen the first button keeps the group reachable.
+      button.tabIndex = on || (chosen < 0 && index === 0) ? 0 : -1;
+    });
+  };
+
+  const choose = (next) => {
+    if (next === current) return;
+    current = next;
+    paint();
+    onChange(next);
+  };
+
+  options.forEach((option, index) => {
+    const button = createElement("button", "");
+    button.type = "button";
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-label", option.label);
+    if (option.render) {
+      option.render(button);
+      button.title = option.label;
+    } else {
+      button.textContent = option.label;
+    }
+    button.addEventListener("click", () => choose(option.value));
+    button.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      const next = (index + step + options.length) % options.length;
+      choose(options[next].value);
+      group.children[next].focus();
+    });
+    group.append(button);
+  });
+
+  group.setValue = (next) => {
+    current = next;
+    paint();
+  };
+  paint();
+  return group;
+}
+
+// The run of consecutive image entries around `index` (entries matching isGap
+// between images don't break the run) — the group a grid layout applies to.
+function imageRunAround(items, index, isGap) {
+  if (!items[index] || items[index].type !== "img") return [];
+  let start = index;
+  while (start - 1 >= 0) {
+    if (items[start - 1].type === "img") { start -= 1; continue; }
+    if (isGap(items[start - 1]) && start - 2 >= 0 && items[start - 2].type === "img") { start -= 2; continue; }
+    break;
+  }
+  const run = [];
+  for (let i = start; i < items.length; i += 1) {
+    if (items[i].type === "img") { run.push(items[i]); continue; }
+    if (isGap(items[i]) && items[i + 1] && items[i + 1].type === "img") continue;
+    break;
+  }
+  return run;
+}
+
+const isBlankMdSegment = (seg) => seg.type === "md" && !seg.text.trim();
+const isBlankTextBlock = (block) => block.type === "text" && !block.value.trim();
+
+// Pull image files out of a paste/drop DataTransfer (empty if none).
+function imageFilesFromTransfer(dt) {
+  if (!dt) return [];
+  const out = [];
+  if (dt.files && dt.files.length) {
+    for (const file of Array.from(dt.files)) {
+      if (file && file.type && file.type.startsWith("image/")) out.push(file);
+    }
+  }
+  if (!out.length && dt.items && dt.items.length) {
+    for (const item of Array.from(dt.items)) {
+      if (item.kind === "file" && item.type && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) out.push(file);
+      }
+    }
+  }
+  return out;
+}
+
+// Timestamp for auto-named pasted images, e.g. 20260706T....
+function imageStamp() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function safeImageFileName(rawName, fallbackExt) {
+  const clean = textLine(rawName);
+  const match = clean.match(/\.([a-z0-9]+)$/i);
+  const ext = textLine(match ? match[1] : fallbackExt || "png").replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
+  const base = match ? clean.slice(0, -match[0].length) : clean;
+  return `${cardFileBaseName(base || `Pasted image ${imageStamp()}`)}.${ext}`;
+}
+
+module.exports = {
+  IMG_BLOCK_DRAG_TYPE,
+  SAVE_DEBOUNCE_MS,
+  DETAILS_AUTOSAVE_MS,
+  LOCK_HEARTBEAT_MS,
+  setIconSafe,
+  fillMiniCard,
+  colorSwatchGrid,
+  choiceGroup,
+  imageRunAround,
+  imageFilesFromTransfer,
+  imageStamp,
+  safeImageFileName,
+  isBlankMdSegment,
+  isBlankTextBlock,
+};

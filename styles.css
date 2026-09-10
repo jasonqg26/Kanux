@@ -1,0 +1,5325 @@
+.ot-board-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
+  padding: 12px;
+  color: var(--text-normal);
+  background-color: var(--ot-board-background, var(--background-primary));
+  font-size: calc(16px * var(--ot-font-scale, 1));
+}
+
+/* Save actions follow the theme's green; override with --ot-save-color. */
+button.ot-save-button.mod-cta,
+button.ot-save-button {
+  border-color: var(--ot-save-color, var(--color-green, #22c55e));
+  background-color: var(--ot-save-color, var(--color-green, #22c55e));
+  color: var(--text-on-accent, #ffffff);
+}
+
+button.ot-save-button.mod-cta:hover,
+button.ot-save-button:hover {
+  border-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 86%, black);
+  background-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 86%, black);
+}
+
+button.ot-save-button.mod-cta:active,
+button.ot-save-button:active {
+  border-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 74%, black);
+  background-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 74%, black);
+}
+
+button.ot-save-button.mod-cta:disabled,
+button.ot-save-button:disabled {
+  border-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 35%, var(--background-primary));
+  background-color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 35%, var(--background-primary));
+  color: color-mix(in srgb, var(--ot-save-color, var(--color-green, #22c55e)) 45%, var(--text-normal));
+}
+
+.ot-board-root.is-appearance-dark {
+  --text-normal: #f1f2f4;
+  --text-muted: #b6c2cf;
+  --text-faint: #8c9bab;
+}
+
+.ot-board-root.is-surfaces-dark {
+  --background-primary: #1d2125;
+  --background-primary-alt: #22272b;
+  --background-secondary: #101214;
+  --background-modifier-hover: #323940;
+  --background-modifier-border: #45505a;
+  --background-modifier-border-hover: #738496;
+}
+
+.ot-board-root.is-appearance-light {
+  --text-normal: #20242b;
+  --text-muted: #515966;
+  --text-faint: #737b87;
+}
+
+.ot-board-root.is-surfaces-light {
+  --background-primary: #ffffff;
+  --background-primary-alt: #ffffff;
+  --background-secondary: #f1f2f4;
+  --background-modifier-hover: #dcdfe4;
+  --background-modifier-border: #b7bdc8;
+  --background-modifier-border-hover: #8590a2;
+  --interactive-normal: #ffffff;
+  --interactive-hover: #e8ebf0;
+}
+
+.ot-card.is-locked {
+  outline: 1.5px solid var(--ot-lock-color, #f59e0b);
+  outline-offset: -1px;
+  opacity: 0.9;
+  cursor: default;
+}
+
+.ot-card-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #17130a;
+  background: var(--ot-lock-color, #f59e0b);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.ot-card-lock-icon {
+  display: inline-flex;
+}
+
+.ot-card-lock-icon > svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+}
+
+.ot-card-lock-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: #17130a;
+  background: #f59e0b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ot-card-lock-banner-icon {
+  display: inline-flex;
+}
+
+.ot-card-lock-banner-icon > svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+
+.ot-card-readonly .is-disabled,
+.ot-card-readonly input:disabled,
+.ot-card-readonly textarea:disabled,
+.ot-card-readonly button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ot-presence-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ot-presence-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  filter: drop-shadow(0 3px 8px rgb(0 0 0 / 28%));
+  /* Position is driven per-frame from JS via transform (GPU compositing). */
+  will-change: transform;
+}
+
+.ot-presence-arrow {
+  width: 16px;
+  height: 18px;
+  background: var(--ot-presence-color, var(--interactive-accent));
+  border: 2px solid var(--background-primary);
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+}
+
+.ot-presence-name {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  gap: 5px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 999px;
+  padding: 3px 8px 3px 5px;
+  overflow: hidden;
+  color: white;
+  background: var(--ot-presence-color, var(--interactive-accent));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ot-presence-avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+/* One wrapping row: the board name takes whatever width is left, and a group
+   that no longer fits drops to the next line whole. A grid could not do the
+   second part — its columns kept their size and the name simply overflowed on
+   top of them, which is what put Add card behind the view switch. */
+.ot-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-height: 44px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: var(--background-secondary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+/* Basis rather than a bare 1fr: below it the name yields the line instead of
+   squeezing the switch, and above it grows into the space it is given. */
+.ot-toolbar-title {
+  display: flex;
+  flex: 1 1 200px;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+/* A nowrap title only ellipsizes once it is allowed to shrink: with the flex
+   default of min-width auto it stays at full text width and spills instead. */
+.ot-toolbar h2 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: calc(19px * var(--ot-font-scale, 1));
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ot-board-select {
+  max-width: 220px;
+  height: 32px;
+}
+
+.ot-toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  /* Holds the right edge whether it shares the first line or has its own. A
+     divider rule went here and had to go: once this group wraps onto its own
+     line the border has nothing on its left to divide it from. */
+  margin-left: auto;
+  padding-left: 4px;
+}
+
+.ot-toolbar-primary {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The switch is two words wide at most; the name is what should give way. */
+.ot-toolbar .ot-view-switch {
+  flex: none;
+}
+
+.ot-toolbar .ot-text-button {
+  transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ot-toolbar .ot-text-button:hover {
+  box-shadow: 0 3px 8px rgb(0 0 0 / 16%);
+  transform: translateY(-1px);
+}
+
+.ot-board-root.is-surfaces-light .ot-toolbar .ot-text-button,
+.ot-board-root.is-surfaces-light .ot-list-footer .ot-text-button {
+  border-color: #c8cdd5;
+  color: #252a32;
+  background: #ffffff;
+}
+
+.ot-board-root.is-surfaces-light .ot-toolbar .ot-text-button:hover,
+.ot-board-root.is-surfaces-light .ot-list-footer .ot-text-button:hover {
+  color: #111318;
+  background: #e8ebf0;
+}
+
+/* Toolbar controls run smaller than the ones inside a list: six of them share
+   one line, and at list size they crowded the board name out of it. */
+.ot-board-root .ot-toolbar .ot-text-button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: calc(13.5px * var(--ot-font-scale, 1));
+}
+
+/* With several boards the switcher is the title, so it reads like one: plain
+   until it is hovered, the way the card modal's own title behaves. */
+.ot-toolbar .ot-board-select {
+  min-width: 0;
+  max-width: 260px;
+  /* Shrinking is what keeps the bar on one line, so a squeezed name has to read
+     as cut rather than as a shorter board. */
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0 6px;
+  /* The toolbar colour rather than transparent: a native select needs an
+     explicit background or its option list renders unreadable on Windows. */
+  background-color: var(--background-secondary);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: calc(19px * var(--ot-font-scale, 1));
+  font-weight: 700;
+}
+
+.ot-toolbar .ot-board-select:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ot-toolbar .ot-board-select:focus-visible {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-form-field);
+}
+
+/* Adding a card is what the bar is for; the rest are things you do once. */
+.ot-board-root .ot-toolbar .ot-text-button.ot-toolbar-cta {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+  color: var(--interactive-accent);
+}
+
+.ot-board-root .ot-toolbar .ot-text-button.ot-toolbar-cta:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+  color: var(--interactive-accent);
+}
+
+.ot-welcome-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 18px;
+  background: var(--background-secondary);
+}
+
+.ot-welcome-copy {
+  min-width: 0;
+}
+
+.ot-welcome-copy h2 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.ot-welcome-copy p,
+.ot-empty-board-home p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ot-welcome-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ot-board-home {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.ot-empty-board-home,
+.ot-board-tile {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--background-secondary);
+}
+
+.ot-empty-board-home {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ot-empty-board-home h3 {
+  margin: 0;
+}
+
+.ot-board-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-height: 96px;
+  gap: 8px;
+  color: var(--text-normal);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ot-board-tile:hover {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-modifier-hover);
+}
+
+.ot-board-tile-title {
+  max-width: calc(100% - 32px);
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ot-board-tile-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ot-board-tile-menu {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.ot-board-scroll {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  min-height: 0;
+  gap: var(--ot-column-gap, 12px);
+  overflow-x: auto;
+  padding: 2px 2px 10px;
+}
+
+.ot-list {
+  display: flex;
+  flex: 0 0 var(--ot-list-width, 292px);
+  flex-direction: column;
+  max-height: 100%;
+  min-width: var(--ot-list-min-width, 272px);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+  border-top: var(--ot-list-top-border-width, 3px) solid var(--ot-list-color, var(--background-modifier-border));
+  border-radius: var(--ot-list-radius, 12px);
+  background: var(--ot-list-background, color-mix(in srgb, var(--background-secondary) 96%, var(--background-primary) 4%));
+  box-shadow: 0 3px 10px rgb(0 0 0 / 20%);
+  overflow: hidden;
+  transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ot-list:hover {
+  box-shadow: 0 5px 16px rgb(0 0 0 / 24%);
+}
+
+.ot-list.is-dragging-list {
+  opacity: 0.55;
+}
+
+.ot-list.is-list-drop-before {
+  box-shadow: -4px 0 0 var(--interactive-accent);
+}
+
+.ot-list.is-list-drop-after {
+  box-shadow: 4px 0 0 var(--interactive-accent);
+}
+
+.ot-list-header,
+.ot-list-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+}
+
+.ot-list-header {
+  align-items: flex-start;
+  border-bottom: 1px solid color-mix(in srgb, var(--ot-list-color, var(--background-modifier-border)) 34%, var(--background-modifier-border));
+}
+
+.ot-list-drag-source {
+  cursor: grab;
+}
+
+.ot-list-drag-source:active {
+  cursor: grabbing;
+}
+
+.ot-list-drag-handle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 6px;
+  color: var(--text-muted);
+}
+
+.ot-list-color-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  margin-top: 7px;
+  border-radius: 999px;
+  background: var(--ot-list-color, var(--text-faint));
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 12%);
+}
+
+.ot-list-footer {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.ot-board-root.is-list-color-dot-hidden .ot-list-color-dot {
+  display: none;
+}
+
+.ot-list-footer .ot-text-button {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 32px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.ot-list-footer .ot-text-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-list-header h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: visible;
+  color: var(--text-normal);
+  font-size: calc(20px * var(--ot-font-scale, 1));
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.ot-list-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  color: var(--text-muted);
+  font-size: calc(14px * var(--ot-font-scale, 1));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ot-list-header > .ot-icon-button {
+  flex: 0 0 30px;
+}
+
+.ot-cards {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--ot-card-gap, 8px);
+  min-height: 80px;
+  overflow-y: auto;
+  padding: 10px 8px 8px;
+}
+
+.ot-cards.is-drop-zone {
+  background: transparent;
+  background: color-mix(in srgb, var(--interactive-accent) 4%, transparent);
+}
+
+.ot-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  border-radius: var(--ot-card-radius, 9px);
+  padding: var(--ot-card-padding, 9px 10px);
+  background: var(--ot-card-background, color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 88%, var(--background-modifier-hover) 12%));
+  box-shadow: var(--ot-card-shadow, 0 2px 4px rgb(0 0 0 / 24%), 0 1px 1px rgb(0 0 0 / 16%));
+  cursor: pointer;
+  transition: background-color 220ms ease, border-color 220ms ease, box-shadow 220ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ot-card:hover {
+  z-index: 1;
+  background: var(--ot-card-hover-background, var(--ot-card-background));
+  border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--background-modifier-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 18%, transparent), 0 8px 18px rgb(0 0 0 / 24%);
+  transform: translateY(-2px) scale(1.008);
+}
+
+.ot-card:active {
+  transform: translateY(0) scale(0.996);
+  transition-duration: 90ms;
+}
+
+.ot-card.is-drop-target {
+  border-color: var(--interactive-accent);
+}
+
+.ot-card.is-dragging {
+  z-index: 2;
+  opacity: 0.38;
+  transform: translateY(-1px) scale(0.985);
+}
+
+.ot-board-root.is-card-drag-active .ot-card,
+.ot-card.is-drag-settling {
+  will-change: transform;
+}
+
+.ot-card.is-drag-settling {
+  animation: ot-card-drop-settle 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ot-card-drop-placeholder {
+  flex: 0 0 auto;
+  min-height: 42px;
+  border: 1px dashed var(--interactive-accent);
+  border-color: color-mix(in srgb, var(--interactive-accent) 78%, var(--background-modifier-border));
+  border-radius: var(--ot-card-radius, 9px);
+  background: var(--background-secondary);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+  box-shadow: inset 0 0 0 1px rgb(139 92 246 / 8%), 0 4px 14px rgb(0 0 0 / 12%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 8%, transparent), 0 4px 14px rgb(0 0 0 / 12%);
+  pointer-events: none;
+  transform: scale(0.985);
+  transition: height 130ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 150ms ease, transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ot-card.ot-card-drag-preview {
+  position: fixed;
+  top: -10000px;
+  left: -10000px;
+  z-index: 10000;
+  opacity: 0.96;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 34%), 0 4px 12px rgb(0 0 0 / 22%);
+  pointer-events: none;
+  transform: rotate(1.2deg) scale(1.015);
+  transition: none;
+}
+
+@keyframes ot-card-drop-settle {
+  0% { transform: scale(0.975); }
+  62% { transform: scale(1.012); }
+  100% { transform: scale(1); }
+}
+
+.ot-card.is-completed .ot-card-title {
+  color: var(--text-muted);
+}
+
+.ot-card-image-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: -2px -2px 0;
+}
+
+.ot-card-image-strip.is-single {
+  grid-template-columns: 1fr;
+}
+
+.ot-card-image-thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--background-secondary);
+}
+
+.ot-card-image-strip.is-single .ot-card-image-thumb {
+  aspect-ratio: 16 / 9;
+}
+
+.ot-card-image-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ot-card-image-more {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: rgb(0 0 0 / 48%);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.ot-card.is-just-completed {
+  z-index: 1;
+  animation: ot-complete-card-pulse 560ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ot-card-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ot-card-label,
+.ot-label-pill {
+  max-width: 100%;
+  border: 0;
+  border-radius: 4px;
+  padding: 3px 9px;
+  overflow: hidden;
+  color: white;
+  font-size: calc(14px * var(--ot-font-scale, 1));
+  font-weight: 700;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ot-card-label {
+  cursor: default;
+  transition: max-width 260ms cubic-bezier(0.2, 0.8, 0.2, 1), height 220ms ease, min-height 220ms ease, padding 220ms ease, color 180ms ease, line-height 220ms ease;
+}
+
+.ot-board-root.is-compact-labels .ot-card-label,
+.ot-board-root.is-hover-labels .ot-card-label,
+.ot-board-root.is-card-hover-labels .ot-card-label {
+  width: 40px;
+  min-width: 40px;
+  height: 8px;
+  min-height: 8px;
+  flex: 0 0 40px;
+  box-sizing: border-box;
+  display: block;
+  margin: 1px 0;
+  padding: 0;
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  background-clip: padding-box;
+}
+
+.ot-board-root.is-hover-labels .ot-card-label:hover {
+  max-width: 240px;
+  height: calc(29px * var(--ot-font-scale, 1));
+  min-height: calc(29px * var(--ot-font-scale, 1));
+  flex: 0 1 auto;
+  margin: 0;
+  padding: 3px 9px;
+  color: white;
+  font-size: calc(14px * var(--ot-font-scale, 1));
+  line-height: 1.5;
+}
+
+.ot-board-root.is-card-hover-labels .ot-card:hover .ot-card-label,
+.ot-board-root.is-card-hover-labels .ot-card:focus-within .ot-card-label {
+  width: max-content;
+  max-width: 240px;
+  height: calc(29px * var(--ot-font-scale, 1));
+  min-height: calc(29px * var(--ot-font-scale, 1));
+  flex: 0 1 auto;
+  margin: 0;
+  padding: 3px 9px;
+  color: white;
+  font-size: calc(14px * var(--ot-font-scale, 1));
+  line-height: 1.5;
+}
+
+.ot-board-root.is-hover-labels .ot-card-label,
+.ot-board-root.is-card-hover-labels .ot-card-label {
+  width: max-content;
+  max-width: 40px;
+  flex: 0 1 auto;
+  font-size: calc(14px * var(--ot-font-scale, 1));
+  will-change: max-width, height, padding;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ot-board-root.is-hover-labels .ot-card-label,
+  .ot-board-root.is-card-hover-labels .ot-card-label {
+    transition: none;
+  }
+}
+
+.ot-label-pill {
+  cursor: pointer;
+}
+
+.ot-selected-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ot-large-label-pill {
+  min-height: 32px;
+  max-width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 12px;
+  color: white;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.ot-label-add-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: transparent;
+}
+
+.ot-card-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0;
+}
+
+/* A card's identifier, in front of its name. Inline-block rather than a flex
+   item so a long title wraps around it the way it would around a first word,
+   and sized in em so it follows the board's own title size. The board decides
+   how it is drawn, in Customize under Card codes: a class for the style, one
+   for the placement and the colour as a variable, all set by the chip helper. */
+.ot-card-code {
+  --ot-code-tint: var(--ot-code-color, var(--interactive-accent));
+  display: inline-block;
+  margin-right: 6px;
+  border: 1px solid color-mix(in srgb, var(--ot-code-tint) 34%, var(--background-modifier-border));
+  border-radius: 5px;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--ot-code-tint);
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 0.68em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  /* Middle rather than baseline: on the baseline the chip's descender space
+     grew the title's line box, making a card with a code 2px taller than one
+     without, which showed up as ragged card heights down a list. */
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.ot-card-code.is-filled {
+  border-color: transparent;
+  background: var(--ot-code-tint);
+  color: var(--text-on-accent, #fff);
+}
+
+.ot-card-code.is-soft {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ot-code-tint) 16%, transparent);
+}
+
+.ot-card-code.is-plain {
+  border-color: transparent;
+  padding: 0;
+  color: color-mix(in srgb, var(--ot-code-tint) 70%, var(--text-muted));
+  letter-spacing: 0.04em;
+}
+
+/* Above the name rather than in front of it: the chip takes a line of its own. */
+.ot-card-code.is-above {
+  display: block;
+  width: fit-content;
+  margin: 0 0 3px;
+}
+
+/* A finished card's code steps back with the rest of it, whatever its colour. */
+.ot-card.is-completed .ot-card-code {
+  --ot-code-tint: var(--text-muted);
+}
+
+/* In the library row and the table cell the chip is one item in a row, so it
+   stays inline whatever placement the board chose. */
+.ot-mini-card-meta .ot-card-code,
+.ot-td-title .ot-card-code {
+  display: inline-block;
+}
+
+.ot-mini-card-meta .ot-card-code {
+  margin: 0;
+  font-size: 10px;
+}
+
+.ot-td-title .ot-card-code.is-above {
+  margin: 0 6px 0 0;
+}
+
+.ot-card-title {
+  min-width: 0;
+  overflow-wrap: break-word;
+  color: var(--text-normal);
+  font-size: calc(var(--ot-card-title-size, 18px) * var(--ot-font-scale, 1));
+  font-weight: 650;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.ot-card .ot-card-complete-toggle,
+.ot-card .ot-card-actions {
+  position: static;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 170ms ease, transform 210ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ot-card .ot-card-complete-toggle {
+  transform: scale(0.78);
+}
+
+.ot-card .ot-card-actions {
+  transform: translateX(5px) scale(0.9);
+}
+
+.ot-card .ot-card-complete-toggle {
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--text-muted);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.ot-card .ot-card-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.ot-card .ot-card-action-button {
+  width: 24px;
+  height: 24px;
+}
+
+.ot-card:hover .ot-card-complete-toggle,
+.ot-card:hover .ot-card-actions,
+.ot-card:focus-within .ot-card-complete-toggle,
+.ot-card:focus-within .ot-card-actions,
+.ot-card.is-completed .ot-card-complete-toggle {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.ot-card.is-completed .ot-card-complete-toggle {
+  border-color: var(--ot-done-color, var(--color-green, #8cc63f));
+  background: var(--ot-done-color, var(--color-green, #8cc63f));
+  color: #1f2328;
+}
+
+.ot-card.is-just-completed .ot-card-complete-toggle {
+  animation: ot-complete-toggle-pop 420ms cubic-bezier(0.2, 0.9, 0.2, 1.2);
+}
+
+.ot-card-complete-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.ot-card.is-just-completed .ot-card-complete-mark {
+  animation: ot-complete-check-pop 420ms cubic-bezier(0.2, 0.9, 0.2, 1.2);
+}
+
+.ot-card.is-just-completed .ot-card-title {
+  animation: ot-complete-title-settle 520ms ease;
+}
+
+@keyframes ot-complete-card-pulse {
+  0% {
+    box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+    transform: translateY(0);
+  }
+
+  38% {
+    box-shadow: 0 0 0 3px rgb(140 198 63 / 22%), 0 8px 18px rgb(0 0 0 / 22%);
+    transform: translateY(-2px);
+  }
+
+  100% {
+    box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+    transform: translateY(0);
+  }
+}
+
+@keyframes ot-complete-toggle-pop {
+  0% {
+    transform: scale(0.72);
+  }
+
+  58% {
+    transform: scale(1.18);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes ot-complete-check-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) rotate(-18deg);
+  }
+
+  62% {
+    opacity: 1;
+    transform: scale(1.18) rotate(5deg);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes ot-complete-title-settle {
+  0% {
+    color: var(--text-normal);
+    transform: translateX(0);
+  }
+
+  45% {
+    color: var(--text-normal);
+    transform: translateX(3px);
+  }
+
+  100% {
+    color: var(--text-muted);
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ot-card,
+  .ot-card.is-just-completed,
+  .ot-card.is-just-completed .ot-card-complete-toggle,
+  .ot-card.is-just-completed .ot-card-complete-mark,
+  .ot-card.is-just-completed .ot-card-title {
+    animation: none;
+    transition: none;
+  }
+}
+
+.ot-card-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.ot-card-title-form {
+  flex: 1;
+  min-width: 0;
+}
+
+.ot-card-title-input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+  font-weight: 650;
+}
+
+.ot-card-title-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.ot-inline-card-input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+}
+
+.ot-inline-card-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border);
+  outline: none;
+}
+
+.ot-card-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ot-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: calc(13px * var(--ot-font-scale, 1));
+}
+
+.ot-card-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ot-card-date-badge {
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: calc(13px * var(--ot-font-scale, 1));
+  font-weight: 650;
+}
+
+.ot-card-date-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.ot-card-checklist-badge {
+  border-radius: 4px;
+  padding: 2px 5px;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  font-size: calc(13px * var(--ot-font-scale, 1));
+  font-weight: 700;
+}
+
+.ot-card-checklist-badge.is-complete {
+  color: #17210d;
+  background: var(--ot-done-color, var(--color-green, #8cc63f));
+}
+
+.ot-card-checklist-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.ot-card-dependency-badge {
+  border-radius: 4px;
+  padding: 2px 5px;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  font-size: calc(13px * var(--ot-font-scale, 1));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ot-card-dependency-badge.is-blocked {
+  color: #ffffff;
+  background: var(--ot-danger-color, var(--color-red, #c9372c));
+}
+
+.ot-card-dependency-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.ot-icon-button,
+.ot-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ot-icon-button {
+  width: 30px;
+  height: 30px;
+}
+
+.ot-text-button {
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 8px;
+  font-weight: 650;
+}
+
+.ot-board-root .ot-text-button {
+  font-size: calc(15px * var(--ot-font-scale, 1));
+}
+
+.ot-board-root.ot-board-root.is-motion-disabled *,
+.ot-board-root.ot-board-root.is-motion-disabled *::before,
+.ot-board-root.ot-board-root.is-motion-disabled *::after {
+  animation: none;
+  scroll-behavior: auto;
+  transition: none;
+}
+
+.ot-icon-button:hover,
+.ot-text-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-text-button.ot-cloud-cta {
+  color: var(--interactive-accent);
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+.ot-text-button.ot-cloud-cta:hover {
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+
+.ot-icon-button:disabled,
+.ot-icon-button:disabled:hover {
+  color: var(--text-faint);
+  background: transparent;
+  cursor: default;
+  opacity: 0.45;
+}
+
+.ot-button-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.ot-icon-button > svg,
+.ot-button-icon > svg,
+.ot-card-date-icon > svg,
+.ot-card-checklist-icon > svg,
+.ot-checklist-heading-icon > svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.ot-button-with-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.ot-card-modal,
+.ot-about-modal,
+.ot-prompt-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Roomier card modal (closer to Trello) so description + images + checklist
+   have space; the content area scrolls. */
+.modal.ot-card-modal-shell {
+  width: min(1040px, 96vw);
+  max-width: 96vw;
+  max-height: 92vh;
+  transition: transform 280ms cubic-bezier(0.32, 0.72, 0.22, 1);
+}
+
+/* ---- Side editing sheet ---- */
+/* While the description is edited beside the card, the modal slides left by
+   half the sheet's footprint so the pair stays centered. */
+.modal.ot-card-modal-shell.ot-side-editing {
+  transform: translateX(-229px);
+  overflow: visible;
+}
+
+.ot-side-sheet {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 18px);
+  width: 440px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 22%), 0 12px 28px rgb(0 0 0 / 22%), 0 32px 72px rgb(0 0 0 / 26%);
+  animation: ot-side-sheet-in 340ms cubic-bezier(0.32, 0.72, 0.22, 1) 60ms backwards;
+}
+
+.ot-side-sheet.is-closing {
+  animation: ot-side-sheet-out 240ms cubic-bezier(0.55, 0, 0.75, 0.4) forwards;
+  pointer-events: none;
+}
+
+/* The modal slides left first (60ms head start), then the sheet emerges from
+   behind it; on close the sheet tucks back under while the modal recenters. */
+@keyframes ot-side-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(-84px) scale(0.96);
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes ot-side-sheet-out {
+  to {
+    opacity: 0;
+    transform: translateX(-72px) scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal.ot-card-modal-shell {
+    transition: none;
+  }
+
+  .ot-side-sheet {
+    animation: none;
+  }
+
+  .ot-side-sheet.is-closing {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.ot-side-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ot-side-sheet-header .ot-details-heading-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.ot-side-sheet-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+}
+
+/* The editor fills the sheet's height; its content scrolls inside. */
+.ot-side-sheet-content .ot-side-sheet-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.ot-side-sheet-content .ot-embedded-editor {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+/* Inline stand-in shown where the description editor would normally sit: a
+   quiet recessed panel, not a call-to-action box. */
+.ot-side-editing-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.ot-card-modal {
+  gap: 0;
+  min-height: min(720px, 82vh);
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--background-primary);
+}
+
+.ot-card-modal-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 22px 48px 18px;
+  background: color-mix(in srgb, var(--background-secondary) 78%, var(--background-primary));
+  text-align: center;
+}
+
+
+/* The title reads as a heading, not a form field: chrome only on interaction. */
+.ot-card-modal .ot-title-input {
+  width: min(680px, 100%);
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 3px 10px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.ot-card-modal .ot-title-input:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ot-card-modal .ot-title-input:focus {
+  border-color: var(--interactive-accent);
+  background: var(--background-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+
+/* The card's identifier reads as a document number above its name: no chip,
+   because here it is the heading's own eyebrow rather than a tag in a list. */
+.ot-card-modal-code {
+  color: var(--ot-code-color, var(--interactive-accent));
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+.ot-card-modal-location {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ot-card-modal-location-pill {
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+  border-radius: 999px;
+  padding: 1px 9px;
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
+  font-weight: 650;
+}
+
+.ot-card-modal-location-sep {
+  color: var(--text-faint);
+}
+
+.ot-card-modal-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  align-items: start;
+  gap: 24px;
+  min-height: 0;
+  padding: 22px;
+  overflow-y: auto;
+}
+
+.ot-card-modal-body.is-notes-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ot-card-modal-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 24px;
+}
+
+.ot-card-modal-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 12px;
+}
+
+.ot-card-modal-sidebar > .ot-field {
+  gap: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  padding: 13px 14px;
+  background: color-mix(in srgb, var(--background-secondary) 62%, var(--background-primary));
+}
+
+.ot-card-modal-sidebar > .ot-field > span:first-child {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.ot-card-modal > .ot-modal-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 12px 20px;
+  background: color-mix(in srgb, var(--background-secondary) 88%, var(--background-primary));
+  box-shadow: 0 -8px 20px rgb(0 0 0 / 10%);
+}
+
+.ot-about-modal p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.modal.ot-card-modal-shell .modal-close-button,
+.modal.ot-about-modal-shell .modal-close-button,
+.modal.ot-date-modal-shell .modal-close-button,
+.modal.ot-card-picker-shell .modal-close-button,
+.modal.ot-label-modal-shell .modal-close-button {
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+}
+
+@media (max-width: 760px) {
+  .ot-card-modal {
+    min-height: 0;
+  }
+
+  .ot-card-modal-header {
+    padding: 16px 42px 14px 12px;
+  }
+
+  .ot-card-modal .ot-title-input {
+    font-size: 20px;
+  }
+
+  .ot-card-modal-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    padding: 16px 12px;
+  }
+
+  .ot-card-modal-sidebar {
+    position: static;
+    grid-row: 1;
+  }
+
+  .ot-card-modal > .ot-modal-actions {
+    flex-wrap: wrap;
+    padding: 10px 12px;
+  }
+}
+
+.ot-prompt-modal h2 {
+  margin: 0;
+}
+
+/* Card template editor. The shell, header, two-column body and sticky actions
+   are the card modal's own rules — this block is only what a template has and
+   a card does not. */
+.ot-template-modal .ot-title-input {
+  text-align: center;
+}
+
+.ot-template-modal .ot-title-input.is-invalid {
+  border-color: var(--ot-danger-color, var(--color-red, #dc2626));
+}
+
+.ot-template-error {
+  margin: 0;
+  color: var(--ot-danger-color, var(--color-red, #dc2626));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* The destination list is a control where the card modal prints a static pill,
+   so it keeps the pill's shape and picks up the affordances of a button. */
+.ot-template-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  min-height: 0;
+  padding: 2px 10px;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 12px;
+  touch-action: manipulation;
+}
+
+.ot-template-list:hover {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+
+.ot-template-details {
+  width: 100%;
+  min-height: 128px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.ot-template-hint {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+/* ---- Numbering ---- */
+/* The heading is the switch's label, so the whole row toggles. */
+.ot-template-numbering-head {
+  cursor: pointer;
+}
+
+/* Inside a label the heading misses the sidebar's field-heading rule, so it
+   restates that rule to read like Labels and Members beside it. */
+.ot-template-numbering-head > span:first-child {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+/* A switch drawn by hand so it follows the accent in every theme. The real
+   checkbox lies invisible over the track: the track is the hit target, and
+   the focus ring lands where the eye already is. */
+.ot-switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+}
+
+.ot-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ot-switch-track {
+  flex: 1 1 auto;
+  border-radius: 999px;
+  background: var(--background-modifier-border-hover, var(--background-modifier-border));
+  transition: background-color 160ms ease;
+}
+
+.ot-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--text-on-accent, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 160ms ease;
+}
+
+.ot-switch input:checked + .ot-switch-track {
+  background: var(--interactive-accent);
+}
+
+.ot-switch input:checked + .ot-switch-track::after {
+  transform: translateX(14px);
+}
+
+.ot-switch input:focus-visible + .ot-switch-track {
+  box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--interactive-accent);
+}
+
+.ot-template-numbering-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* An explicit display beats the [hidden] attribute's own display:none, so the
+   block the switch hides has to opt back out by hand. */
+.ot-template-numbering-body[hidden] {
+  display: none;
+}
+
+/* The next card, drawn the way the board will draw it: same chip, same look. */
+.ot-template-number-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.ot-template-number-caption-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ot-template-number-caption {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* The way to the chip's settings, which live with the board's appearance. */
+.ot-template-customize {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--text-faint);
+}
+
+.ot-template-customize svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ot-template-number-name {
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: break-word;
+}
+
+.ot-template-number-name .ot-card-code {
+  font-size: 10.5px;
+}
+
+/* Prefix beside its separator, then the next number beside its digits: the
+   two halves of the code, each control as wide as what goes in it. */
+.ot-template-number-boxes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  gap: 8px 6px;
+}
+
+.ot-template-number-box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ot-template-numbering .ot-template-number-box input,
+.ot-template-numbering .ot-template-number-box select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  /* The select keeps room on the right for the chevron Obsidian paints, and
+     sets only the colour so the shorthand does not wipe that chevron image. */
+  padding: 0 22px 0 8px;
+  background-color: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ot-template-numbering .ot-template-number-box input {
+  padding: 0 8px;
+}
+
+.ot-template-numbering .ot-template-number-box input[name="prefix"] {
+  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-weight: 700;
+}
+
+.ot-template-numbering .ot-template-number-box input:focus-visible,
+.ot-template-numbering .ot-template-number-box select:focus-visible {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+
+/* A radio group drawn as one bar of buttons; the chosen one is lifted. */
+.ot-segmented {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  padding: 2px;
+  background: var(--background-secondary);
+}
+
+.ot-segmented button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  padding: 0 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.ot-segmented button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ot-segmented button[aria-checked="true"] {
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+  color: var(--text-normal);
+}
+
+.ot-segmented button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+/* The style options are the chips themselves, so the choice is seen, not read. */
+.ot-segmented .ot-card-code {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* Colour: a dot per colour, the theme's accent first. */
+.ot-code-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ot-code-colors button {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  padding: 0;
+  background: var(--ot-swatch, var(--interactive-accent));
+  box-shadow: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ot-code-colors button:hover {
+  border-color: color-mix(in srgb, var(--text-normal) 45%, transparent);
+}
+
+.ot-code-colors button[aria-checked="true"] {
+  border-color: var(--text-normal);
+  box-shadow: inset 0 0 0 2px var(--background-primary);
+}
+
+.ot-code-colors button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+/* Fingers need more room than the pointer layout gets away with. */
+@media (pointer: coarse) {
+  .ot-code-colors {
+    gap: 10px;
+  }
+
+  .ot-code-colors button {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ot-switch-track,
+  .ot-switch-track::after {
+    transition: none;
+  }
+}
+
+.ot-template-checklists {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ot-template-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--ot-checklist-color, var(--interactive-accent));
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--background-primary);
+}
+
+.ot-template-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ot-template-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Template library: one row per saved template, each a card-shaped link to the
+   note plus the one action that has nowhere else to live. */
+.modal.ot-template-library-shell {
+  width: min(440px, calc(100vw - 32px));
+}
+
+.ot-template-library {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ot-template-library-header h2 {
+  margin: 0;
+  text-align: center;
+}
+
+.ot-template-library-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 58vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+
+.ot-template-library-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.ot-template-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.ot-template-delete:hover {
+  color: var(--ot-danger-color, var(--color-red, #dc2626));
+}
+
+.ot-date-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 360px;
+}
+
+.ot-date-modal h2 {
+  margin: 0;
+  text-align: center;
+}
+
+.ot-date-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ot-date-calendar-nav {
+  display: grid;
+  grid-template-columns: 30px 30px minmax(0, 1fr) 30px 30px;
+  align-items: center;
+  gap: 8px;
+}
+
+.ot-date-month-title {
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ot-date-weekdays,
+.ot-date-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ot-date-weekdays span {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.ot-date-day {
+  min-width: 0;
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ot-date-day:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ot-date-day.is-outside {
+  color: var(--text-faint);
+}
+
+.ot-date-day.is-range {
+  background: rgb(139 92 246 / 18%);
+}
+
+.ot-date-day.is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent, #fff);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
+}
+
+.ot-date-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ot-date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ot-date-field-label {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ot-date-field-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.ot-date-checkbox {
+  width: 18px;
+  height: 18px;
+}
+
+.ot-date-field-button {
+  min-height: 42px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ot-date-field-button.is-empty {
+  color: var(--text-faint);
+  background: var(--background-modifier-hover);
+}
+
+.ot-date-field-button.is-active {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.ot-title-input,
+.ot-input,
+.ot-textarea {
+  width: 100%;
+}
+
+.ot-title-input {
+  width: calc(100% - 42px);
+  border: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 4px 0 8px;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.ot-modal-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.ot-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ot-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ot-field input,
+.ot-field textarea {
+  color: var(--text-normal);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.ot-label-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ot-label-modal-header,
+.ot-card-picker-header {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+  align-items: center;
+}
+
+.ot-label-back {
+  grid-column: 1;
+}
+
+.ot-label-modal-header h2,
+.ot-card-picker-header h2 {
+  grid-column: 2;
+  margin: 0;
+  text-align: center;
+}
+
+.ot-label-search,
+.ot-card-picker-search {
+  width: 100%;
+  min-height: 46px;
+  border: 2px solid var(--interactive-accent);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+}
+
+.ot-label-modal-subtitle,
+.ot-card-picker-subtitle {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* The compact stand-in for a board card, shared by the card picker and the
+   dependency lists: the same surface language as a real card, at a smaller
+   scale, with the title free to wrap instead of being cut off. */
+.ot-mini-card {
+  display: flex;
+  flex-direction: column;
+  /* A card-shaped button has to opt out of the base button rules Obsidian
+     applies to every <button>: a fixed height, and content centered on both
+     axes. Left in place they push a wrapped title outside the painted box. */
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: var(--ot-card-background, color-mix(in srgb, var(--background-primary-alt, var(--background-primary)) 88%, var(--background-modifier-hover) 12%));
+  box-shadow: none;
+  color: var(--text-normal);
+  cursor: pointer;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  touch-action: manipulation;
+}
+
+.ot-mini-card:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--background-modifier-border));
+  background: var(--background-modifier-hover);
+}
+
+.ot-mini-card:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.ot-mini-card-title {
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+}
+
+.ot-mini-card.is-done .ot-mini-card-title {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.ot-mini-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+}
+
+.ot-mini-card-list,
+.ot-mini-card-board {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.ot-mini-card-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ot-mini-card-color, var(--text-faint));
+}
+
+.ot-mini-card-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.ot-mini-card-badge > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ot-mini-card-badge.is-block {
+  color: var(--ot-danger-color, var(--color-red, #dc2626));
+}
+
+.ot-mini-card-badge.is-warn {
+  color: var(--ot-warn-color, #c2620f);
+}
+
+/* Card picker: the same cards the board shows, listed to pick one. */
+.ot-card-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ot-card-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(420px, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+
+/* The list is a height-capped flex column, so its options have to refuse to
+   shrink: left to the default they squash to fit and clip the list pill. */
+.ot-card-picker-option {
+  flex: 0 0 auto;
+  gap: 7px;
+  padding: 11px 12px;
+}
+
+.ot-card-picker-option .ot-mini-card-title {
+  font-size: 14px;
+}
+
+.ot-card-picker-option .ot-mini-card-list,
+.ot-card-picker-option .ot-mini-card-board {
+  font-size: 11.5px;
+}
+
+.ot-label-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ot-label-option-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 10px;
+}
+
+.ot-label-option {
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 14px;
+  overflow: hidden;
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ot-label-create-area {
+  margin-top: 8px;
+}
+
+.ot-label-create-button {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.ot-label-create-preview-band {
+  margin: 0 -4px;
+  padding: 34px 40px;
+  background: var(--background-secondary);
+}
+
+.ot-label-preview-pill {
+  min-height: 42px;
+  border-radius: 6px;
+  padding: 0 16px;
+  overflow: hidden;
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 42px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ot-label-create-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ot-label-create-title {
+  width: 100%;
+  min-height: 46px;
+  border: 2px solid var(--interactive-accent);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+}
+
+.ot-label-color-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(44px, 1fr));
+  gap: 10px 12px;
+}
+
+.ot-label-color-swatch {
+  position: relative;
+  min-height: 38px;
+  border: 2px solid transparent;
+  border-radius: 7px;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.ot-label-color-swatch.is-selected {
+  border-color: var(--text-normal);
+}
+
+.ot-label-color-swatch svg {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 18px;
+  height: 18px;
+}
+
+.ot-remove-color-button {
+  min-height: 38px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.ot-label-create-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 16px;
+}
+
+.modal.ot-appearance-modal-shell {
+  width: min(720px, calc(100vw - 32px));
+  max-width: 720px;
+}
+
+/* The dialog is a column: title, intro, the preview strip, then the settings,
+   the only part that scrolls, with the actions pinned below them. */
+.ot-appearance-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: min(84vh, 860px);
+}
+
+.ot-appearance-modal > h2 {
+  margin: 0 0 2px;
+  text-wrap: balance;
+}
+
+.ot-appearance-modal-intro {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+
+.ot-appearance-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+}
+
+.ot-appearance-modal .setting-item-control {
+  flex-wrap: wrap;
+}
+
+.ot-appearance-section-intro {
+  margin: -4px 0 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+/* A slider's value in words: the tooltip alone shows nothing on touch. */
+.ot-appearance-value {
+  min-width: 48px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ot-appearance-modal .ot-appearance-choice {
+  flex: 1 1 240px;
+  max-width: 320px;
+}
+
+.ot-appearance-modal .ot-code-colors {
+  justify-content: flex-end;
+}
+
+.ot-appearance-modal .ot-modal-actions {
+  flex: 0 0 auto;
+  margin-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 12px;
+}
+
+/* The preview strip: a slice of the board drawn by the board's own rules from
+   the variables and classes its root gets, so it shows what the board shows.
+   A board root laid out as a strip rather than a screen. */
+.ot-board-root.ot-appearance-preview {
+  flex: 0 0 auto;
+  flex-direction: row;
+  justify-content: center;
+  height: auto;
+  gap: 0;
+  margin: 0 0 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.ot-appearance-preview .ot-list {
+  flex: 0 1 280px;
+  min-width: 0;
+  max-height: none;
+}
+
+.ot-appearance-preview-list-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px 7px;
+  color: var(--text-normal);
+  font-size: calc(13px * var(--ot-font-scale, 1));
+  font-weight: 700;
+}
+
+.ot-appearance-preview-list-title .ot-mini-card-dot {
+  background: var(--ot-list-color, var(--interactive-accent));
+}
+
+.ot-appearance-preview.is-list-color-dot-hidden .ot-mini-card-dot {
+  display: none;
+}
+
+.ot-appearance-preview-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ot-card-gap, 8px);
+  padding: 0 8px 8px;
+}
+
+.ot-appearance-preview .ot-card {
+  cursor: default;
+}
+
+.ot-label-create-footer .mod-cta {
+  margin-left: auto;
+}
+
+.ot-color-input {
+  width: 48px;
+  min-width: 48px;
+  height: 32px;
+  padding: 0;
+}
+
+.ot-textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.ot-details-editor {
+  min-height: 220px;
+}
+
+.ot-details-field {
+  gap: 12px;
+}
+
+.ot-details-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ot-details-heading-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+  color: var(--text-normal);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.ot-details-heading-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  color: var(--text-muted);
+}
+
+.ot-details-edit-button {
+  min-height: 36px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: transparent;
+  font-weight: 700;
+}
+
+.ot-details-edit-button:hover {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-modifier-hover);
+}
+
+/* Quiet chrome: a hairline that only warms up to the accent while the editor
+   actually has focus — the content, not the frame, is the loud part. */
+.ot-trello-editor {
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%), 0 8px 24px rgb(0 0 0 / 10%);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.ot-trello-editor:focus-within {
+  border-color: color-mix(in srgb, var(--interactive-accent) 65%, var(--background-modifier-border));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%), 0 12px 32px rgb(0 0 0 / 14%);
+}
+
+.ot-details-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 42px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--background-secondary) 55%, transparent);
+}
+
+.ot-details-toolbar-group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 0 1 auto;
+  gap: 2px;
+}
+
+/* Buttons shrink as a group so the full toolset always fits the row, even in
+   the narrower side sheet. */
+.ot-details-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 34px;
+  min-width: 20px;
+  width: auto;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.ot-details-tool svg {
+  width: 17px;
+  height: 17px;
+}
+
+.ot-details-tool:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-details-text-tool {
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ot-details-text-tool[aria-label^="Italic"] {
+  font-style: italic;
+}
+
+.ot-details-text-tool[aria-label^="Strikethrough"] {
+  text-decoration: line-through;
+}
+
+.ot-trello-editor .ot-image-gallery.is-editing {
+  padding: 10px 12px 0;
+}
+
+.ot-trello-editor .ot-details-editor {
+  display: block;
+  width: 100%;
+  min-height: 280px;
+  border: 0;
+  border-radius: 0;
+  padding: 18px 20px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  resize: vertical;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.ot-trello-editor .ot-details-editor:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.ot-details-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ot-details-action-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ot-details-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: 700;
+}
+
+.ot-details-status.is-dirty {
+  color: var(--text-warning, #d97706);
+}
+
+.ot-details-status.is-error {
+  color: var(--text-error);
+}
+
+.ot-details-shortcut {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.ot-details-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ot-details-actions button {
+  min-height: 36px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.ot-image-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ot-image-gallery.is-empty {
+  display: none;
+}
+
+/* Images fill the description width and keep their aspect (no crop, no squish),
+   like a Trello card attachment — part of the modal. Same in edit and preview. */
+.ot-image-gallery-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ot-image-gallery.is-preview {
+  margin: 4px 0 14px;
+}
+
+.ot-image-item {
+  position: relative;
+  min-width: 0;
+}
+
+.ot-image-tile {
+  display: block;
+  width: 100%;
+  height: auto;      /* override Obsidian's fixed button height... */
+  min-height: 0;     /* ...so the image isn't clipped to a thin strip */
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--background-secondary);
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.ot-image-tile:hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+
+.ot-image-tile img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: 12px;
+  background: var(--background-secondary);
+}
+
+/* While editing, cap image height a bit so the textarea stays within reach. */
+.ot-image-gallery.is-editing .ot-image-tile img {
+  max-height: 42vh;
+}
+
+.ot-image-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  color: white;
+  background: rgb(0 0 0 / 58%);
+  backdrop-filter: blur(4px);
+}
+
+.ot-image-remove:hover {
+  color: white;
+  background: rgb(0 0 0 / 78%);
+}
+
+.ot-image-info {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #f3f4f6;
+  background: rgb(0 0 0 / 72%);
+  backdrop-filter: blur(4px);
+}
+
+.ot-image-info:hover {
+  color: #fff;
+  background: rgb(0 0 0 / 86%);
+}
+
+.ot-image-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: break-word;
+}
+
+.ot-markdown-fallback {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font: inherit;
+}
+
+.ot-markdown-preview {
+  min-height: 120px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  /* Click-to-edit + copy-friendly: text caret signals both "select me" and
+     "click to type"; selectable so text can be copied without entering edit. */
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.ot-card-modal .ot-markdown-preview:hover {
+  border-color: var(--background-modifier-border-hover, var(--background-modifier-border));
+}
+
+.ot-markdown-preview ul,
+.ot-markdown-preview ol {
+  margin-block: 0.4em;
+  padding-inline-start: 1.5em;
+}
+
+/* Read-view parity with the WYSIWYG editor: Obsidian scopes its own markdown
+   styles to its views, so quotes/code/rules rendered in this modal preview get
+   NO styling from the theme — a "> quote" looked like plain text in read mode
+   while showing a proper quote bar in edit mode. Mirror the editor's styles. */
+.ot-markdown-preview blockquote {
+  margin: 0.35em 0;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+.ot-markdown-preview code {
+  background: var(--background-modifier-border);
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 0.92em;
+}
+.ot-markdown-preview hr {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+/* Compact heading margins only: size, weight, and color come from the active
+   Obsidian theme via the markdown-rendered class, same as the editor. */
+.ot-markdown-preview h1,
+.ot-markdown-preview h2,
+.ot-markdown-preview h3,
+.ot-markdown-preview h4,
+.ot-markdown-preview h5,
+.ot-markdown-preview h6 {
+  margin: 0.5em 0 0.25em;
+}
+
+/* Inline images: fill the description width, keep aspect, sensible height —
+   part of the flowing document, like a Trello attachment. */
+.ot-markdown-preview img,
+.ot-markdown-preview .internal-embed.image-embed img {
+  max-width: 100%;
+  max-height: 440px;
+  width: auto;
+  height: auto;
+  margin: 10px 0;
+  border-radius: 10px;
+  object-fit: contain;
+  display: block;
+}
+
+/* Collapse a long description behind "Show more" (expands + the modal scrolls). */
+.ot-details-body.is-clamped {
+  max-height: 340px;
+  overflow: hidden;
+}
+
+.ot-details-more {
+  margin-top: 8px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--interactive-accent);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ot-details-more:hover {
+  text-decoration: underline;
+}
+
+.ot-inline-image {
+  position: relative;
+  /* Flow side by side: consecutive images wrap like a grid once resized down. */
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+  margin: 4px 8px 4px 0;
+}
+.ot-inline-image img {
+  cursor: default;
+  margin: 0;
+}
+/* Copy-image chip: appears over the image on hover, top-right. */
+.ot-image-copy {
+  position: absolute;
+  top: 16px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  box-shadow: none;
+  z-index: 2;
+}
+.ot-inline-image:hover .ot-image-copy {
+  opacity: 1;
+}
+.ot-image-copy:hover {
+  background: rgba(0, 0, 0, 0.82);
+}
+.ot-image-copy svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Resize grip: Notion-style bar on the image's right edge (hover to reveal,
+   always visible while dragging and on touch screens). */
+.ot-img-resize {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 44px;
+  max-height: 45%;
+  padding: 0;
+  border-radius: 4px;
+  background: rgba(15, 15, 15, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 3;
+  touch-action: none;
+}
+.ot-inline-image:hover .ot-img-resize,
+.ot-block-image:hover .ot-img-resize,
+.ot-img-resize.is-dragging {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .ot-img-resize {
+    opacity: 0.85;
+  }
+}
+/* Live width readout while dragging. */
+.ot-img-size-chip {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Grid chip: sits under the top-right chip (remove in the editor, copy in the
+   read view); opens the 2/3/4-columns menu for the surrounding image run. */
+.ot-image-grid-chip {
+  position: absolute;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  box-shadow: none;
+  z-index: 3;
+}
+.ot-inline-image:hover .ot-image-grid-chip,
+.ot-block-image:hover .ot-image-grid-chip {
+  opacity: 1;
+}
+.ot-image-grid-chip:hover {
+  background: rgba(0, 0, 0, 0.82);
+}
+.ot-image-grid-chip svg {
+  width: 15px;
+  height: 15px;
+}
+.ot-inline-image .ot-image-grid-chip {
+  top: 52px;
+}
+.ot-block-image .ot-image-grid-chip {
+  top: 44px;
+}
+
+/* Drag-to-move image blocks in the editor. */
+.ot-block-image[draggable="true"] {
+  cursor: grab;
+}
+.ot-block-image.is-dragging {
+  opacity: 0.5;
+}
+.ot-block-image.is-img-drop-before {
+  box-shadow: -3px 0 0 var(--interactive-accent);
+}
+.ot-block-image.is-img-drop-after {
+  box-shadow: 3px 0 0 var(--interactive-accent);
+}
+
+.ot-image-missing {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.ot-md-chunk > :first-child { margin-top: 0; }
+.ot-md-chunk > :last-child { margin-bottom: 0; }
+
+/* Drag-over hint while dropping an image onto the details field. */
+.ot-field.is-image-drag .ot-markdown-preview,
+.ot-field.is-image-drag .ot-details-editor {
+  outline: 2px dashed var(--interactive-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.ot-hidden-file-input { display: none; }
+
+.ot-empty-text {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* Dependencies: the same field wherever it appears — the card's sidebar and
+   every checklist group. Each blocking level gets its own labelled card, and
+   each dependency is drawn as the board card it points at, shrunk. */
+.ot-dependencies-field {
+  gap: 8px;
+}
+
+/* Inside a checklist the panel is opt-in, and the field's own display:flex
+   would otherwise win against the hidden attribute's display:none. */
+.ot-dependencies-field[hidden] {
+  display: none;
+}
+
+/* The field owns its caption so it reads identically inside the sidebar and
+   inside a checklist group, where the sidebar rules do not reach. */
+.ot-dependencies-field > .ot-field-row > span:first-child {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.ot-dependency-add {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  color: var(--text-muted);
+}
+
+.ot-dependency-add > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ot-dependency-add:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-dependency-add:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.ot-dependency-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ot-dependency-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: var(--background-primary);
+}
+
+.ot-dependency-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ot-dependency-group-title {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ot-dependency-group-count {
+  border-radius: 20px;
+  padding: 0 6px;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A grid rather than a stack, so the same field adapts to whatever width it
+   lands in: one column in the card's 250px sidebar, three across a checklist,
+   where full-width rows would stretch every card into a strip. `auto-fill`
+   keeps the empty tracks so two dependencies stay card-sized. */
+.ot-dependency-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ot-dependency-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+/* Dragging a dependency onto another level is what moves it there; the card's
+   own menu stays the equivalent pointer-free route. */
+.ot-dependency-card.is-dragging {
+  opacity: 0.4;
+}
+
+.ot-dependency-group.is-drop-target {
+  border-color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+}
+
+.ot-dependency-group.is-empty-level {
+  border-style: dashed;
+}
+
+/* Blocking level picker: three tiles instead of a list of names, because what
+   decides the choice is the consequence, and the line under them says it. */
+.ot-level-picker {
+  position: fixed;
+  z-index: var(--layer-menu, 1000);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 272px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--background-secondary);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 34%);
+  animation: ot-level-picker-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes ot-level-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ot-level-picker {
+    animation: none;
+  }
+}
+
+.ot-level-picker-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ot-level-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  height: auto;
+  min-height: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 4px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: normal;
+  touch-action: manipulation;
+}
+
+.ot-level-tile.is-block {
+  --ot-level-color: var(--ot-danger-color, var(--color-red, #dc2626));
+}
+
+.ot-level-tile.is-warn {
+  --ot-level-color: var(--ot-warn-color, #c2620f);
+}
+
+.ot-level-tile.is-none {
+  --ot-level-color: var(--text-muted);
+}
+
+.ot-level-tile-icon {
+  display: inline-flex;
+  color: var(--ot-level-color, var(--text-muted));
+}
+
+.ot-level-tile-icon > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ot-level-tile:hover {
+  border-color: var(--ot-level-color, var(--interactive-accent));
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ot-level-tile.is-current {
+  border-color: var(--ot-level-color, var(--interactive-accent));
+  background: color-mix(in srgb, var(--ot-level-color, var(--interactive-accent)) 16%, var(--background-primary));
+  color: var(--text-normal);
+}
+
+.ot-level-tile:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+/* Two lines tall, so naming a level never shifts the tiles above it. */
+.ot-level-picker-hint {
+  margin: 0;
+  min-height: 32px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.ot-dependency-drop-hint {
+  border-radius: 6px;
+  padding: 7px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* The remove control floats in the corner so the title keeps the full width to
+   wrap into. */
+.ot-dependency-card-main {
+  padding-right: 26px;
+}
+
+.ot-dependency-card.is-missing .ot-mini-card-title {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.ot-dependency-card-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  color: var(--text-faint);
+}
+
+.ot-dependency-card-remove > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ot-dependency-card-remove:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-dependency-card-remove:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+/* Fingers need more room than the pointer layout gets away with. */
+@media (pointer: coarse) {
+  .ot-dependency-add {
+    width: 32px;
+    height: 32px;
+  }
+
+  .ot-dependency-card-main {
+    padding-right: 34px;
+  }
+
+  .ot-dependency-card-remove {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+.ot-dependency-summary {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.ot-dependency-summary:empty {
+  display: none;
+}
+
+.ot-dependency-summary.is-warning {
+  color: var(--ot-warn-color, #c2620f);
+}
+
+.ot-dependency-summary.is-blocked {
+  color: var(--ot-danger-color, var(--color-red, #dc2626));
+  font-weight: 600;
+}
+
+.ot-checklists-field {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The group's color lives in a spine on the left (like the note panels), not
+   in a loud full outline — the content stays the focal point. */
+.ot-checklist-group {
+  position: relative;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--ot-checklist-color, var(--interactive-accent));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-secondary) 62%, var(--background-primary));
+}
+
+/* Groups live in their own column so reordering them only moves siblings. */
+.ot-checklist-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ot-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ot-checklist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ot-checklist-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  color: var(--text-normal);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.ot-field .ot-checklist-name {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.ot-field .ot-checklist-name:hover {
+  background: var(--background-modifier-hover);
+}
+
+.ot-field .ot-checklist-name:focus {
+  background: var(--background-modifier-form-field);
+  box-shadow: inset 0 0 0 1px var(--interactive-accent);
+}
+
+.ot-checklist-delete {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--text-faint);
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+/* Opt-in group description: the button reveals itself on hover like the
+   delete control; the field only exists once the user asks for it. */
+.ot-checklist-desc-button {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--text-faint);
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+.ot-checklist-group:hover .ot-checklist-desc-button,
+.ot-checklist-desc-button:focus-visible {
+  opacity: 1;
+}
+
+/* Sits with the description button and behaves like it — quiet until the group
+   is hovered — except when it is carrying a count, which has to be legible
+   without hovering anything. Wider than a plain icon button to fit that count. */
+.ot-checklist-deps-button {
+  flex: 0 0 auto;
+  gap: 3px;
+  width: auto;
+  min-width: 30px;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--text-faint);
+  box-shadow: none;
+  opacity: 0.55;
+}
+
+.ot-checklist-group:hover .ot-checklist-deps-button,
+.ot-checklist-deps-button:focus-visible,
+.ot-checklist-deps-button.is-expanded,
+.ot-checklist-deps-button.is-warning,
+.ot-checklist-deps-button.is-blocked {
+  opacity: 1;
+}
+
+.ot-checklist-deps-button.is-expanded {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-checklist-deps-button.is-warning {
+  color: var(--ot-warn-color, #c2620f);
+}
+
+.ot-checklist-deps-button.is-blocked {
+  color: var(--ot-danger-color, var(--color-red, #dc2626));
+}
+
+.ot-checklist-deps-count {
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.ot-checklist-deps-count[hidden] {
+  display: none;
+}
+
+.ot-checklist-description {
+  margin-top: 2px;
+}
+
+.ot-checklist-description-input {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--input-radius, 6px);
+  box-sizing: border-box;
+  overflow: hidden;
+  resize: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.ot-checklist-description:hover .ot-checklist-description-input:not(:focus):not(:disabled) {
+  border-color: var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-modifier-form-field) 55%, transparent);
+}
+
+.ot-checklist-description-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-form-field);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.ot-checklist-color {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid color-mix(in srgb, var(--text-normal) 28%, transparent);
+  border-radius: 999px;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.ot-checklist-color:hover,
+.ot-checklist-color:focus-visible {
+  border-color: var(--text-normal);
+  transform: scale(1.08);
+}
+
+.ot-checklist-group:hover .ot-checklist-delete,
+.ot-checklist-delete:focus-visible {
+  opacity: 1;
+}
+
+.ot-checklist-heading-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  color: var(--ot-checklist-color, var(--interactive-accent));
+}
+
+.ot-checklist-progress {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.ot-checklist-percent {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ot-progress-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+}
+
+.ot-progress-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ot-checklist-color, var(--interactive-accent));
+  transition: width 260ms cubic-bezier(0.32, 0.72, 0.22, 1);
+}
+
+.ot-checklist-row {
+  display: grid;
+  grid-template-columns: 18px 26px 20px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  min-height: 32px;
+  border-radius: 6px;
+  padding: 2px 4px;
+  background: transparent;
+}
+
+.ot-checklist-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 30px;
+  color: var(--text-faint);
+  cursor: grab;
+  touch-action: none;
+}
+
+.ot-checklist-drag-handle:active {
+  cursor: grabbing;
+}
+
+.ot-checklist-drag-handle > svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Per-item member assignment circle (leftmost). */
+.ot-checklist-assignee {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ot-checklist-assignee .ot-card-avatar {
+  width: 24px;
+  height: 24px;
+}
+
+.ot-checklist-assignee-empty {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1.5px dashed var(--background-modifier-border);
+}
+
+.ot-checklist-assignee:hover .ot-checklist-assignee-empty {
+  border-color: var(--interactive-accent);
+}
+
+.ot-checklist-row input[type="checkbox"] {
+  margin: 8px 0 0;
+}
+
+.ot-checklist-row:hover,
+.ot-checklist-row:focus-within {
+  background: var(--background-modifier-hover);
+}
+
+.ot-checklist-row .ot-icon-button {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.ot-checklist-row:hover .ot-icon-button,
+.ot-checklist-row:focus-within .ot-icon-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ot-checklist-item {
+  position: relative;
+  min-width: 0;
+}
+
+.ot-checklist-item.is-checklist-dragging {
+  opacity: 0.45;
+}
+
+.ot-checklist-item.is-checklist-drop-before::before,
+.ot-checklist-item.is-checklist-drop-after::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  left: 4px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--ot-checklist-color, var(--interactive-accent));
+}
+
+.ot-checklist-item.is-checklist-drop-before::before {
+  top: -1px;
+}
+
+.ot-checklist-item.is-checklist-drop-after::after {
+  bottom: -1px;
+}
+
+.ot-checklist.is-checklist-drop-end {
+  box-shadow: inset 0 -2px var(--ot-checklist-color, var(--interactive-accent));
+}
+
+/* Whole-checklist reordering mirrors the item affordance: a grip in the
+   header, a dimmed source and a colored seam where the group would land. */
+.ot-checklist-group-handle {
+  flex: 0 0 auto;
+  margin-right: -4px;
+}
+
+.ot-checklist-group.is-checklist-group-dragging {
+  opacity: 0.45;
+}
+
+.ot-checklist-group.is-checklist-group-drop-before::before,
+.ot-checklist-group.is-checklist-group-drop-after::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  left: 6px;
+  z-index: 2;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--ot-checklist-color, var(--interactive-accent));
+}
+
+.ot-checklist-group.is-checklist-group-drop-before::before {
+  top: -8px;
+}
+
+.ot-checklist-group.is-checklist-group-drop-after::after {
+  bottom: -8px;
+}
+
+/* While a whole checklist is dragged every group collapses to its header and
+   progress bar, so long item lists never sit between the pointer and the seam. */
+.ot-checklist-groups.is-checklist-drag-compact .ot-checklist-description,
+.ot-checklist-groups.is-checklist-drag-compact .ot-dependencies-field,
+.ot-checklist-groups.is-checklist-drag-compact .ot-checklist,
+.ot-checklist-groups.is-checklist-drag-compact .ot-checklist-add {
+  display: none;
+}
+
+/* A folded checklist keeps its header and progress bar on screen; everything
+   else waits behind the chevron. The dependencies button stays because it
+   carries the gate count; the opt-in description button folds with the body. */
+.ot-checklist-collapse {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+.ot-checklist-group.is-checklist-collapsed .ot-checklist-description,
+.ot-checklist-group.is-checklist-collapsed .ot-dependencies-field,
+.ot-checklist-group.is-checklist-collapsed .ot-checklist,
+.ot-checklist-group.is-checklist-collapsed .ot-checklist-add,
+.ot-checklist-group.is-checklist-collapsed .ot-checklist-desc-button {
+  display: none;
+}
+
+/* The drag ghost is a compact header pill, parked off-screen like the card
+   drag preview so it never flashes inside the layout. */
+.ot-checklist-drag-preview {
+  position: fixed;
+  top: -10000px;
+  left: -10000px;
+  z-index: 10000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 340px;
+  padding: 10px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--ot-checklist-color, var(--interactive-accent));
+  border-radius: 10px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 34%), 0 4px 12px rgb(0 0 0 / 22%);
+  pointer-events: none;
+}
+
+.ot-checklist-drag-preview .ot-checklist-heading-icon {
+  color: var(--ot-checklist-color, var(--interactive-accent));
+}
+
+.ot-checklist-drag-preview-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ot-checklist-drag-preview-count {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+/* Completed items live behind their own toggle so a busy checklist reads as
+   what is left to do; the count keeps the hidden rows accounted for. */
+.ot-checklist-completed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.ot-checklist .ot-checklist-completed-toggle {
+  align-self: flex-start;
+  min-height: 26px;
+  padding: 0 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ot-checklist .ot-checklist-completed-toggle:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-checklist-completed-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ot-checklist-completed-items .ot-checklist-title {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.ot-card-modal.is-sync-disabled .ot-checklist-row {
+  grid-template-columns: 18px 20px minmax(0, 1fr) auto;
+}
+
+.ot-card-modal.is-sync-disabled .ot-checklist-assignee {
+  display: none;
+}
+
+.ot-checklist-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 60px;
+}
+
+.ot-checklist-row .ot-checklist-note {
+  opacity: 0.55;
+  pointer-events: auto;
+}
+
+.ot-checklist-row .ot-checklist-note.is-linked {
+  color: var(--interactive-accent);
+  opacity: 1;
+}
+
+.ot-checklist-row .ot-checklist-note-toggle {
+  min-height: 28px;
+  padding: 0 6px;
+  color: var(--interactive-accent);
+  font-size: var(--font-ui-smaller);
+  opacity: 1;
+  white-space: nowrap;
+}
+
+.ot-checklist-note-chevron,
+.ot-checklist-note-chevron > svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* One surface, not a box-in-a-box: the checklist's colored spine carries the
+   nesting and the note itself is the only bordered panel, aligned with the
+   item's text column. */
+.ot-checklist-note-panel {
+  width: auto;
+  margin: 6px 8px 14px 62px;
+  padding: 0 0 0 12px;
+  box-sizing: border-box;
+  border-left: 2px solid color-mix(in srgb, var(--ot-checklist-color, var(--interactive-accent)) 70%, transparent);
+  background: transparent;
+}
+
+.ot-card-modal.is-sync-disabled .ot-checklist-note-panel {
+  margin-left: 40px;
+}
+
+.ot-checklist-note-panel[hidden] {
+  display: none;
+}
+
+.ot-checklist-note-content > :first-child {
+  margin-top: 0;
+}
+
+.ot-checklist-note-content > :last-child {
+  margin-bottom: 0;
+}
+
+.ot-checklist-note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ot-checklist-note-actions button {
+  min-height: 28px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ot-checklist-note-actions button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.ot-checklist-note-preview {
+  min-height: 56px;
+  padding: 12px 14px;
+  background: var(--background-primary);
+}
+
+.ot-checklist-note-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.ot-checklist-note-status.is-error {
+  color: var(--text-error);
+}
+
+/* Items read as a task list, not a form: plain text at rest, the input frame
+   appears only while pointing at or editing the row. */
+.ot-checklist-title {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--input-radius, 6px);
+  box-sizing: border-box;
+  overflow: hidden;
+  resize: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.ot-checklist-row:hover .ot-checklist-title:not(:focus) {
+  border-color: var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-modifier-form-field) 55%, transparent);
+}
+
+.ot-checklist-title:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-form-field);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.ot-checklist-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 56px;
+}
+
+.ot-checklist-add .ot-text-button {
+  background: transparent;
+  box-shadow: none;
+}
+
+.ot-checklist-group .ot-empty-text {
+  padding: 4px 0 4px 88px;
+}
+
+/* The dependency panel's own empty line: it is not a checklist item, so the
+   indent that lines items up under their checkbox does not apply to it. */
+.ot-checklist-group .ot-dependencies-field .ot-empty-text {
+  padding: 0;
+}
+
+.ot-card-modal.is-sync-disabled .ot-checklist-group .ot-empty-text {
+  padding-left: 54px;
+}
+
+.ot-checklist-add-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 30px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.ot-add-checklist {
+  align-self: stretch;
+  min-height: 38px;
+  border: 1px dashed var(--background-modifier-border);
+  background: transparent;
+  box-shadow: none;
+}
+
+.ot-add-checklist:hover {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+/* Scoped: a bare .is-hidden would hide that class anywhere in Obsidian, in
+   core UI and in other plugins, not only inside Kanux. */
+.ot-board-root .is-hidden,
+.ot-card-modal .is-hidden,
+.ot-side-sheet .is-hidden {
+  display: none;
+}
+
+.ot-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal.ot-confirm-modal-shell {
+  width: min(350px, calc(100vw - 32px));
+  max-width: 350px;
+}
+
+.ot-confirm-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  background: var(--background-primary);
+}
+
+.ot-confirm-heading {
+  display: block;
+}
+
+.ot-confirm-heading h2 {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 16px;
+}
+
+.ot-confirm-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.35;
+}
+
+/* Whatever the message introduced, one item per line. Long card titles wrap
+   instead of stretching the dialog, and a long list scrolls instead of pushing
+   the buttons off screen. */
+.ot-confirm-list {
+  margin: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-left: 20px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+}
+
+.ot-confirm-list li {
+  overflow-wrap: break-word;
+}
+
+.ot-confirm-list li + li {
+  margin-top: 4px;
+}
+
+.ot-confirm-warning {
+  margin: 0;
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  font-weight: 700;
+}
+
+.ot-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 5px;
+}
+
+.ot-confirm-actions .mod-warning {
+  border-color: var(--ot-danger-color, var(--color-red, #dc2626));
+  background-color: var(--ot-danger-color, var(--color-red, #dc2626));
+  color: #ffffff;
+}
+
+.ot-confirm-actions .mod-warning:hover {
+  border-color: color-mix(in srgb, var(--ot-danger-color, var(--color-red, #dc2626)) 85%, black);
+  background-color: color-mix(in srgb, var(--ot-danger-color, var(--color-red, #dc2626)) 85%, black);
+}
+
+.ot-modal-actions .mod-warning {
+  margin-right: auto;
+}
+
+.ot-loading {
+  padding: 16px 0;
+  color: var(--text-muted);
+}
+
+@media (max-width: 640px) {
+  .ot-board-root {
+    padding: 10px;
+  }
+
+  /* On a phone the bar is tall rather than cramped: a row per group, each
+     starting at the left edge, instead of two groups sharing a tight line. */
+  .ot-toolbar-title,
+  .ot-toolbar-primary,
+  .ot-toolbar-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .ot-toolbar-actions {
+    margin-left: 0;
+    padding-left: 0;
+  }
+
+  .ot-welcome-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ot-welcome-actions {
+    justify-content: flex-start;
+  }
+
+  .ot-list {
+    flex-basis: 86vw;
+  }
+
+  .ot-label-create-preview-band {
+    padding-inline: 18px;
+  }
+
+  .ot-label-color-grid {
+    grid-template-columns: repeat(3, minmax(44px, 1fr));
+  }
+
+  .ot-details-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ot-details-toolbar-group {
+    flex-wrap: wrap;
+  }
+
+  .ot-details-actions,
+  .ot-details-action-buttons {
+    width: 100%;
+  }
+
+  .ot-details-action-buttons button {
+    flex: 1;
+  }
+
+  .ot-details-shortcut {
+    display: none;
+  }
+}
+
+/* Card member assignment (avatars). */
+.ot-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  margin-top: 1px;
+}
+
+.ot-card-assignees {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.ot-card-assignees .ot-card-avatar { margin-left: -6px; }
+.ot-card-assignees .ot-card-avatar:first-child { margin-left: 0; }
+
+.ot-card-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--background-primary);
+  background: var(--ot-avatar-color, var(--interactive-accent));
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ot-card-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Card modal "Members" field. */
+.ot-assignee-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The chip never outgrows its card: the name shrinks with an ellipsis and the
+   remove button stays inside the pill. */
+.ot-assignee-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 4px 3px 3px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+}
+
+.ot-assignee-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ot-assignee-remove,
+.ot-assignee-add {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.ot-assignee-remove:hover,
+.ot-assignee-add:hover {
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--text-normal) 12%, transparent);
+}
+
+.ot-assignee-add {
+  border: 1px solid var(--background-modifier-border);
+}
+
+/* ---- View switch (Board / Table) ---- */
+.ot-view-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-left: 8px;
+  border-radius: 8px;
+  background: var(--background-modifier-border);
+}
+.ot-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: none;
+}
+.ot-view-tab:hover {
+  color: var(--text-normal);
+}
+.ot-view-tab.is-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+.ot-view-tab-icon {
+  display: inline-flex;
+}
+.ot-view-tab-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ---- Table view ---- */
+.ot-table-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
+}
+
+.ot-table-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ot-list-radius, 12px);
+  padding: 10px;
+  background: var(--ot-list-background, var(--background-secondary));
+  box-shadow: var(--ot-list-shadow, 0 2px 8px rgb(0 0 0 / 14%));
+}
+
+.ot-table-search {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-width: 190px;
+  min-height: 34px;
+  gap: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--ot-card-background, var(--background-primary));
+  flex: 1 1 320px;
+}
+
+.ot-table-search:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
+
+.ot-table-search-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+.ot-table-search-input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-normal);
+  box-shadow: none;
+}
+
+.ot-table-filter {
+  flex: 0 1 170px;
+  width: 170px;
+  min-width: 0;
+  min-height: 34px;
+  max-width: 180px;
+  border-radius: 8px;
+  color: var(--text-normal);
+  background: var(--ot-card-background, var(--background-primary));
+}
+
+.ot-table-summary {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.ot-table-clear {
+  min-height: 34px;
+}
+.ot-table-label-filter {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--ot-card-background, var(--background-primary));
+  color: var(--text-muted);
+}
+.ot-table-label-filter:hover,
+.ot-table-label-filter.is-active {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, var(--background-modifier-border));
+  color: var(--text-normal);
+}
+.ot-table-label-filter.is-active {
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--ot-card-background, var(--background-primary)));
+}
+.ot-table-label-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  border-radius: 999px;
+  padding: 0 5px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.ot-table-label-filter-count[hidden] {
+  display: none;
+}
+
+.ot-table-wrap {
+  flex: 1;
+  min-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ot-list-radius, 12px);
+  padding: 0 8px 8px;
+  background: var(--ot-list-background, var(--background-secondary));
+  box-shadow: var(--ot-list-shadow, 0 2px 8px rgb(0 0 0 / 14%));
+}
+.ot-table {
+  border-collapse: separate;
+  border-spacing: 0 8px;
+  width: 100%;
+  min-width: 100%;
+  font-size: 0.9em;
+}
+.ot-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 8px 12px;
+  white-space: nowrap;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-muted) 28%, transparent);
+  position: sticky;
+  top: 0;
+  background: var(--ot-list-background, var(--background-secondary));
+  z-index: 2;
+}
+.ot-table td {
+  padding: 9px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  vertical-align: middle;
+  color: var(--text-normal);
+  background: var(--ot-card-background, var(--background-primary));
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.ot-table-row {
+  cursor: pointer;
+  outline: none;
+  transition: background-color 140ms ease;
+}
+.ot-table-row:hover td {
+  border-color: color-mix(in srgb, var(--ot-row-list-color) 42%, var(--background-modifier-border));
+  background: var(--ot-card-hover-background, var(--background-modifier-hover));
+}
+.ot-table-row:focus-visible td {
+  background: color-mix(in srgb, var(--interactive-accent) 11%, var(--ot-card-background, var(--background-primary)));
+  box-shadow: inset 0 1px color-mix(in srgb, var(--interactive-accent) 36%, transparent), inset 0 -1px color-mix(in srgb, var(--interactive-accent) 36%, transparent);
+}
+.ot-table-row.is-locked {
+  opacity: 0.75;
+}
+.ot-td-name {
+  min-width: 240px;
+}
+.ot-th-name,
+.ot-td-name {
+  position: sticky;
+  left: 0;
+}
+.ot-th-name {
+  z-index: 4;
+  background: var(--ot-list-background, var(--background-secondary));
+}
+.ot-td-name {
+  z-index: 1;
+  border-left: 3px solid var(--ot-row-list-color, var(--interactive-accent));
+  border-radius: var(--ot-card-radius, 10px) 0 0 var(--ot-card-radius, 10px);
+  background: var(--ot-card-background, var(--background-primary));
+}
+.ot-table-row:hover .ot-td-name {
+  background: var(--ot-card-hover-background, var(--background-modifier-hover));
+}
+.ot-table-row td:last-child {
+  border-right: 1px solid var(--background-modifier-border);
+  border-radius: 0 var(--ot-card-radius, 10px) var(--ot-card-radius, 10px) 0;
+}
+.ot-td-name-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ot-td-title {
+  overflow-wrap: break-word;
+}
+.ot-table-row.is-completed .ot-td-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.ot-td-hints {
+  display: inline-flex;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+.ot-td-empty {
+  color: var(--text-faint);
+}
+.ot-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 11px;
+  border-radius: 999px;
+  color: var(--text-normal);
+  font-size: 0.9em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ot-status-pill.is-clickable {
+  cursor: pointer;
+}
+.ot-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--ot-status-color, #8b8b8b);
+}
+.ot-td-assignee .ot-card-assignees {
+  display: inline-flex;
+}
+/* NEVER set display:flex on a <td> — it drops the cell out of the table's
+   row/column grid and knocks that column out of alignment. The label pills wrap
+   inside the .ot-cell-labels div instead; the cell stays a normal table-cell. */
+.ot-table-empty {
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 22px 14px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+  text-align: center;
+}
+.ot-td-dependency-hint {
+  font-variant-numeric: tabular-nums;
+}
+
+.ot-td-dependency-hint.is-blocked {
+  color: var(--ot-danger-color, var(--color-red, #c9372c));
+}
+
+.ot-td-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
+}
+.ot-td-hint-icon,
+.ot-td-hint-icon > svg {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+.ot-td-checklist-hint {
+  border-radius: 5px;
+  padding: 3px 5px;
+  background: color-mix(in srgb, var(--text-muted) 13%, transparent);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ot-table-empty[hidden] {
+  display: none;
+}
+.ot-table-creator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ot-list-radius, 12px);
+  padding: 14px;
+  background: var(--ot-list-background, var(--background-secondary));
+  box-shadow: var(--ot-list-shadow, 0 2px 8px rgb(0 0 0 / 14%));
+}
+
+.ot-table-composer {
+  display: grid;
+  width: min(900px, 100%);
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 210px) auto;
+  align-items: end;
+  gap: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--ot-card-radius, 10px);
+  padding: 10px;
+  background: var(--ot-card-background, var(--background-primary));
+}
+
+.ot-table-composer-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+.ot-table-composer-input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 0 10px;
+  outline: none;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  box-shadow: none;
+}
+.ot-table-composer-input::placeholder {
+  color: var(--text-faint);
+}
+.ot-table-composer-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+}
+
+.ot-table-composer-select {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 8px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+}
+
+.ot-table-composer-submit {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.ot-table-creator-empty {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ot-table-date.is-overdue {
+  border-radius: 5px;
+  padding: 2px 6px;
+  color: #fff;
+  background: var(--ot-danger-color, var(--color-red, #c9372c));
+  font-weight: 750;
+}
+
+@media (max-width: 1100px) {
+  .ot-table-controls {
+    grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(120px, 1fr));
+  }
+
+  .ot-table-summary {
+    grid-column: 1 / -2;
+    margin-left: 0;
+  }
+
+  .ot-table-clear {
+    justify-self: end;
+  }
+}
+
+@media (max-width: 760px) {
+  .ot-table-controls {
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+  }
+
+  .ot-table-search {
+    grid-column: 1 / -1;
+  }
+
+  .ot-table-filter {
+    max-width: none;
+  }
+
+  .ot-table-summary {
+    grid-column: 1;
+    margin-left: 0;
+    align-self: center;
+  }
+
+  .ot-table-composer {
+    grid-template-columns: 1fr;
+  }
+
+  .ot-table-creator-empty {
+    justify-content: flex-start;
+  }
+}
+
+/* ---- Table view: resizable / hideable / reorderable columns ---- */
+.ot-table {
+  table-layout: fixed;
+  width: max-content;
+}
+.ot-table th,
+.ot-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ot-th {
+  position: relative;
+}
+.ot-th-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ot-th-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.ot-th[draggable="true"] {
+  cursor: grab;
+}
+.ot-th.is-col-dragging {
+  opacity: 0.4;
+}
+.ot-th.is-col-drop {
+  box-shadow: inset 2px 0 0 var(--interactive-accent);
+}
+.ot-th-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  box-shadow: none;
+}
+.ot-th:hover .ot-th-menu {
+  opacity: 1;
+}
+.ot-th-menu:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.ot-th-menu svg {
+  width: 13px;
+  height: 13px;
+}
+.ot-col-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+}
+.ot-col-resize:hover {
+  box-shadow: inset -2px 0 0 var(--interactive-accent);
+}
+body.ot-col-resizing,
+body.ot-col-resizing * {
+  cursor: col-resize;
+  user-select: none;
+}
+.ot-th-add {
+  padding: 4px 6px;
+}
+.ot-th-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+}
+.ot-th-add-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.ot-th-add-btn svg {
+  width: 15px;
+  height: 15px;
+}
+/* Inline-edit cell triggers (assignee / dates / labels) */
+/* Inline-edit cells are plain <div>s (NOT buttons) so no theme button chrome can
+   paint a box around them. The only highlight is the row hover — keeps every
+   column flat and aligned. */
+.ot-cell-edit {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 24px;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.ot-cell-labels {
+  flex-wrap: wrap;
+}
+.ot-td-assignee .ot-cell-edit {
+  justify-content: flex-start;
+}
+/* Row checkbox — a plain div, not a themed button, so it shows no box. */
+.ot-table-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1.6px solid var(--text-faint);
+  border-radius: 50%;
+  background: none;
+  color: #1f2328;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.ot-table-check:hover {
+  border-color: var(--text-muted);
+}
+.ot-table-row.is-completed .ot-table-check {
+  background: var(--ot-done-color, var(--color-green, #8cc63f));
+  border-color: var(--ot-done-color, var(--color-green, #8cc63f));
+}
+/* A clean scale pop — NOT the Kanban toggle keyframes, which carry a
+   translateY(-50%) for their absolutely-positioned button and would jump the
+   flex-laid-out table checkbox upward. */
+.ot-table-row.is-just-completed .ot-table-check {
+  animation: ot-table-check-pop 360ms cubic-bezier(0.2, 0.9, 0.2, 1.2);
+}
+@keyframes ot-table-check-pop {
+  0% { transform: scale(0.8); }
+  55% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ot-table-row.is-just-completed .ot-table-check {
+    animation: none;
+  }
+}
+
+/* Custom picker popover (status = colored dots, members = profile pictures) */
+.ot-popover {
+  position: fixed;
+  z-index: 100;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+.ot-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 0.9em;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none;
+}
+.ot-popover-row:hover {
+  background: var(--background-modifier-hover);
+}
+.ot-popover-row .ot-card-avatar {
+  margin: 0;
+  flex: 0 0 auto;
+}
+.ot-popover-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ot-popover-check {
+  display: inline-flex;
+  color: var(--interactive-accent);
+}
+.ot-popover-check svg {
+  width: 15px;
+  height: 15px;
+}
+.ot-popover-empty {
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+.ot-label-filter-popover {
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(480px, calc(100vh - 24px));
+  padding: 8px;
+  overflow: hidden;
+}
+.ot-label-filter-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-bottom: 8px;
+  background: var(--background-primary);
+}
+.ot-label-filter-search {
+  width: 100%;
+  min-height: 36px;
+  border-radius: 7px;
+  background: var(--background-secondary);
+}
+.ot-label-filter-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.ot-label-filter-options {
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ot-label-filter-dot {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 10px;
+  border-radius: 999px;
+}
+.ot-label-filter-limit {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 8px 8px 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+.ot-label-filter-limit[hidden] {
+  display: none;
+}
+
+/* ---- Embedded Obsidian Live Preview editor ---- */
+.ot-embedded-editor {
+  min-height: 170px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px 10px;
+  cursor: text;
+}
+
+.ot-embedded-editor .cm-editor {
+  background: transparent;
+}
+
+/* The description field is a note-sized surface: line numbers and fold
+   controls are workspace-editor furniture, not card furniture. */
+.ot-embedded-editor .cm-gutters {
+  display: none;
+}
+
+/* Match the read preview's body weight; per-line heading/bold styles from the
+   theme still apply on top. */
+.ot-embedded-editor .cm-content {
+  font-weight: var(--font-normal, 400);
+}
+
+/* ---- Description block editor (Notion/Trello-style) ---- */
+.ot-block-editor {
+  /* Block flow (not flex): image blocks are inline-block, so consecutive
+     images sit side by side and wrap like a grid once resized down. */
+  display: block;
+  min-height: 170px;
+  padding: 10px 12px 14px;
+  cursor: text;
+}
+.ot-block-text {
+  position: relative;
+  width: 100%;
+  min-height: 30px;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  /* Match the read preview's typography so editing IS the preview. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* Empty text slot between two images: a slim clickable strip that keeps the
+   images side by side; typing expands it back to a full row. */
+.ot-block-text--slim {
+  display: inline-block;
+  width: auto;
+  min-width: 12px;
+  vertical-align: top;
+}
+.ot-block-text:focus {
+  outline: none;
+  box-shadow: none;
+}
+/* Obsidian-style live-preview marker: the "#" shown while the caret is on a
+   heading line. Visual only — the serializer skips it. */
+.ot-block-text .ot-md-token {
+  color: var(--text-faint);
+  user-select: none;
+}
+.ot-block-text[data-empty="true"][data-placeholder]::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  pointer-events: none;
+  position: absolute;
+}
+/* Formatted content INSIDE the editable surface (live WYSIWYG). */
+.ot-block-text p {
+  margin: 0 0 0.45em;
+}
+.ot-block-text p:last-child {
+  margin-bottom: 0;
+}
+.ot-block-text ul,
+.ot-block-text ol {
+  margin: 0.25em 0;
+  padding-inline-start: 1.5em;
+}
+.ot-block-text li {
+  margin: 0.1em 0;
+}
+/* Compact heading margins only: size, weight, and color come from the active
+   Obsidian theme via the markdown-rendered class on the editable surface. */
+.ot-block-text h1,
+.ot-block-text h2,
+.ot-block-text h3,
+.ot-block-text h4,
+.ot-block-text h5,
+.ot-block-text h6 {
+  margin: 0.5em 0 0.25em;
+}
+.ot-block-text blockquote {
+  margin: 0.35em 0;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+.ot-block-text hr {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.ot-block-text code {
+  background: var(--background-modifier-border);
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 0.92em;
+}
+.ot-block-text a {
+  color: var(--interactive-accent);
+}
+.ot-block-image {
+  position: relative;
+  display: inline-block;
+  vertical-align: top;
+  margin: 4px 8px 4px 0;
+  max-width: 100%;
+}
+.ot-block-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 340px;
+  width: auto;
+  height: auto;
+  border-radius: 10px;
+  object-fit: contain;
+}
+.ot-block-image-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  box-shadow: none;
+  z-index: 2;
+}
+.ot-block-image:hover .ot-block-image-remove {
+  opacity: 1;
+}
+.ot-block-image-remove:hover {
+  background: rgba(200, 40, 40, 0.85);
+}
+.ot-block-image-remove svg {
+  width: 15px;
+  height: 15px;
+}

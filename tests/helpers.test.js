@@ -1,0 +1,612 @@
+const assert = require("assert");
+const Module = require("module");
+
+const originalLoad = Module._load;
+Module._load = function load(request, parent, isMain) {
+  if (request === "obsidian") {
+    return {
+      getIcon(iconName) {
+        return ["trash-2", "circle-help"].includes(iconName) ? { iconName } : null;
+      },
+    };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
+
+const {
+  DEFAULT_APPEARANCE,
+  blankChecklists,
+  checklistItems,
+  checklistItemNoteBody,
+  checklistItemNoteWithBody,
+  checklistStats,
+  checklistsToMarkdown,
+  dependencyGate,
+  firstPlaceholderIndex,
+  formatCardCode,
+  normalizeNumbering,
+  parseTemplateNumbering,
+  withNumbering,
+  cardCodeNumber,
+  cleanCardCode,
+  cardCodeChip,
+  cleanSeparator,
+  normalizeCodeLook,
+  iconButton,
+  moveArrayEntry,
+  normalizeChecklists,
+  normalizeDependencies,
+  parseCardMarkdown,
+  parseChecklists,
+  parseDependencies,
+  serializeDependencies,
+} = require("../src/helpers");
+
+function createFakeElement(tagName) {
+  const element = {
+    tagName,
+    attributes: {},
+    children: [],
+    style: { properties: {}, setProperty(name, value) { this.properties[name] = value; } },
+    addEventListener() {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+    replaceChildren(...children) { this.children = children; },
+  };
+  element.classList = { names: [], add: (...names) => element.classList.names.push(...names) };
+  return element;
+}
+
+function testRegisteredIconAndGenericFallback() {
+  global.document = { createElement: createFakeElement };
+
+  const aliasedButton = iconButton("trash", "Delete", () => {});
+  assert.strictEqual(aliasedButton.children[0].iconName, "trash-2");
+  assert.strictEqual(aliasedButton.attributes["aria-label"], "Delete");
+
+  const fallbackButton = iconButton("not-registered", "Unknown", () => {});
+  assert.strictEqual(fallbackButton.children[0].iconName, "circle-help");
+}
+
+function testChecklistItemNoteBody() {
+  const managed = [
+    "---",
+    "kanux-checklist-item: true",
+    "kanux-card-id: card-1",
+    "---",
+    "",
+    "# Review implementation",
+    "",
+    "Card: [[Board/Card|Card title]]",
+    "",
+    "Review the parser and keep [[Architecture]] in sync.",
+    "",
+    "- Confirm lists",
+    "- Confirm links",
+  ].join("\n");
+  assert.strictEqual(
+    checklistItemNoteBody(managed),
+    "Review the parser and keep [[Architecture]] in sync.\n\n- Confirm lists\n- Confirm links",
+  );
+
+  const external = [
+    "---",
+    "owner: docs",
+    "---",
+    "",
+    "# External heading",
+    "",
+    "Paragraph with [[Reference]].",
+    "",
+    "- First",
+    "- Second",
+  ].join("\n");
+  assert.strictEqual(
+    checklistItemNoteBody(external),
+    "# External heading\n\nParagraph with [[Reference]].\n\n- First\n- Second",
+  );
+
+  const managedWithNewBody = checklistItemNoteWithBody(managed, "## Acceptance criteria\n\n- Keep links working");
+  assert.ok(managedWithNewBody.startsWith("---\nkanux-checklist-item: true\n"));
+  assert.ok(managedWithNewBody.includes("# Review implementation\n\nCard: [[Board/Card|Card title]]"));
+  assert.ok(managedWithNewBody.endsWith("## Acceptance criteria\n\n- Keep links working\n"));
+
+  const externalWithNewBody = checklistItemNoteWithBody(external, "# Updated heading\n\nUpdated paragraph.");
+  assert.ok(externalWithNewBody.startsWith("---\nowner: docs\n---\n"));
+  assert.ok(externalWithNewBody.endsWith("# Updated heading\n\nUpdated paragraph.\n"));
+}
+
+function testLegacyChecklistMigration() {
+  const groups = parseChecklists("- [x] Existing item\n- [ ] Pending item");
+  assert.strictEqual(groups.length, 1);
+  assert.strictEqual(groups[0].title, "Checklist");
+  assert.deepStrictEqual(groups[0].items.map((item) => [item.done, item.text]), [
+    [true, "Existing item"],
+    [false, "Pending item"],
+  ]);
+}
+
+function testNamedChecklistRoundTrip() {
+  const source = [
+    {
+      title: "Development",
+      color: "#ef4444",
+      items: [
+        { done: true, text: "Implement parser", assignee: null },
+        {
+          done: false,
+          text: "Review",
+          filePath: "Project/checklist-items/Review.md",
+          assignee: { email: "dev@example.com", name: "Dev", color: "#123456" },
+        },
+      ],
+    },
+    { title: "Release", items: [{ done: false, text: "Publish", assignee: null }] },
+  ];
+  const markdown = checklistsToMarkdown(source);
+  const parsed = parseChecklists(markdown);
+
+  assert.deepStrictEqual(parsed.map((group) => group.title), ["Development", "Release"]);
+  assert.strictEqual(parsed[0].color, "#ef4444");
+  assert.ok(markdown.includes("<!--kanux-checklist-color:#ef4444-->"));
+  assert.deepStrictEqual(parsed.map((group) => group.items.map((item) => item.text)), [
+    ["Implement parser", "Review"],
+    ["Publish"],
+  ]);
+  assert.strictEqual(parsed[0].items[1].assignee.email, "dev@example.com");
+  assert.strictEqual(parsed[0].items[1].filePath, "Project/checklist-items/Review.md");
+  assert.ok(markdown.includes("[[Project/checklist-items/Review|Review]]"));
+
+  const empty = parseChecklists(checklistsToMarkdown([{ title: "Empty group", color: "#22c55e", items: [] }]));
+  assert.strictEqual(empty.length, 1);
+  assert.strictEqual(empty[0].title, "Empty group");
+  assert.strictEqual(empty[0].color, "#22c55e");
+  assert.deepStrictEqual(empty[0].items, []);
+}
+
+function testChecklistIdentityRoundTrip() {
+  const [group] = normalizeChecklists([
+    {
+      title: "Development",
+      items: [
+        { done: false, text: "Implement parser" },
+        { done: true, text: "Review", assignee: { email: "dev@example.com", name: "Dev", color: "#123456" } },
+      ],
+    },
+  ], []);
+  assert.ok(/^checklist-/.test(group.id));
+  assert.ok(group.items.every((item) => /^item-/.test(item.id)));
+
+  const markdown = checklistsToMarkdown([group]);
+  assert.ok(markdown.includes(`<!--kanux-checklist-id:${group.id}-->`));
+  group.items.forEach((item) => assert.ok(markdown.includes(`<!--kanux-item-id:${item.id}-->`)));
+
+  const [parsed] = normalizeChecklists(parseChecklists(markdown), []);
+  assert.strictEqual(parsed.id, group.id);
+  assert.deepStrictEqual(parsed.items.map((item) => item.id), group.items.map((item) => item.id));
+  assert.strictEqual(parsed.title, "Development");
+  assert.deepStrictEqual(parsed.items.map((item) => item.text), ["Implement parser", "Review"]);
+  assert.strictEqual(parsed.items[1].assignee.email, "dev@example.com");
+}
+
+function testChecklistDescriptionRoundTrip() {
+  const markdown = checklistsToMarkdown([{
+    title: "Release",
+    description: "Steps before shipping.\n# Not a heading\n- Not an item",
+    items: [{ done: false, text: "Publish" }],
+  }]);
+  assert.ok(markdown.includes("Steps before shipping."));
+  assert.ok(markdown.includes("\\# Not a heading"));
+  assert.ok(markdown.includes("\\- Not an item"));
+
+  const [parsed] = parseChecklists(markdown);
+  assert.strictEqual(parsed.description, "Steps before shipping.\n# Not a heading\n- Not an item");
+  assert.deepStrictEqual(parsed.items.map((item) => item.text), ["Publish"]);
+
+  const handWritten = parseChecklists("### Notes\nContext paragraph.\n\n- [ ] Task\nTrailing loose line");
+  assert.strictEqual(handWritten[0].description, "Context paragraph.");
+  assert.deepStrictEqual(handWritten[0].items.map((item) => item.text), ["Task", "Trailing loose line"]);
+
+  const descriptionOnly = parseChecklists("### Empty\nOnly context, no items yet.");
+  assert.strictEqual(descriptionOnly[0].description, "Only context, no items yet.");
+  assert.deepStrictEqual(descriptionOnly[0].items, []);
+
+  const [normalized] = normalizeChecklists([{ title: "Plain", items: [] }], []);
+  assert.strictEqual(normalized.description, "");
+}
+
+function testChecklistIdDeduplicationAndSanitizing() {
+  const groups = normalizeChecklists([
+    { id: "checklist-dup", title: "A", items: [{ id: "item-dup", text: "One" }, { id: "item-dup", text: "Two" }] },
+    { id: "checklist-dup", title: "B", items: [{ id: "bad id!", text: "Three" }] },
+  ], []);
+
+  assert.strictEqual(groups[0].id, "checklist-dup");
+  assert.notStrictEqual(groups[1].id, "checklist-dup");
+  assert.strictEqual(groups[0].items[0].id, "item-dup");
+  assert.notStrictEqual(groups[0].items[1].id, "item-dup");
+  assert.ok(/^item-/.test(groups[1].items[0].id));
+}
+
+function testCardParserAndAggregateStats() {
+  const markdown = [
+    "---",
+    "kanban-card-id: card-1",
+    "---",
+    "",
+    "# Card",
+    "",
+    "## Details",
+    "Body",
+    "",
+    "## Checklist",
+    "### First",
+    "- [x] A",
+    "",
+    "### Second",
+    "- [ ] B",
+    "- [x] C",
+  ].join("\n");
+  const card = parseCardMarkdown(markdown);
+  const items = checklistItems(card.checklists);
+  assert.strictEqual(card.checklists.length, 2);
+  assert.deepStrictEqual(checklistStats(items), { done: 2, total: 3, percent: 67 });
+  assert.deepStrictEqual(checklistStats(card.checklists), { done: 2, total: 3, percent: 67 });
+}
+
+function testCardMetadataParsing() {
+  const markdown = [
+    "---",
+    "kanban-card-id: card-7",
+    "kanban-board-id: board-2",
+    "kanban-list-id: list-3",
+    "kanux-list: Doing: Today",
+    "position: 4",
+    "labels: Urgent|#ef4444, Docs|#3b82f6",
+    "assignees: dev@example.com|Dev User|#123456",
+    "depends-on: card-1|warn,card-2|block",
+    "completed: yes",
+    "start: 2026-08-25",
+    "due: invalid",
+    "---",
+    "",
+    "# Metadata card",
+    "",
+    "position: 99",
+  ].join("\n");
+
+  const card = parseCardMarkdown(markdown);
+  assert.strictEqual(card.id, "card-7");
+  assert.strictEqual(card.boardId, "board-2");
+  assert.strictEqual(card.listId, "list-3");
+  assert.strictEqual(card.listTitle, "Doing: Today");
+  assert.strictEqual(card.position, 4);
+  assert.deepStrictEqual(card.labels.map((label) => label.name), ["Urgent", "Docs"]);
+  assert.strictEqual(card.assignees[0].email, "dev@example.com");
+  assert.deepStrictEqual(card.dependencies, [
+    { cardId: "card-1", blocking: "warn" },
+    { cardId: "card-2", blocking: "block" },
+  ]);
+  assert.strictEqual(card.completed, true);
+  assert.strictEqual(card.startDate, "2026-08-25");
+  assert.strictEqual(card.dueDate, "");
+
+  const missing = parseCardMarkdown("# Card without metadata");
+  assert.strictEqual(missing.position, null);
+  assert.strictEqual(missing.assignees, null);
+  assert.strictEqual(missing.dependencies, null);
+  assert.strictEqual(missing.completed, null);
+  assert.strictEqual(missing.startDate, null);
+  assert.strictEqual(missing.dueDate, null);
+}
+
+function testTemplateChecklistsStartClean() {
+  const source = [{
+    id: "checklist-1",
+    title: "Steps",
+    color: "#3b82f6",
+    description: "How to reproduce",
+    dependencies: [{ cardId: "card-9", blocking: "block" }],
+    items: [{
+      id: "item-1",
+      text: "Reproduce",
+      done: true,
+      filePath: "Board/checklist-items/Reproduce.md",
+      assignee: { email: "dev@example.com", name: "Dev", color: "#123456" },
+    }],
+  }];
+
+  const blanked = blankChecklists(source);
+
+  // Nothing that belonged to the card it was copied from comes along.
+  assert.strictEqual(blanked[0].id, undefined);
+  assert.deepStrictEqual(blanked[0].dependencies, []);
+  assert.strictEqual(blanked[0].items[0].id, undefined);
+  assert.strictEqual(blanked[0].items[0].done, false);
+  assert.strictEqual(blanked[0].items[0].filePath, "");
+
+  // The shape worth reusing survives.
+  assert.strictEqual(blanked[0].title, "Steps");
+  assert.strictEqual(blanked[0].color, "#3b82f6");
+  assert.strictEqual(blanked[0].description, "How to reproduce");
+  assert.strictEqual(blanked[0].items[0].assignee.email, "dev@example.com");
+
+  // Two cards made from one template get their own ids instead of sharing a set.
+  const first = normalizeChecklists(blankChecklists(source), []);
+  const second = normalizeChecklists(blankChecklists(source), []);
+  assert.notStrictEqual(first[0].id, second[0].id);
+  assert.notStrictEqual(first[0].items[0].id, second[0].items[0].id);
+}
+
+function testTemplatePlaceholderCaret() {
+  assert.strictEqual(firstPlaceholderIndex("As a [ ] I want [ ]"), 6);
+  // A checkbox is a task, not a blank waiting to be filled in.
+  assert.strictEqual(firstPlaceholderIndex("- [ ] Reproduce\n\nAs a [ ] I want"), 23);
+  assert.strictEqual(firstPlaceholderIndex("Nothing to fill in here"), -1);
+  assert.strictEqual(firstPlaceholderIndex(""), -1);
+}
+
+function testDependencyNormalizationAndRoundTrip() {
+  const dependencies = normalizeDependencies([
+    { cardId: "card-1", blocking: "block" },
+    { cardId: "card-1", blocking: "warn" },
+    { cardId: "", blocking: "warn" },
+    { cardId: "card 2", blocking: "warn" },
+    { cardId: "card-3", blocking: "nonsense" },
+  ]);
+
+  // Duplicates keep the first entry, unusable ids are dropped, and an unknown
+  // blocking mode falls back to the harmless default.
+  assert.deepStrictEqual(dependencies, [
+    { cardId: "card-1", blocking: "block" },
+    { cardId: "card-3", blocking: "none" },
+  ]);
+  assert.strictEqual(serializeDependencies(dependencies), "card-1|block,card-3|none");
+  assert.deepStrictEqual(parseDependencies("card-1|block, card-3|none"), dependencies);
+  assert.deepStrictEqual(parseDependencies(""), []);
+}
+
+function testChecklistDependencyRoundTrip() {
+  const markdown = checklistsToMarkdown([{
+    id: "checklist-1",
+    title: "Release",
+    color: "#3b82f6",
+    dependencies: [{ cardId: "card-9", blocking: "block" }],
+    items: [{ id: "item-1", text: "Tag the build", done: false }],
+  }]);
+  assert.ok(markdown.includes("<!--kanux-checklist-depends:card-9|block-->"));
+
+  const parsed = parseChecklists(markdown);
+  assert.strictEqual(parsed[0].title, "Release");
+  assert.deepStrictEqual(parsed[0].dependencies, [{ cardId: "card-9", blocking: "block" }]);
+  assert.deepStrictEqual(parseChecklists("### Plain <!--kanux-checklist-id:checklist-2-->")[0].dependencies, []);
+}
+
+function testDependencyGateResolvesTheStrongestUnmetMode() {
+  const cards = {
+    "card-done": { id: "card-done", title: "Design QA", completed: true },
+    "card-open": { id: "card-open", title: "Ship docs", completed: false },
+  };
+  const resolveCard = (cardId) => cards[cardId];
+
+  const unmet = dependencyGate([{ cardId: "card-open", blocking: "none" }], resolveCard);
+  assert.strictEqual(unmet.mode, "none");
+  assert.deepStrictEqual(unmet.pending.map((entry) => entry.title), ["Ship docs"]);
+
+  // The missing card is counted but never blocks, so the warning wins.
+  const mixed = dependencyGate([
+    { cardId: "card-open", blocking: "warn" },
+    { cardId: "card-gone", blocking: "block" },
+  ], resolveCard);
+  assert.strictEqual(mixed.mode, "warn");
+  assert.strictEqual(mixed.total, 2);
+  assert.strictEqual(mixed.met, 0);
+  assert.strictEqual(mixed.entries[1].status, "missing");
+
+  const met = dependencyGate([{ cardId: "card-done", blocking: "block" }], resolveCard);
+  assert.strictEqual(met.mode, "none");
+  assert.strictEqual(met.met, 1);
+  assert.strictEqual(met.entries[0].status, "done");
+}
+
+function testCardCodesPadAndCarryTheirPrefix() {
+  assert.strictEqual(formatCardCode({ prefix: "BUG", next: 14, pad: 3 }), "BUG-014");
+  assert.strictEqual(formatCardCode({ prefix: "", next: 7, pad: 4 }), "0007");
+  assert.strictEqual(formatCardCode(null), "");
+  // A number wider than the padding is not truncated to fit it.
+  assert.strictEqual(formatCardCode({ prefix: "BUG", next: 1234, pad: 2 }), "BUG-1234");
+  // A code is one token: it identifies the card, so it has to survive a trip
+  // through frontmatter byte for byte.
+  assert.strictEqual(cleanCardCode(" BUG-014 "), "BUG-014");
+  assert.strictEqual(cleanCardCode("BUG 014"), "BUG014");
+  assert.strictEqual(cleanCardCode(null), "");
+}
+
+function testNumberingSurvivesTheNoteRoundTrip() {
+  const note = "---\nkanux-template: true\nlabels: \n---\n\n# Bug report\n\n## Details\nAs a [ ]\n";
+  assert.strictEqual(parseTemplateNumbering(note), null);
+
+  const on = withNumbering(note, { prefix: "BUG", next: 1, pad: 3 });
+  assert.deepStrictEqual(parseTemplateNumbering(on), { prefix: "BUG", separator: "dash", next: 1, pad: 3 });
+
+  // Advancing rewrites the key instead of adding a second one.
+  const bumped = withNumbering(on, { prefix: "BUG", next: 2, pad: 3 });
+  assert.deepStrictEqual(parseTemplateNumbering(bumped), { prefix: "BUG", separator: "dash", next: 2, pad: 3 });
+  assert.strictEqual((bumped.match(/kanux-id-next/g) || []).length, 1);
+
+  // Everything the parser does not model has to come back untouched: a template
+  // is a note people edit by hand.
+  const off = withNumbering(bumped, null);
+  assert.strictEqual(parseTemplateNumbering(off), null);
+  assert.ok(off.includes("labels: ") && off.includes("# Bug report") && off.includes("As a [ ]"));
+  assert.strictEqual(off, note);
+
+  // A note with no frontmatter has nowhere to keep a counter, so it is left be.
+  assert.strictEqual(withNumbering("# Plain", { prefix: "X", next: 1, pad: 1 }), "# Plain");
+}
+
+function testNumberingClampsWhatTheEditorCanType() {
+  assert.deepStrictEqual(normalizeNumbering({ prefix: " BUG ", next: "9", pad: "2" }), { prefix: "BUG", separator: "dash", next: 9, pad: 2 });
+  // Digits below one or past the cap, and a negative counter, cannot be stored.
+  assert.deepStrictEqual(normalizeNumbering({ prefix: "", next: -5, pad: 0 }), { prefix: "", separator: "dash", next: 0, pad: 1 });
+  assert.deepStrictEqual(normalizeNumbering({ prefix: "", next: 1, pad: 99 }), { prefix: "", separator: "dash", next: 1, pad: 8 });
+  assert.strictEqual(normalizeNumbering(null), null);
+  // A prefix is one token: a space typed into it would split the stored code.
+  assert.strictEqual(normalizeNumbering({ prefix: "BUG REPORT", next: 1, pad: 1 }).prefix, "BUGREPORT");
+}
+
+function testCodeSeparatorsShapeTheCode() {
+  assert.strictEqual(formatCardCode({ prefix: "BUG", separator: "none", next: 14, pad: 3 }), "BUG014");
+  assert.strictEqual(formatCardCode({ prefix: "BUG", separator: "slash", next: 14, pad: 3 }), "BUG/014");
+  assert.strictEqual(formatCardCode({ prefix: "BUG", separator: "hash", next: 14, pad: 3 }), "BUG#014");
+  // No prefix, no separator: the number stands alone whatever was chosen.
+  assert.strictEqual(formatCardCode({ prefix: "", separator: "hash", next: 14, pad: 3 }), "014");
+  // Read by name or by the character itself; anything else falls back to the dash.
+  assert.strictEqual(cleanSeparator("HASH"), "hash");
+  assert.strictEqual(cleanSeparator("_"), "underscore");
+  assert.strictEqual(cleanSeparator("weird"), "dash");
+  assert.strictEqual(cleanSeparator(""), "dash");
+  // Detection follows the separator, and the dot is literal, not any character.
+  const dotted = { prefix: "BUG", separator: "dot", next: 1, pad: 1 };
+  assert.strictEqual(cardCodeNumber("BUG.014", dotted), 14);
+  assert.strictEqual(cardCodeNumber("BUGX014", dotted), -1);
+  assert.strictEqual(cardCodeNumber("BUG-014", dotted), -1);
+  assert.strictEqual(cardCodeNumber("BUG014", { prefix: "BUG", separator: "none", next: 1, pad: 1 }), 14);
+}
+
+function testCodeLookIsOneChoicePerBoard() {
+  const fallback = { style: "outline", color: "", placement: "inline" };
+  assert.deepStrictEqual(normalizeCodeLook(null), fallback);
+  assert.deepStrictEqual(normalizeCodeLook("filled"), fallback);
+  // Known values are kept, a colour is canonical lowercase, anything else falls back.
+  assert.deepStrictEqual(normalizeCodeLook({ style: "filled", color: "#EF4444", placement: "above" }), { style: "filled", color: "#ef4444", placement: "above" });
+  assert.deepStrictEqual(normalizeCodeLook({ style: "shiny", color: "red", placement: "sideways" }), fallback);
+  // Every board starts on the plain outlined chip.
+  assert.deepStrictEqual(DEFAULT_APPEARANCE.codes, fallback);
+}
+
+function testCardCodeChipWearsTheBoardLook() {
+  global.document = { createElement: createFakeElement };
+  const chip = cardCodeChip("BUG-014", { style: "filled", color: "#EF4444", placement: "above" });
+  // Customize swaps chips by this class and rebuilds them from their text.
+  assert.strictEqual(chip.className, "ot-card-code");
+  assert.strictEqual(chip.textContent, "BUG-014");
+  assert.deepStrictEqual(chip.classList.names, ["is-filled", "is-above"]);
+  assert.strictEqual(chip.style.properties["--ot-code-color"], "#ef4444");
+  // An identifier, not prose: machine translation keeps off it.
+  assert.strictEqual(chip.attributes.translate, "no");
+  // No look at all is the outlined inline chip in the accent, so no colour is set.
+  const plain = cardCodeChip("BUG-014", null);
+  assert.deepStrictEqual(plain.classList.names, ["is-outline", "is-inline"]);
+  assert.strictEqual(plain.style.properties["--ot-code-color"], undefined);
+}
+
+function testSeparatorTravelsWithTheTemplate() {
+  const note = "---\nkanux-template: true\n---\n\n# Bug report\n";
+  const numbering = { prefix: "BUG", separator: "hash", next: 4, pad: 2 };
+  const on = withNumbering(note, numbering);
+  // Stored by name: a bare \"#\" opens a YAML comment and a bare \"-\" a list.
+  assert.match(on, /kanux-id-separator: hash\n/);
+  assert.deepStrictEqual(parseTemplateNumbering(on), numbering);
+  assert.strictEqual(formatCardCode(parseTemplateNumbering(on)), "BUG#04");
+
+  // A character typed by hand still reads, and switching numbering off leaves the note as it was.
+  const plain = withNumbering(note, { prefix: "BUG", next: 1, pad: 3 });
+  assert.strictEqual(parseTemplateNumbering(plain.replace("kanux-id-separator: dash", "kanux-id-separator: .")).separator, "dot");
+  assert.strictEqual(withNumbering(on, null), note);
+}
+
+function testCodeDetectionIsPrefixExact() {
+  const numbering = { prefix: "BUG", next: 1, pad: 3 };
+  assert.strictEqual(cardCodeNumber("BUG-014", numbering), 14);
+  assert.strictEqual(cardCodeNumber("BUG-7", numbering), 7);
+  assert.strictEqual(cardCodeNumber("", numbering), -1);
+  assert.strictEqual(cardCodeNumber("BUGS-014", numbering), -1);
+  // A code is the whole field, so a card's name can never be read as one.
+  assert.strictEqual(cardCodeNumber("BUG-014 Broken login", numbering), -1);
+  // A prefix is matched literally, not as a pattern.
+  assert.strictEqual(cardCodeNumber("A.B-7", { prefix: "A.B", next: 1, pad: 1 }), 7);
+  assert.strictEqual(cardCodeNumber("AXB-7", { prefix: "A.B", next: 1, pad: 1 }), -1);
+}
+
+function testChecklistCollapseSurvivesTheMarkdownRoundTrip() {
+  const markdown = checklistsToMarkdown([
+    { title: "Folded", color: "#22c55e", collapsed: true, items: [{ text: "One", done: false }] },
+    { title: "Open", color: "#3b82f6", items: [{ text: "Two", done: true }] },
+  ]);
+  // Written only when folded, so notes that never fold never gain the marker.
+  assert.strictEqual((markdown.match(/kanux-checklist-collapsed/g) || []).length, 1);
+  assert.ok(markdown.includes("<!--kanux-checklist-collapsed:true-->"));
+
+  const parsed = normalizeChecklists(parseChecklists(markdown), []);
+  assert.strictEqual(parsed[0].collapsed, true);
+  assert.strictEqual(parsed[0].title, "Folded");
+  assert.strictEqual(parsed[1].collapsed, false);
+
+  // Reusing groups as a template starts every copy unfolded.
+  assert.strictEqual(!!blankChecklists(parsed)[0].collapsed, false);
+}
+
+function testMoveArrayEntryPointsAtTheSlotTheDragSaw() {
+  const items = ["a", "b", "c", "d"];
+  // Moving down: the index was measured with the entry still in place.
+  assert.strictEqual(moveArrayEntry(items, items, "a", 3), true);
+  assert.deepStrictEqual(items, ["b", "c", "a", "d"]);
+  // Moving up needs no adjustment.
+  assert.strictEqual(moveArrayEntry(items, items, "d", 0), true);
+  assert.deepStrictEqual(items, ["d", "b", "c", "a"]);
+
+  // Across arrays the index is clamped to what the target can hold.
+  const target = ["x"];
+  assert.strictEqual(moveArrayEntry(items, target, "b", 99), true);
+  assert.deepStrictEqual(items, ["d", "c", "a"]);
+  assert.deepStrictEqual(target, ["x", "b"]);
+
+  // An entry the source does not hold moves nothing.
+  assert.strictEqual(moveArrayEntry(items, target, "missing", 0), false);
+  assert.deepStrictEqual(items, ["d", "c", "a"]);
+  assert.deepStrictEqual(target, ["x", "b"]);
+}
+
+function testCardCodeSurvivesTheFrontmatterRoundTrip() {
+  const note = `---
+kanban-card-id: card-1
+kanux-card-code: BUG-014
+labels:
+---
+
+# Broken login
+`;
+  assert.strictEqual(parseCardMarkdown(note).code, "BUG-014");
+
+  // Absent is not the same as empty: a note written before codes existed must
+  // leave whatever the card already holds alone, so the parser reports null.
+  assert.strictEqual(parseCardMarkdown(note.replace(/^kanux-card-code:.*\n/m, "")).code, null);
+  assert.strictEqual(parseCardMarkdown(note.replace("BUG-014", "")).code, "");
+}
+
+testLegacyChecklistMigration();
+testRegisteredIconAndGenericFallback();
+testChecklistItemNoteBody();
+testNamedChecklistRoundTrip();
+testChecklistIdentityRoundTrip();
+testChecklistDescriptionRoundTrip();
+testChecklistIdDeduplicationAndSanitizing();
+testCardParserAndAggregateStats();
+testCardMetadataParsing();
+testDependencyNormalizationAndRoundTrip();
+testChecklistDependencyRoundTrip();
+testDependencyGateResolvesTheStrongestUnmetMode();
+testTemplateChecklistsStartClean();
+testTemplatePlaceholderCaret();
+testCardCodesPadAndCarryTheirPrefix();
+testNumberingSurvivesTheNoteRoundTrip();
+testNumberingClampsWhatTheEditorCanType();
+testCodeDetectionIsPrefixExact();
+testCodeSeparatorsShapeTheCode();
+testCodeLookIsOneChoicePerBoard();
+testCardCodeChipWearsTheBoardLook();
+testSeparatorTravelsWithTheTemplate();
+testChecklistCollapseSurvivesTheMarkdownRoundTrip();
+testMoveArrayEntryPointsAtTheSlotTheDragSaw();
+testCardCodeSurvivesTheFrontmatterRoundTrip();
+console.log("helpers tests passed");

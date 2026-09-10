@@ -1,0 +1,3 @@
+const COMPLETION_SOUND_URL = "__KANUX_COMPLETION_SOUND__";
+
+module.exports = { COMPLETION_SOUND_URL };

@@ -1,0 +1,139 @@
+# Catálogo de utilidades compartidas
+
+Este documento registra las utilidades públicas que ya existen en `src/helpers.js`. Consúltalo antes de crear una función auxiliar para evitar lógica duplicada entre vistas, modales y el plugin.
+
+## Regla de uso y mantenimiento
+
+- Importa una utilidad existente cuando su responsabilidad coincida con la necesidad nueva.
+- Extiende una utilidad solo si conserva una responsabilidad clara y el cambio es compatible con sus consumidores.
+- Mantén las transformaciones de datos puras siempre que sea posible.
+- Al agregar, renombrar o cambiar una utilidad exportada, actualiza este catálogo y `tests/helpers.test.js`.
+- Las funciones internas no exportadas son detalles de implementación de `helpers.js`; no deben copiarse en otros módulos.
+
+## Constantes y datos iniciales
+
+- `VIEW_TYPE`: identificador de la vista Kanux en Obsidian.
+- `LEGACY_CARD_FOLDER`: nombre de la antigua carpeta global de tarjetas.
+- `LEGACY_BOARD_INDEX_SUFFIX`: sufijo de índices de boards heredados.
+- `BOARD_INDEX_MARKER`: marcador que identifica un índice generado por Kanux.
+- `KANUX_ICON` y `KANUX_ICON_SVG`: nombre y dibujo SVG del icono del plugin.
+- `LIST_DRAG_TYPE`: tipo MIME usado al arrastrar listas.
+- `IMAGE_EXTENSIONS`: extensiones reconocidas como imágenes.
+- `DEFAULT_LABEL_COLOR`, `LABEL_COLORS` y `LIST_COLORS`: colores compartidos para etiquetas y listas.
+- `DEFAULT_APPEARANCE`: configuración visual inicial.
+- `DEFAULT_DATA`: estructura mínima de datos persistidos del plugin.
+- `DEPENDENCY_BLOCK_NONE`, `DEPENDENCY_BLOCK_WARN` y `DEPENDENCY_BLOCK_TOTAL`: niveles de bloqueo de una dependencia, del más débil al más fuerte.
+- `DEPENDENCY_BLOCK_MODES`: los tres niveles ordenados; su índice es la comparación que usa `dependencyGate`. Su presentación (nombre, icono y descripción) vive en `src/modals/dependency-level-picker.js`.
+- `DEPENDENCY_STATUS_DONE`, `DEPENDENCY_STATUS_PENDING` y `DEPENDENCY_STATUS_MISSING`: estado de una dependencia según la card a la que apunta.
+
+## Valores, texto e identidad
+
+- `clone(value)`: crea una copia profunda de datos serializables como JSON.
+- `uid(prefix)`: genera un identificador temporal con un prefijo legible.
+- `textLine(value)`: convierte un valor en una sola línea de texto limpia.
+- `parseBoolean(value)`: interpreta los valores booleanos admitidos en Markdown.
+- `cardFileBaseName(value)`: convierte un título en un nombre de archivo seguro y legible.
+
+## Fechas
+
+- `cleanDate(value)`: acepta únicamente fechas persistidas como `YYYY-MM-DD`.
+- `dateFromISO(value)`: convierte una fecha válida en `Date` local o devuelve `null`.
+- `isoFromDate(date)`: convierte un `Date` local al formato `YYYY-MM-DD`.
+- `addMonths(date, amount)`: obtiene el primer día de un mes desplazado.
+- `shortDateLabel(value)`: crea la etiqueta corta localizada usada en las tarjetas.
+- `fieldDateLabel(value)`: crea la etiqueta `DD.MM.YYYY` usada en campos de fecha.
+- `dateRangeLabel(startDate, dueDate)`: resume una fecha o un intervalo para la interfaz.
+
+## Colores, etiquetas y miembros
+
+- `cleanColor(value)`: valida y normaliza colores hexadecimales de seis dígitos.
+- `labelKey(label)`: genera la clave comparable de una etiqueta.
+- `cleanLabelName(label)`: limpia un nombre y descarta líneas reservadas de metadatos.
+- `parseLabels(raw)` y `labelsToFrontmatter(labels)`: leen y escriben etiquetas en frontmatter.
+- `parseAssignees(raw)` y `assigneesToFrontmatter(assignees)`: leen y escriben miembros asignados.
+- `initials(nameOrEmail)`: obtiene hasta dos iniciales para el avatar de respaldo.
+
+## Rutas, etiquetas de Obsidian e imágenes
+
+- `kanuxListTag(boardName, listTitle)`: crea la etiqueta jerárquica de una lista.
+- `imageTarget(raw)`: extrae el destino limpio de un embed o enlace de imagen.
+- `isImagePath(value)`: indica si una ruta tiene una extensión de imagen compatible.
+- `imageRefsFromMarkdown(markdown)`: encuentra embeds wiki e imágenes Markdown.
+- `stripImageEmbeds(markdown)`: elimina los embeds de imagen conservando el resto del contenido.
+- `imageSizeFromMarkup(markup)`: lee el ancho guardado en la sintaxis de imagen de Obsidian.
+- `imageMarkupWithSize(markup, width)`: agrega, cambia o elimina el ancho de un embed.
+
+## DOM, iconos y arrastre
+
+- `createElement(tag, className, text)`: crea elementos DOM con clase y texto opcionales.
+- `moveArrayEntry(source, target, entry, insertionIndex)`: mueve un elemento existente a la posición indicada de otro arreglo (o del mismo), midiendo el índice antes de retirarlo — el hueco que ve quien arrastra.
+- `hasDragType(event, type)`: comprueba de forma compatible un tipo en `dataTransfer`.
+- `renderIcon(element, icon)`: pinta dentro de un elemento un icono registrado en Obsidian, resolviendo alias entre versiones y cayendo en un icono genérico si ninguno existe.
+- `iconButton(icon, label, onClick)`: crea un botón accesible con un icono registrado en Obsidian.
+- `textButton(icon, label, onClick, className)`: crea un botón de texto con un icono registrado en Obsidian.
+- `addButtonIcon(button, icon)`: agrega a un botón existente un icono registrado, con alias compatibles y un respaldo genérico.
+
+## Secciones Markdown y tarjetas
+
+- `getSection(markdown, heading, boundaries)`: obtiene el cuerpo de una sección H2 respetando bloques de código.
+- `getSectionAny(markdown, headings)`: obtiene la primera sección disponible entre varios nombres compatibles.
+- `parseCardMarkdown(markdown)`: convierte una nota Markdown de tarjeta en los campos usados en memoria.
+- `encodeListMeta(lists, deleted)` y `decodeListMeta(markdown)`: serializan y recuperan la estructura de listas guardada en el índice del board.
+
+## Checklists
+
+- `parseChecklist(text)`: convierte líneas Markdown en elementos de checklist.
+- `checklistItemNoteBody(markdown)`: obtiene el contenido editable de una nota de elemento enlazado.
+- `checklistItemNoteWithBody(markdown, nextBody)`: reemplaza el contenido editable y conserva el frontmatter y encabezado administrado.
+- `parseChecklists(text)`: lee grupos de checklist actuales y el formato plano heredado, incluyendo los ids estables de grupo (`<!--kanux-checklist-id:...-->`), el estado plegado (`<!--kanux-checklist-collapsed:true-->`) y los ids de elemento (`<!--kanux-item-id:...-->`); las líneas de texto plano previas al primer elemento se leen como descripción del grupo.
+- `normalizeChecklists(checklists, legacyItems)`: normaliza grupos, elementos, colores, miembros, descripción y estado plegado; garantiza un id estable y único por card para cada grupo y elemento.
+- `checklistToText(items)`: serializa elementos sin viñeta Markdown.
+- `checklistToMarkdown(items)`: serializa elementos con tareas Markdown y metadatos de miembro e id.
+- `checklistsToMarkdown(checklists)`: serializa grupos completos con título, color, id, estado plegado y descripción (escapando marcadores de heading/tarea al inicio de línea para que el round-trip no altere la estructura).
+- `checklistItems(checklists)`: aplana los elementos de todos los grupos.
+- `checklistStats(items)`: calcula elementos completados, total y porcentaje.
+- `blankChecklists(checklists)`: deja los grupos listos para reutilizar (plantillas): sin marcar, sin notas enlazadas, sin dependencias y sin ids, para que cada copia genere los suyos.
+
+## Plantillas de card
+
+- `firstPlaceholderIndex(markdown)`: posición del primer hueco rellenable (`As a [ ] I want [ ]`) donde debe caer el cursor; ignora los `[ ]` que son casillas de tarea y devuelve `-1` si no hay ninguno.
+
+### Numeración incremental
+
+El contador vive en la nota de la plantilla (`kanux-id-prefix`, `kanux-id-separator`, `kanux-id-next`, `kanux-id-pad`), así que sobrevive un reinicio y viaja con el vault. La numeración está activa cuando la nota trae `kanux-id-next`.
+
+El código que recibe cada card se guarda en el frontmatter de la card (`kanux-card-code`), no en su título: renombrarla no le quita el identificador, y la búsqueda de la tabla lo incluye. Cómo se dibuja el chip no es cosa de la card ni de la plantilla sino del tablero: `appearance.codes` en Customize, un solo aspecto para todos los códigos del tablero.
+
+- `NUMBERING_KEYS`: las cuatro claves de frontmatter del contador (`kanux-id-prefix`, `kanux-id-separator`, `kanux-id-next`, `kanux-id-pad`). Un solo lugar decide cómo se escriben, para que lector y escritor no se separen.
+- `MAX_NUMBER_PAD`: el máximo de dígitos de relleno (8); el editor ofrece de 1 a este número.
+- `CODE_SEPARATORS`: los separadores entre prefijo y número (`{ id, char, label }`: `dash`, `dot`, `slash`, `hash`, `underscore`, `none`). Se guardan por nombre porque `-` y `#` a secas no sobreviven al YAML del frontmatter.
+- `cleanSeparator(value)`: el id de un separador a partir de su nombre o de su carácter literal (para notas editadas a mano); `dash` cuando no es ninguno.
+- `separatorChar(id)`: el carácter que corresponde a un id.
+- `CODE_STYLES`, `CODE_PLACEMENTS`, `DEFAULT_CODE_LOOK`: cómo puede dibujarse el chip del código (`outline`, `filled`, `soft`, `plain`), dónde (`inline` delante del título, `above` en su propia línea) y el aspecto inicial de todo tablero (`DEFAULT_APPEARANCE.codes`).
+- `normalizeCodeLook(value)`: el aspecto completo `{ style, color, placement }` a partir de un objeto parcial; lo que no reconoce cae al valor por defecto y el color queda en minúsculas. Es lo que `normalizeAppearance` usa para `appearance.codes`.
+- `parseTemplateNumbering(markdown)`: lee `{ prefix, separator, next, pad }` del frontmatter, o `null` si la plantilla no numera.
+- `normalizeNumbering(numbering)`: acota lo que el editor puede escribir — prefijo sin espacios (el código es un solo token), separador por id, `next` nunca negativo, `pad` entre 1 y 8.
+- `formatCardCode(numbering, value)`: el código con relleno de ceros y el separador de la plantilla (`BUG-014`, `BUG#014`, o `014` sin prefijo). Un número más ancho que el relleno no se recorta.
+- `cleanCardCode(value)`: el código como se guarda — un solo token, sin espacios. El código identifica la card, así que debe sobrevivir el viaje por el frontmatter sin cambios.
+- `cardCodeNumber(code, numbering)`: el número dentro de un código (`14` para `BUG-014`), o `-1` si ese código no salió de esa plantilla. Prefijo y separador se comparan literales, no como patrón, y el código es el campo completo — el nombre de una card nunca puede leerse como uno.
+- `withNumbering(markdown, numbering)`: reescribe solo las claves de numeración del frontmatter y deja intacto el resto de la nota; `null` apaga la numeración.
+- `cardCodeChip(code, look)` (sección DOM): el `span.ot-card-code` con el que todas las superficies dibujan un código — tablero, tabla, biblioteca y la vista previa del editor de plantillas. `look` es el `appearance.codes` del tablero y viaja en el elemento: una clase por estilo (`is-filled`) y por colocación (`is-above`) y el color como variable `--ot-code-color`.
+
+## Dependencias entre cards
+
+- `cleanDependencyBlockMode(value)`: valida un nivel de bloqueo y cae en `none` si no lo reconoce.
+- `normalizeDependencies(dependencies)`: normaliza la colección a una entrada `{ cardId, blocking }` por card referenciada, descartando ids inservibles y duplicados.
+- `parseDependencies(raw)` y `serializeDependencies(dependencies)`: leen y escriben el formato compacto `cardId|modo,cardId2|modo2` que comparten el frontmatter `depends-on` de la card y el comentario `<!--kanux-checklist-depends:...-->` del grupo de checklist.
+- `dependencyGate(dependencies, resolveCard)`: resuelve cómo una colección condiciona una acción. Devuelve `{ entries, pending, total, met, mode }`, donde una dependencia se cumple cuando su card está completada, una card inexistente se marca `missing` y nunca bloquea, y `mode` es el bloqueo más fuerte entre las pendientes.
+
+## Ejemplo de reutilización
+
+```js
+const { cleanDate, textLine, checklistStats } = require("./helpers");
+
+const title = textLine(input.value);
+const dueDate = cleanDate(rawDueDate);
+const progress = checklistStats(card.checklists);
+```
+
+Si una necesidad no aparece aquí, revisa primero las funciones privadas de `src/helpers.js`. Puede ser más limpio promover una de ellas con pruebas que implementar otra versión en un módulo diferente.
