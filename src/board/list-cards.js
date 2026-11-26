@@ -7,6 +7,7 @@ const {
   LIST_DRAG_TYPE,
   addButtonIcon,
   cardCodeChip,
+  cardLabelsElement,
   checklistItems,
   checklistStats,
   createElement,
@@ -179,11 +180,13 @@ const listCardMethods = {
     this.configureCardElement(element, card, { isRenaming, lockedByOther });
     this.bindCardInteractions(element, card);
     const labels = this.buildCardLabels(card);
-    if (labels.childElementCount) element.append(labels);
+    const labelsAtBottom = !!(this.labelLook && this.labelLook.placement === "bottom");
+    if (labels.childElementCount && !labelsAtBottom) element.append(labels);
     element.append(this.buildCardMain(card, { isRenaming, lockHolder }));
 
     const footer = this.buildCardFooter(card);
     if (footer) element.append(footer);
+    if (labels.childElementCount && labelsAtBottom) element.append(labels);
     if (lockedByOther) element.append(this.buildLockBadge(lockHolder));
     return element;
   },
@@ -212,14 +215,7 @@ const listCardMethods = {
   },
 
   buildCardLabels(card) {
-    const labels = createElement("div", "ot-card-labels");
-    (card.labels || []).forEach((label) => {
-      const pill = createElement("span", "ot-card-label", label.name);
-      pill.style.backgroundColor = label.color;
-      pill.title = label.name;
-      labels.append(pill);
-    });
-    return labels;
+    return cardLabelsElement(card.labels, this.labelLook);
   },
 
   buildCardMain(card, { isRenaming, lockHolder }) {

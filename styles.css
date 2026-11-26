@@ -711,12 +711,15 @@ button.ot-save-button:disabled {
 }
 
 .ot-card-labels {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
 }
 
 .ot-card-label,
+.ot-card-label-popover-item,
 .ot-label-pill {
   max-width: 100%;
   border: 0;
@@ -792,6 +795,93 @@ button.ot-save-button:disabled {
 @media (prefers-reduced-motion: reduce) {
   .ot-board-root.is-hover-labels .ot-card-label,
   .ot-board-root.is-card-hover-labels .ot-card-label {
+    transition: none;
+  }
+}
+
+.ot-card-labels-overflow {
+  display: inline-flex;
+  align-items: center;
+  outline: none;
+}
+
+.ot-card-label-more {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: calc(13px * var(--ot-font-scale, 1));
+  font-weight: 700;
+  line-height: 1.5;
+  cursor: default;
+  transition: height 220ms ease, padding 220ms ease, font-size 220ms ease, line-height 220ms ease, border-color 150ms ease;
+}
+
+.ot-board-root.is-compact-labels .ot-card-label-more,
+.ot-board-root.is-hover-labels .ot-card-label-more,
+.ot-board-root.is-card-hover-labels .ot-card-label-more {
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.ot-board-root.is-card-hover-labels .ot-card:hover .ot-card-label-more,
+.ot-board-root.is-card-hover-labels .ot-card:focus-within .ot-card-label-more {
+  height: calc(29px * var(--ot-font-scale, 1));
+  padding: 2px 7px;
+  font-size: calc(13px * var(--ot-font-scale, 1));
+  line-height: 1.5;
+}
+
+.ot-card-labels-popover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
+}
+
+.ot-card-labels.is-bottom .ot-card-labels-popover {
+  top: auto;
+  bottom: calc(100% + 4px);
+  transform: translateY(2px);
+}
+
+.ot-card-labels-overflow:hover .ot-card-labels-popover,
+.ot-card-labels-overflow:focus-within .ot-card-labels-popover {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.ot-card-labels-overflow:focus-visible .ot-card-label-more {
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.ot-board-root.is-motion-disabled .ot-card-label-more,
+.ot-board-root.is-motion-disabled .ot-card-labels-popover {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ot-card-label-more,
+  .ot-card-labels-popover {
     transition: none;
   }
 }

@@ -39,6 +39,10 @@ const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b
 const CODE_STYLES = ["outline", "filled", "soft", "plain"];
 const CODE_PLACEMENTS = ["inline", "above"];
 const DEFAULT_CODE_LOOK = { style: "outline", color: "", placement: "inline" };
+const LABEL_DISPLAY_MODES = ["compact", "expanded", "hover", "card-hover"];
+const LABEL_PLACEMENTS = ["top", "bottom"];
+const MAX_VISIBLE_LABELS_LIMIT = 12;
+const DEFAULT_LABEL_LOOK = { displayMode: "expanded", placement: "top", maxVisible: 0 };
 const DEFAULT_CHECKLIST_TITLE = "Checklist";
 const DEFAULT_CHECKLIST_COLOR = LIST_COLORS[1];
 const DEFAULT_APPEARANCE = {
@@ -47,9 +51,7 @@ const DEFAULT_APPEARANCE = {
   surfaceScheme: "theme",
   density: "normal",
   fontScale: 1,
-  labels: {
-    displayMode: "expanded",
-  },
+  labels: { ...DEFAULT_LABEL_LOOK },
   background: {
     type: "theme",
     color: "#1e1e1e",
@@ -340,6 +342,37 @@ function cardCodeChip(code, look) {
   // An identifier, not prose: keep machine translation off it.
   chip.setAttribute("translate", "no");
   return chip;
+}
+
+function cardLabelsElement(labels, look) {
+  const clean = normalizeLabelLook(look);
+  const { visible, hidden } = partitionCardLabels(labels, clean.maxVisible);
+  const container = createElement("div", "ot-card-labels");
+  if (clean.placement === "bottom") container.classList.add("is-bottom");
+  visible.forEach((label) => container.append(buildLabelPill(label, "ot-card-label")));
+  if (hidden.length) container.append(buildLabelOverflow(hidden));
+  return container;
+}
+
+function buildLabelPill(label, className) {
+  const pill = createElement("span", className, label.name);
+  pill.style.backgroundColor = label.color;
+  pill.title = label.name;
+  return pill;
+}
+
+function buildLabelOverflow(hidden) {
+  const names = hidden.map((label) => label.name).join(", ");
+  const overflow = createElement("span", "ot-card-labels-overflow");
+  overflow.tabIndex = 0;
+  overflow.title = names;
+  overflow.setAttribute("aria-label", `${hidden.length} more ${hidden.length === 1 ? "label" : "labels"}: ${names}`);
+  overflow.append(createElement("span", "ot-card-label-more", `+${hidden.length}`));
+  const popover = createElement("span", "ot-card-labels-popover");
+  popover.setAttribute("role", "tooltip");
+  hidden.forEach((label) => popover.append(buildLabelPill(label, "ot-card-label-popover-item")));
+  overflow.append(popover);
+  return overflow;
 }
 
 function hasDragType(event, type) {
@@ -874,6 +907,27 @@ function normalizeCodeLook(value) {
   };
 }
 
+function normalizeLabelLook(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const rawMax = source.maxVisible;
+  const parsedMax = rawMax === null || rawMax === undefined || rawMax === "" ? 0 : Number(rawMax);
+  const maxVisible = Number.isFinite(parsedMax) && parsedMax > 0
+    ? Math.min(MAX_VISIBLE_LABELS_LIMIT, Math.floor(parsedMax))
+    : 0;
+  return {
+    displayMode: LABEL_DISPLAY_MODES.includes(source.displayMode) ? source.displayMode : DEFAULT_LABEL_LOOK.displayMode,
+    placement: LABEL_PLACEMENTS.includes(source.placement) ? source.placement : DEFAULT_LABEL_LOOK.placement,
+    maxVisible,
+  };
+}
+
+function partitionCardLabels(labels, maxVisible) {
+  const list = Array.isArray(labels) ? labels : [];
+  const limit = Number.isFinite(Number(maxVisible)) && Number(maxVisible) > 0 ? Math.floor(Number(maxVisible)) : 0;
+  if (!limit || list.length <= limit) return { visible: list, hidden: [] };
+  return { visible: list.slice(0, limit), hidden: list.slice(limit) };
+}
+
 /** Numbering is on when the note carries a next number; nothing else is required. */
 function parseTemplateNumbering(markdown) {
   const read = (key) => {
@@ -1299,6 +1353,7 @@ module.exports = {
   moveArrayEntry,
   createElement,
   cardCodeChip,
+  cardLabelsElement,
   hasDragType,
   renderIcon,
   iconButton,
@@ -1334,6 +1389,12 @@ module.exports = {
   CODE_STYLES,
   CODE_PLACEMENTS,
   DEFAULT_CODE_LOOK,
+  LABEL_DISPLAY_MODES,
+  LABEL_PLACEMENTS,
+  MAX_VISIBLE_LABELS_LIMIT,
+  DEFAULT_LABEL_LOOK,
+  normalizeLabelLook,
+  partitionCardLabels,
   dependencyGate,
   normalizeDependencies,
   parseDependencies,
@@ -2075,6 +2136,8 @@ module.exports = {
 // Applies the active appearance (density, colors, background, motion) to the
 // board root element as CSS variables, classes, and background properties.
 
+const { normalizeLabelLook } = __require("src/helpers.js");
+
 const BOARD_DENSITY = {
   compact: { listWidth: 258, listMinWidth: 244, cardPadding: "7px 8px" },
   normal: { listWidth: 292, listMinWidth: 272, cardPadding: "9px 10px" },
@@ -2102,6 +2165,7 @@ const boardAppearanceMethods = {
     this.applyAppearanceVariables(root, appearance);
     this.applyAppearanceClasses(root, appearance);
     this.applyBoardBackground(root, appearance.background);
+    this.labelLook = normalizeLabelLook(appearance.labels);
     // Read once per render for the chip on every card, rather than once per card.
     this.codeLook = appearance.codes;
   },
@@ -2133,6 +2197,10 @@ const boardAppearanceMethods = {
   },
 
   applyAppearanceClasses(root, appearance) {
+    const labels = normalizeLabelLook(appearance && appearance.labels);
+    root.classList.toggle("is-compact-labels", labels.displayMode === "compact");
+    root.classList.toggle("is-hover-labels", labels.displayMode === "hover");
+    root.classList.toggle("is-card-hover-labels", labels.displayMode === "card-hover");
     root.classList.toggle("is-motion-disabled", !appearance.motion.enabled);
     root.classList.toggle("is-appearance-dark", appearance.colorScheme === "dark");
     root.classList.toggle("is-appearance-light", appearance.colorScheme === "light");
@@ -2238,7 +2306,12 @@ const {
   CODE_PLACEMENTS,
   CODE_STYLES,
   LIST_COLORS,
+  LABEL_COLORS,
+  LABEL_PLACEMENTS,
+  MAX_VISIBLE_LABELS_LIMIT,
   cardCodeChip,
+  cardLabelsElement,
+  normalizeLabelLook,
   clone,
   createElement,
 } = __require("src/helpers.js");
@@ -2260,6 +2333,14 @@ const BUILTIN_PRESETS = [
 ];
 const CODE_STYLE_LABELS = { outline: "Outline", filled: "Filled", soft: "Soft", plain: "Plain" };
 const CODE_PLACEMENT_LABELS = { inline: "Before title", above: "Above title" };
+const LABEL_PLACEMENT_LABELS = { top: "Above title", bottom: "Below title" };
+const PREVIEW_LABELS = [
+  { name: "Bug", color: LABEL_COLORS[3] },
+  { name: "Frontend", color: LABEL_COLORS[1] },
+  { name: "Urgent", color: LABEL_COLORS[8] },
+  { name: "Docs", color: LABEL_COLORS[0] },
+];
+const labelLimitText = (value) => (value > 0 ? String(Math.round(value)) : "All");
 // The palette by name, in its order, so a colour dot is announced as more than a hex code.
 const COLOR_NAMES = ["Slate", "Blue", "Green", "Amber", "Red", "Violet", "Teal", "Pink"];
 // The style options are drawn as chips; this is the text inside them.
@@ -2472,7 +2553,7 @@ class BoardAppearanceModal extends Modal {
     const title = createElement("div", "ot-appearance-preview-list-title");
     title.append(createElement("span", "ot-mini-card-dot"), createElement("span", "", (first && first.title) || "To do"));
     const cards = createElement("div", "ot-appearance-preview-cards");
-    cards.append(this.previewCard(PREVIEW_CODE, "Fix the login redirect"), this.previewCard("", "Write the release notes"));
+    cards.append(this.previewCard(PREVIEW_CODE, "Fix the login redirect", PREVIEW_LABELS), this.previewCard("", "Write the release notes"));
     list.append(title, cards);
 
     root.append(list);
@@ -2480,13 +2561,25 @@ class BoardAppearanceModal extends Modal {
     return root;
   }
 
-  previewCard(code, text) {
+  previewCard(code, text, labels = []) {
     const card = createElement("div", "ot-card ot-appearance-preview-card");
+    if (labels.length > 0) card.dataset.hasPreviewLabels = "1";
     const title = createElement("div", "ot-card-title");
     if (code) title.append(cardCodeChip(code, null));
     title.append(createElement("span", "ot-card-title-text", text));
     card.append(title);
     return card;
+  }
+
+  syncPreviewLabels(root, labels) {
+    const cards = root.querySelectorAll("[data-has-preview-labels=\"1\"]");
+    cards.forEach((card) => {
+      const existing = card.querySelector(".ot-card-labels");
+      if (existing) existing.remove();
+      const next = cardLabelsElement(PREVIEW_LABELS, labels);
+      if (labels.placement === "bottom") card.append(next);
+      else card.prepend(next);
+    });
   }
 
   paintPreview(appearance, root = this.previewRoot) {
@@ -2500,6 +2593,7 @@ class BoardAppearanceModal extends Modal {
     view.applyBoardBackground(root, appearance.background);
     // The chip is rebuilt so style, colour and placement follow the choice.
     root.querySelectorAll(".ot-card-code").forEach((chip) => chip.replaceWith(cardCodeChip(chip.textContent, appearance.codes)));
+    this.syncPreviewLabels(root, normalizeLabelLook(appearance && appearance.labels));
     if (this.codeStyleGroup) {
       if (appearance.codes.color) this.codeStyleGroup.style.setProperty("--ot-code-color", appearance.codes.color);
       else this.codeStyleGroup.style.removeProperty("--ot-code-color");
@@ -2609,13 +2703,28 @@ class BoardAppearanceModal extends Modal {
       min: 12, max: 30, step: 1, value: cards.titleSize, format: px,
       patch: (value) => ({ cards: { titleSize: value } }),
     });
+    this.renderCardLabelOptions(appearance.labels);
+  }
+
+  renderCardLabelOptions(labels) {
     this.row("labels.displayMode", "Label display", "When a card's labels show their names.").addDropdown((dropdown) => dropdown
       .addOption("compact", "Always compact")
       .addOption("expanded", "Always expanded")
       .addOption("hover", "Expand the hovered label")
       .addOption("card-hover", "Expand while the card is hovered")
-      .setValue(appearance.labels.displayMode)
+      .setValue(labels.displayMode)
       .onChange((value) => this.update({ labels: { displayMode: value } })));
+
+    const placement = choiceGroup("ot-segmented ot-appearance-choice", "Label position", LABEL_PLACEMENTS.map((value) => ({
+      value,
+      label: LABEL_PLACEMENT_LABELS[value],
+    })), labels.placement, (value) => this.update({ labels: { placement: value } }));
+    this.row("labels.placement", "Label position", "Place labels at the top of the card or at the bottom.").controlEl.append(placement);
+
+    this.slider(this.row("labels.maxVisible", "Maximum visible labels", "Limit how many labels appear on a card. Hover the overflow badge to see the rest."), {
+      min: 0, max: MAX_VISIBLE_LABELS_LIMIT, step: 1, value: labels.maxVisible, format: labelLimitText,
+      patch: (value) => ({ labels: { maxVisible: value } }),
+    });
   }
 
   /**
@@ -8436,6 +8545,7 @@ const {
   LIST_DRAG_TYPE,
   addButtonIcon,
   cardCodeChip,
+  cardLabelsElement,
   checklistItems,
   checklistStats,
   createElement,
@@ -8608,11 +8718,13 @@ const listCardMethods = {
     this.configureCardElement(element, card, { isRenaming, lockedByOther });
     this.bindCardInteractions(element, card);
     const labels = this.buildCardLabels(card);
-    if (labels.childElementCount) element.append(labels);
+    const labelsAtBottom = !!(this.labelLook && this.labelLook.placement === "bottom");
+    if (labels.childElementCount && !labelsAtBottom) element.append(labels);
     element.append(this.buildCardMain(card, { isRenaming, lockHolder }));
 
     const footer = this.buildCardFooter(card);
     if (footer) element.append(footer);
+    if (labels.childElementCount && labelsAtBottom) element.append(labels);
     if (lockedByOther) element.append(this.buildLockBadge(lockHolder));
     return element;
   },
@@ -8641,14 +8753,7 @@ const listCardMethods = {
   },
 
   buildCardLabels(card) {
-    const labels = createElement("div", "ot-card-labels");
-    (card.labels || []).forEach((label) => {
-      const pill = createElement("span", "ot-card-label", label.name);
-      pill.style.backgroundColor = label.color;
-      pill.title = label.name;
-      labels.append(pill);
-    });
-    return labels;
+    return cardLabelsElement(card.labels, this.labelLook);
   },
 
   buildCardMain(card, { isRenaming, lockHolder }) {
@@ -10292,10 +10397,6 @@ class BoardView extends ItemView {
   prepareBoardRoot() {
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-board-root");
-    const labelDisplayMode = this.plugin.getAppearance().labels.displayMode;
-    this.contentEl.classList.toggle("is-compact-labels", labelDisplayMode === "compact");
-    this.contentEl.classList.toggle("is-hover-labels", labelDisplayMode === "hover");
-    this.contentEl.classList.toggle("is-card-hover-labels", labelDisplayMode === "card-hover");
     this.applyAppearance();
   }
 
@@ -10946,10 +11047,12 @@ module.exports = { KanuxSettingTab };
 // presets, and the background image assets stored under the config dir.
 const {
   DEFAULT_APPEARANCE,
+  LABEL_DISPLAY_MODES,
   cleanColor,
   clone,
   isImagePath,
   normalizeCodeLook,
+  normalizeLabelLook,
   textLine,
   uid,
 } = __require("src/helpers.js");
@@ -11018,7 +11121,6 @@ const appearanceMethods = {
     const background = source.background && typeof source.background === "object" ? source.background : {};
     const cards = source.cards && typeof source.cards === "object" ? source.cards : {};
     const lists = source.lists && typeof source.lists === "object" ? source.lists : {};
-    const labels = source.labels && typeof source.labels === "object" ? source.labels : {};
     const motion = source.motion && typeof source.motion === "object" ? source.motion : {};
     const inferredSurfaceScheme = source.preset === "trello-light"
       ? "light"
@@ -11037,9 +11139,7 @@ const appearanceMethods = {
       surfaceScheme: choice(source.surfaceScheme, ["theme", "dark", "light"], inferredSurfaceScheme),
       density: choice(source.density, ["compact", "normal", "comfortable"], DEFAULT_APPEARANCE.density),
       fontScale: number(source.fontScale, DEFAULT_APPEARANCE.fontScale, 0.85, 1.4),
-      labels: {
-        displayMode: choice(labels.displayMode, ["compact", "expanded", "hover", "card-hover"], DEFAULT_APPEARANCE.labels.displayMode),
-      },
+      labels: normalizeLabelLook(source.labels),
       background: {
         type: choice(background.type, ["theme", "solid", "gradient", "image"], DEFAULT_APPEARANCE.background.type),
         color: cleanColor(background.color) || DEFAULT_APPEARANCE.background.color,
@@ -11244,7 +11344,7 @@ const appearanceMethods = {
   },
 
   async setLabelDisplayMode(mode) {
-    const next = ["compact", "expanded", "hover", "card-hover"].includes(mode) ? mode : "expanded";
+    const next = LABEL_DISPLAY_MODES.includes(mode) ? mode : "expanded";
     const board = this.getBoard();
     if (!board) return;
     await this.updateBoardAppearance(board.id, { labels: { displayMode: next } });

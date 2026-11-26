@@ -1,6 +1,8 @@
 // Applies the active appearance (density, colors, background, motion) to the
 // board root element as CSS variables, classes, and background properties.
 
+const { normalizeLabelLook } = require("../helpers");
+
 const BOARD_DENSITY = {
   compact: { listWidth: 258, listMinWidth: 244, cardPadding: "7px 8px" },
   normal: { listWidth: 292, listMinWidth: 272, cardPadding: "9px 10px" },
@@ -28,6 +30,7 @@ const boardAppearanceMethods = {
     this.applyAppearanceVariables(root, appearance);
     this.applyAppearanceClasses(root, appearance);
     this.applyBoardBackground(root, appearance.background);
+    this.labelLook = normalizeLabelLook(appearance.labels);
     // Read once per render for the chip on every card, rather than once per card.
     this.codeLook = appearance.codes;
   },
@@ -59,6 +62,10 @@ const boardAppearanceMethods = {
   },
 
   applyAppearanceClasses(root, appearance) {
+    const labels = normalizeLabelLook(appearance && appearance.labels);
+    root.classList.toggle("is-compact-labels", labels.displayMode === "compact");
+    root.classList.toggle("is-hover-labels", labels.displayMode === "hover");
+    root.classList.toggle("is-card-hover-labels", labels.displayMode === "card-hover");
     root.classList.toggle("is-motion-disabled", !appearance.motion.enabled);
     root.classList.toggle("is-appearance-dark", appearance.colorScheme === "dark");
     root.classList.toggle("is-appearance-light", appearance.colorScheme === "light");

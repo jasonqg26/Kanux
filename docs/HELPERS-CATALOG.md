@@ -23,6 +23,7 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 - `DEFAULT_APPEARANCE`: configuración visual inicial.
 - `DEFAULT_DATA`: estructura mínima de datos persistidos del plugin.
 - `DEPENDENCY_BLOCK_NONE`, `DEPENDENCY_BLOCK_WARN` y `DEPENDENCY_BLOCK_TOTAL`: niveles de bloqueo de una dependencia, del más débil al más fuerte.
+- `LABEL_DISPLAY_MODES`, `LABEL_PLACEMENTS`, `MAX_VISIBLE_LABELS_LIMIT`, `DEFAULT_LABEL_LOOK`: constantes y configuración por defecto para las etiquetas de las tarjetas.
 - `DEPENDENCY_BLOCK_MODES`: los tres niveles ordenados; su índice es la comparación que usa `dependencyGate`. Su presentación (nombre, icono y descripción) vive en `src/modals/dependency-level-picker.js`.
 - `DEPENDENCY_STATUS_DONE`, `DEPENDENCY_STATUS_PENDING` y `DEPENDENCY_STATUS_MISSING`: estado de una dependencia según la card a la que apunta.
 
@@ -47,6 +48,7 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 ## Colores, etiquetas y miembros
 
 - `cleanColor(value)`: valida y normaliza colores hexadecimales de seis dígitos.
+- `normalizeLabelLook(value)` y `partitionCardLabels(labels, maxVisible)`: normalizan la configuración de etiquetas y dividen las visibles de las ocultas.
 - `labelKey(label)`: genera la clave comparable de una etiqueta.
 - `cleanLabelName(label)`: limpia un nombre y descarta líneas reservadas de metadatos.
 - `parseLabels(raw)` y `labelsToFrontmatter(labels)`: leen y escriben etiquetas en frontmatter.
@@ -66,6 +68,7 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 ## DOM, iconos y arrastre
 
 - `createElement(tag, className, text)`: crea elementos DOM con clase y texto opcionales.
+- `cardLabelsElement(labels, look)`: construye el contenedor DOM completo para las etiquetas de una tarjeta con soporte de desbordamiento.
 - `moveArrayEntry(source, target, entry, insertionIndex)`: mueve un elemento existente a la posición indicada de otro arreglo (o del mismo), midiendo el índice antes de retirarlo — el hueco que ve quien arrastra.
 - `hasDragType(event, type)`: comprueba de forma compatible un tipo en `dataTransfer`.
 - `renderIcon(element, icon)`: pinta dentro de un elemento un icono registrado en Obsidian, resolviendo alias entre versiones y cayendo en un icono genérico si ninguno existe.

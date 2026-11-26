@@ -56,6 +56,7 @@ function testAppearancePreviewPaintsImageBackground() {
     cards: { useTheme: true, background: "#25262a", hoverBackground: "#30343b", verticalGap: 8, borderRadius: 8, titleSize: 14, shadow: "medium" },
     lists: { useTheme: true, background: "#161719", columnGap: 12, topBorderWidth: 3, borderRadius: 8, showColorDot: true },
     codes: { style: "outline", color: "", placement: "inline" },
+    labels: { displayMode: "compact", placement: "top", maxVisible: 3 },
     background: { type: "image", imagePath: "bg.png", imageSource: "vault", imageFit: "cover", overlayOpacity: 0.2 },
   };
 
@@ -63,6 +64,55 @@ function testAppearancePreviewPaintsImageBackground() {
   assert.ok(properties["background-image"].includes("url(\"app://vault/bg.png\")"));
   // A theme-coloured card hovers in a theme colour, never in the stored hex.
   assert.ok(properties["--ot-card-hover-background"].startsWith("color-mix("));
+}
+
+function testAppearancePreviewAppliesLabelDisplayMode() {
+  const classes = new Set();
+  const root = {
+    style: { setProperty() {}, removeProperty() {} },
+    classList: {
+      toggle(cls, force) {
+        if (force) classes.add(cls);
+        else classes.delete(cls);
+      },
+    },
+    querySelectorAll(selector) {
+      if (selector.includes("ot-card-code")) return [];
+      if (selector.includes("data-has-preview-labels")) {
+        return [{ querySelector() { return null; }, append() {}, prepend() {} }];
+      }
+      return [];
+    },
+  };
+  const modal = Object.create(BoardAppearanceModal.prototype);
+  modal.codeStyleGroup = null;
+  modal.plugin = null;
+  modal.syncPreviewLabels = function() {};
+
+  for (const mode of ["compact", "hover", "card-hover", "expanded"]) {
+    classes.clear();
+    const appearance = {
+      density: "normal",
+      fontScale: 1,
+      colorScheme: "theme",
+      surfaceScheme: "theme",
+      motion: { enabled: true },
+      cards: { useTheme: true, background: "", hoverBackground: "", verticalGap: 8, borderRadius: 8, titleSize: 14, shadow: "none" },
+      lists: { useTheme: true, background: "", columnGap: 12, topBorderWidth: 3, borderRadius: 8, showColorDot: true },
+      codes: { style: "outline", color: "", placement: "inline" },
+      labels: { displayMode: mode, placement: "top", maxVisible: 3 },
+      background: { type: "none" },
+    };
+    modal.paintPreview(appearance, root);
+    if (mode === "compact") assert.ok(classes.has("is-compact-labels"));
+    if (mode === "hover") assert.ok(classes.has("is-hover-labels"));
+    if (mode === "card-hover") assert.ok(classes.has("is-card-hover-labels"));
+    if (mode === "expanded") {
+      assert.strictEqual(classes.has("is-compact-labels"), false);
+      assert.strictEqual(classes.has("is-hover-labels"), false);
+      assert.strictEqual(classes.has("is-card-hover-labels"), false);
+    }
+  }
 }
 
 function testEmptyDescriptionCanStayClosed() {
@@ -297,6 +347,7 @@ async function run() {
   testEmbeddedEditorFallsBackWithoutInternalApi();
   testDescriptionImageSegmentation();
   testAppearancePreviewPaintsImageBackground();
+  testAppearancePreviewAppliesLabelDisplayMode();
   await testExplicitSaveReportsFailureWithoutPoisoningQueue();
   await testDescriptionSaveRollsBackAfterFailure();
   await testAutoSaveKeepsTheEditingSessionOpen();

@@ -36,6 +36,10 @@ const LIST_COLORS = ["#94a3b8", "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b
 const CODE_STYLES = ["outline", "filled", "soft", "plain"];
 const CODE_PLACEMENTS = ["inline", "above"];
 const DEFAULT_CODE_LOOK = { style: "outline", color: "", placement: "inline" };
+const LABEL_DISPLAY_MODES = ["compact", "expanded", "hover", "card-hover"];
+const LABEL_PLACEMENTS = ["top", "bottom"];
+const MAX_VISIBLE_LABELS_LIMIT = 12;
+const DEFAULT_LABEL_LOOK = { displayMode: "expanded", placement: "top", maxVisible: 0 };
 const DEFAULT_CHECKLIST_TITLE = "Checklist";
 const DEFAULT_CHECKLIST_COLOR = LIST_COLORS[1];
 const DEFAULT_APPEARANCE = {
@@ -44,9 +48,7 @@ const DEFAULT_APPEARANCE = {
   surfaceScheme: "theme",
   density: "normal",
   fontScale: 1,
-  labels: {
-    displayMode: "expanded",
-  },
+  labels: { ...DEFAULT_LABEL_LOOK },
   background: {
     type: "theme",
     color: "#1e1e1e",
@@ -337,6 +339,37 @@ function cardCodeChip(code, look) {
   // An identifier, not prose: keep machine translation off it.
   chip.setAttribute("translate", "no");
   return chip;
+}
+
+function cardLabelsElement(labels, look) {
+  const clean = normalizeLabelLook(look);
+  const { visible, hidden } = partitionCardLabels(labels, clean.maxVisible);
+  const container = createElement("div", "ot-card-labels");
+  if (clean.placement === "bottom") container.classList.add("is-bottom");
+  visible.forEach((label) => container.append(buildLabelPill(label, "ot-card-label")));
+  if (hidden.length) container.append(buildLabelOverflow(hidden));
+  return container;
+}
+
+function buildLabelPill(label, className) {
+  const pill = createElement("span", className, label.name);
+  pill.style.backgroundColor = label.color;
+  pill.title = label.name;
+  return pill;
+}
+
+function buildLabelOverflow(hidden) {
+  const names = hidden.map((label) => label.name).join(", ");
+  const overflow = createElement("span", "ot-card-labels-overflow");
+  overflow.tabIndex = 0;
+  overflow.title = names;
+  overflow.setAttribute("aria-label", `${hidden.length} more ${hidden.length === 1 ? "label" : "labels"}: ${names}`);
+  overflow.append(createElement("span", "ot-card-label-more", `+${hidden.length}`));
+  const popover = createElement("span", "ot-card-labels-popover");
+  popover.setAttribute("role", "tooltip");
+  hidden.forEach((label) => popover.append(buildLabelPill(label, "ot-card-label-popover-item")));
+  overflow.append(popover);
+  return overflow;
 }
 
 function hasDragType(event, type) {
@@ -871,6 +904,27 @@ function normalizeCodeLook(value) {
   };
 }
 
+function normalizeLabelLook(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const rawMax = source.maxVisible;
+  const parsedMax = rawMax === null || rawMax === undefined || rawMax === "" ? 0 : Number(rawMax);
+  const maxVisible = Number.isFinite(parsedMax) && parsedMax > 0
+    ? Math.min(MAX_VISIBLE_LABELS_LIMIT, Math.floor(parsedMax))
+    : 0;
+  return {
+    displayMode: LABEL_DISPLAY_MODES.includes(source.displayMode) ? source.displayMode : DEFAULT_LABEL_LOOK.displayMode,
+    placement: LABEL_PLACEMENTS.includes(source.placement) ? source.placement : DEFAULT_LABEL_LOOK.placement,
+    maxVisible,
+  };
+}
+
+function partitionCardLabels(labels, maxVisible) {
+  const list = Array.isArray(labels) ? labels : [];
+  const limit = Number.isFinite(Number(maxVisible)) && Number(maxVisible) > 0 ? Math.floor(Number(maxVisible)) : 0;
+  if (!limit || list.length <= limit) return { visible: list, hidden: [] };
+  return { visible: list.slice(0, limit), hidden: list.slice(limit) };
+}
+
 /** Numbering is on when the note carries a next number; nothing else is required. */
 function parseTemplateNumbering(markdown) {
   const read = (key) => {
@@ -1296,6 +1350,7 @@ module.exports = {
   moveArrayEntry,
   createElement,
   cardCodeChip,
+  cardLabelsElement,
   hasDragType,
   renderIcon,
   iconButton,
@@ -1331,6 +1386,12 @@ module.exports = {
   CODE_STYLES,
   CODE_PLACEMENTS,
   DEFAULT_CODE_LOOK,
+  LABEL_DISPLAY_MODES,
+  LABEL_PLACEMENTS,
+  MAX_VISIBLE_LABELS_LIMIT,
+  DEFAULT_LABEL_LOOK,
+  normalizeLabelLook,
+  partitionCardLabels,
   dependencyGate,
   normalizeDependencies,
   parseDependencies,

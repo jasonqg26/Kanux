@@ -132,4 +132,181 @@ testDragStartKeepsOriginalCardInLayout();
 testDropRefreshGuardExpires();
 testTableSearchIsAccentInsensitive();
 testTableRowsFilterAndSortIndependently();
+
+function makeMockDocument() {
+  return {
+    createElement(tagName) {
+      const classSet = new Set();
+      return {
+        tagName,
+        get className() {
+          return Array.from(classSet).join(" ");
+        },
+        set className(value) {
+          classSet.clear();
+          String(value || "").split(/\s+/).filter(Boolean).forEach((name) => classSet.add(name));
+        },
+        textContent: "",
+        children: [],
+        get childElementCount() {
+          return this.children.length;
+        },
+        classList: {
+          add(...names) {
+            names.forEach((n) => classSet.add(n));
+          },
+          toggle(name, force) {
+            if (force === undefined) {
+              if (classSet.has(name)) classSet.delete(name);
+              else classSet.add(name);
+            } else if (force) {
+              classSet.add(name);
+            } else {
+              classSet.delete(name);
+            }
+          },
+          contains(name) {
+            return classSet.has(name);
+          },
+        },
+        style: {
+          setProperty() {},
+          removeProperty() {},
+        },
+        dataset: {},
+        attributes: {},
+        setAttribute(k, v) {
+          this.attributes[k] = v;
+        },
+        append(...nodes) {
+          nodes.forEach((n) => {
+            if (n) this.children.push(n);
+          });
+        },
+        replaceChildren(...nodes) {
+          this.children = [...nodes];
+        },
+        addEventListener() {},
+        querySelectorAll(selector) {
+          const results = [];
+          const matchClass = selector.startsWith(".") ? selector.slice(1) : null;
+          const walk = (node) => {
+            if (matchClass && node.classList && node.classList.contains(matchClass)) {
+              results.push(node);
+            }
+            if (node.children) {
+              node.children.forEach(walk);
+            }
+          };
+          walk(this);
+          return results;
+        },
+      };
+    },
+  };
+}
+
+function testCardLabelsPlacementAndOverflow() {
+  const oldDoc = global.document;
+  global.document = makeMockDocument();
+
+  const view = Object.create(BoardView.prototype);
+  view.plugin = {
+    getCardLockHolder: () => null,
+    isSyncDeckEnabled: () => false,
+    cardDependencyGate: () => ({ total: 0 }),
+  };
+  view.editingCardId = null;
+  view.configureCardElement = () => {};
+  view.bindCardInteractions = () => {};
+  view.buildCardMain = () => {
+    const el = makeMockDocument().createElement("div");
+    el.classList.add("ot-card-main");
+    return el;
+  };
+  view.buildCardFooter = () => {
+    const el = makeMockDocument().createElement("div");
+    el.classList.add("ot-card-footer");
+    return el;
+  };
+  view.buildLockBadge = () => null;
+
+  // Test A
+  view.labelLook = { displayMode: "expanded", placement: "top", maxVisible: 2 };
+  const cardA = { id: "c1", labels: [{ name: "Bug" }, { name: "UI" }, { name: "Urgent" }] };
+  const elA = view.renderCard(cardA);
+
+  assert.strictEqual(elA.children[0].classList.contains("ot-card-labels"), true);
+  assert.strictEqual(elA.children[0].classList.contains("is-bottom"), false);
+  assert.strictEqual(elA.children[1].classList.contains("ot-card-main"), true);
+  assert.strictEqual(elA.children[2].classList.contains("ot-card-footer"), true);
+
+  const labelsContainer = elA.children[0];
+  const labelItems = labelsContainer.querySelectorAll(".ot-card-label");
+  assert.strictEqual(labelItems.length, 2);
+  assert.deepStrictEqual(labelItems.map((item) => item.textContent), ["Bug", "UI"]);
+  const overflow = labelsContainer.querySelectorAll(".ot-card-labels-overflow");
+  assert.strictEqual(overflow.length, 1);
+  const more = labelsContainer.querySelectorAll(".ot-card-label-more");
+  assert.strictEqual(more[0].textContent, "+1");
+  const popoverItem = labelsContainer.querySelectorAll(".ot-card-label-popover-item");
+  assert.strictEqual(popoverItem.length, 1);
+  assert.strictEqual(popoverItem[0].textContent, "Urgent");
+
+  // Test B
+  view.labelLook = { displayMode: "expanded", placement: "bottom", maxVisible: 0 };
+  const cardB = { id: "c2", labels: [{ name: "A" }, { name: "B" }, { name: "C" }] };
+  const elB = view.renderCard(cardB);
+
+  assert.strictEqual(elB.children[0].classList.contains("ot-card-main"), true);
+  assert.strictEqual(elB.children[1].classList.contains("ot-card-footer"), true);
+  assert.strictEqual(elB.children[2].classList.contains("ot-card-labels"), true);
+  assert.strictEqual(elB.children[2].classList.contains("is-bottom"), true);
+  assert.strictEqual(elB.children[2].querySelectorAll(".ot-card-label").length, 3);
+  const overflowB = elB.children[2].querySelectorAll(".ot-card-labels-overflow");
+  assert.strictEqual(overflowB.length, 0);
+
+  global.document = oldDoc;
+}
+
+function testApplyAppearanceClassesTogglesLabelModes() {
+  const root = makeMockDocument().createElement("div");
+  const view = Object.create(BoardView.prototype);
+
+  view.applyAppearanceClasses(root, {
+    motion: { enabled: true },
+    colorScheme: "theme",
+    surfaceScheme: "theme",
+    lists: { showColorDot: true },
+    labels: { displayMode: "compact" },
+  });
+  assert.strictEqual(root.classList.contains("is-compact-labels"), true);
+  assert.strictEqual(root.classList.contains("is-hover-labels"), false);
+  assert.strictEqual(root.classList.contains("is-card-hover-labels"), false);
+
+  view.applyAppearanceClasses(root, {
+    motion: { enabled: true },
+    colorScheme: "theme",
+    surfaceScheme: "theme",
+    lists: { showColorDot: true },
+    labels: { displayMode: "hover" },
+  });
+  assert.strictEqual(root.classList.contains("is-compact-labels"), false);
+  assert.strictEqual(root.classList.contains("is-hover-labels"), true);
+  assert.strictEqual(root.classList.contains("is-card-hover-labels"), false);
+
+  view.applyAppearanceClasses(root, {
+    motion: { enabled: true },
+    colorScheme: "theme",
+    surfaceScheme: "theme",
+    lists: { showColorDot: true },
+    labels: { displayMode: "card-hover" },
+  });
+  assert.strictEqual(root.classList.contains("is-compact-labels"), false);
+  assert.strictEqual(root.classList.contains("is-hover-labels"), false);
+  assert.strictEqual(root.classList.contains("is-card-hover-labels"), true);
+}
+
+testCardLabelsPlacementAndOverflow();
+testApplyAppearanceClassesTogglesLabelModes();
 console.log("board view tests passed");

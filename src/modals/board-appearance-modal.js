@@ -7,7 +7,12 @@ const {
   CODE_PLACEMENTS,
   CODE_STYLES,
   LIST_COLORS,
+  LABEL_COLORS,
+  LABEL_PLACEMENTS,
+  MAX_VISIBLE_LABELS_LIMIT,
   cardCodeChip,
+  cardLabelsElement,
+  normalizeLabelLook,
   clone,
   createElement,
 } = require("../helpers");
@@ -29,6 +34,14 @@ const BUILTIN_PRESETS = [
 ];
 const CODE_STYLE_LABELS = { outline: "Outline", filled: "Filled", soft: "Soft", plain: "Plain" };
 const CODE_PLACEMENT_LABELS = { inline: "Before title", above: "Above title" };
+const LABEL_PLACEMENT_LABELS = { top: "Above title", bottom: "Below title" };
+const PREVIEW_LABELS = [
+  { name: "Bug", color: LABEL_COLORS[3] },
+  { name: "Frontend", color: LABEL_COLORS[1] },
+  { name: "Urgent", color: LABEL_COLORS[8] },
+  { name: "Docs", color: LABEL_COLORS[0] },
+];
+const labelLimitText = (value) => (value > 0 ? String(Math.round(value)) : "All");
 // The palette by name, in its order, so a colour dot is announced as more than a hex code.
 const COLOR_NAMES = ["Slate", "Blue", "Green", "Amber", "Red", "Violet", "Teal", "Pink"];
 // The style options are drawn as chips; this is the text inside them.
@@ -241,7 +254,7 @@ class BoardAppearanceModal extends Modal {
     const title = createElement("div", "ot-appearance-preview-list-title");
     title.append(createElement("span", "ot-mini-card-dot"), createElement("span", "", (first && first.title) || "To do"));
     const cards = createElement("div", "ot-appearance-preview-cards");
-    cards.append(this.previewCard(PREVIEW_CODE, "Fix the login redirect"), this.previewCard("", "Write the release notes"));
+    cards.append(this.previewCard(PREVIEW_CODE, "Fix the login redirect", PREVIEW_LABELS), this.previewCard("", "Write the release notes"));
     list.append(title, cards);
 
     root.append(list);
@@ -249,13 +262,25 @@ class BoardAppearanceModal extends Modal {
     return root;
   }
 
-  previewCard(code, text) {
+  previewCard(code, text, labels = []) {
     const card = createElement("div", "ot-card ot-appearance-preview-card");
+    if (labels.length > 0) card.dataset.hasPreviewLabels = "1";
     const title = createElement("div", "ot-card-title");
     if (code) title.append(cardCodeChip(code, null));
     title.append(createElement("span", "ot-card-title-text", text));
     card.append(title);
     return card;
+  }
+
+  syncPreviewLabels(root, labels) {
+    const cards = root.querySelectorAll("[data-has-preview-labels=\"1\"]");
+    cards.forEach((card) => {
+      const existing = card.querySelector(".ot-card-labels");
+      if (existing) existing.remove();
+      const next = cardLabelsElement(PREVIEW_LABELS, labels);
+      if (labels.placement === "bottom") card.append(next);
+      else card.prepend(next);
+    });
   }
 
   paintPreview(appearance, root = this.previewRoot) {
@@ -269,6 +294,7 @@ class BoardAppearanceModal extends Modal {
     view.applyBoardBackground(root, appearance.background);
     // The chip is rebuilt so style, colour and placement follow the choice.
     root.querySelectorAll(".ot-card-code").forEach((chip) => chip.replaceWith(cardCodeChip(chip.textContent, appearance.codes)));
+    this.syncPreviewLabels(root, normalizeLabelLook(appearance && appearance.labels));
     if (this.codeStyleGroup) {
       if (appearance.codes.color) this.codeStyleGroup.style.setProperty("--ot-code-color", appearance.codes.color);
       else this.codeStyleGroup.style.removeProperty("--ot-code-color");
@@ -378,13 +404,28 @@ class BoardAppearanceModal extends Modal {
       min: 12, max: 30, step: 1, value: cards.titleSize, format: px,
       patch: (value) => ({ cards: { titleSize: value } }),
     });
+    this.renderCardLabelOptions(appearance.labels);
+  }
+
+  renderCardLabelOptions(labels) {
     this.row("labels.displayMode", "Label display", "When a card's labels show their names.").addDropdown((dropdown) => dropdown
       .addOption("compact", "Always compact")
       .addOption("expanded", "Always expanded")
       .addOption("hover", "Expand the hovered label")
       .addOption("card-hover", "Expand while the card is hovered")
-      .setValue(appearance.labels.displayMode)
+      .setValue(labels.displayMode)
       .onChange((value) => this.update({ labels: { displayMode: value } })));
+
+    const placement = choiceGroup("ot-segmented ot-appearance-choice", "Label position", LABEL_PLACEMENTS.map((value) => ({
+      value,
+      label: LABEL_PLACEMENT_LABELS[value],
+    })), labels.placement, (value) => this.update({ labels: { placement: value } }));
+    this.row("labels.placement", "Label position", "Place labels at the top of the card or at the bottom.").controlEl.append(placement);
+
+    this.slider(this.row("labels.maxVisible", "Maximum visible labels", "Limit how many labels appear on a card. Hover the overflow badge to see the rest."), {
+      min: 0, max: MAX_VISIBLE_LABELS_LIMIT, step: 1, value: labels.maxVisible, format: labelLimitText,
+      patch: (value) => ({ labels: { maxVisible: value } }),
+    });
   }
 
   /**

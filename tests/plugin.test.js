@@ -39,6 +39,7 @@ function createPlugin(data, files = {}) {
     },
   };
   plugin.refreshViews = () => {};
+  plugin.saveData = async () => {};
   plugin.savePluginData = async () => {};
   plugin.undoStack = [];
   return plugin;
@@ -275,6 +276,31 @@ function testAppearanceHoldsOneCodeLookPerBoard() {
   assert.deepStrictEqual(plugin.normalizeAppearance({ codes: { style: "neon", color: "blue", placement: "left" } }).codes, fallback);
 }
 
+async function testAppearanceNormalizesAndPreservesLabelOptions() {
+  const board = { id: "board-1", name: "Project", appearance: {} };
+  const plugin = createPlugin({ activeBoardId: board.id, boards: [board] });
+
+  assert.deepStrictEqual(
+    plugin.normalizeAppearance({ labels: { displayMode: "compact" } }).labels,
+    { displayMode: "compact", placement: "top", maxVisible: 0 },
+  );
+  assert.deepStrictEqual(
+    plugin.normalizeAppearance({ labels: { displayMode: "hover", placement: "bottom", maxVisible: 4 } }).labels,
+    { displayMode: "hover", placement: "bottom", maxVisible: 4 },
+  );
+  assert.deepStrictEqual(
+    plugin.normalizeAppearance({ labels: { displayMode: "bad", placement: "left", maxVisible: -3 } }).labels,
+    { displayMode: "expanded", placement: "top", maxVisible: 0 },
+  );
+
+  await plugin.updateBoardAppearance(board.id, { labels: { placement: "bottom" } });
+  await plugin.updateBoardAppearance(board.id, { labels: { maxVisible: 2 } });
+  assert.deepStrictEqual(
+    plugin.getBoardAppearance(board.id).labels,
+    { displayMode: "expanded", placement: "bottom", maxVisible: 2 },
+  );
+}
+
 async function testAFailedCardDoesNotBurnANumber() {
   const { plugin, list, template } = createTemplateBoard();
   // createCard returns "" when the list is gone; nothing was named, so the
@@ -391,6 +417,7 @@ async function run() {
   await testAnUnnumberedTemplateHandsOutNoCode();
   await testRestartingNumberingRewindsTheCounter();
   testAppearanceHoldsOneCodeLookPerBoard();
+  await testAppearanceNormalizesAndPreservesLabelOptions();
   await testAnEmptyKeyCannotEraseACodeOrADependency();
   await testARealValueInTheNoteStillWins();
   testRefreshViewsHonorsTemporaryViewGuard();

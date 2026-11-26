@@ -32,6 +32,10 @@ const {
   cardCodeChip,
   cleanSeparator,
   normalizeCodeLook,
+  DEFAULT_LABEL_LOOK,
+  MAX_VISIBLE_LABELS_LIMIT,
+  normalizeLabelLook,
+  partitionCardLabels,
   iconButton,
   moveArrayEntry,
   normalizeChecklists,
@@ -584,6 +588,43 @@ labels:
   assert.strictEqual(parseCardMarkdown(note.replace("BUG-014", "")).code, "");
 }
 
+function testLabelLookNormalization() {
+  assert.deepStrictEqual(normalizeLabelLook(null), DEFAULT_LABEL_LOOK);
+  assert.deepStrictEqual(normalizeLabelLook(undefined), DEFAULT_LABEL_LOOK);
+  assert.deepStrictEqual(normalizeLabelLook("invalid"), DEFAULT_LABEL_LOOK);
+
+  const custom = normalizeLabelLook({ displayMode: "hover", placement: "bottom", maxVisible: 3 });
+  assert.deepStrictEqual(custom, { displayMode: "hover", placement: "bottom", maxVisible: 3 });
+
+  const invalidStyle = normalizeLabelLook({ displayMode: "unknown", placement: "invalid", maxVisible: -2 });
+  assert.deepStrictEqual(invalidStyle, { displayMode: DEFAULT_LABEL_LOOK.displayMode, placement: DEFAULT_LABEL_LOOK.placement, maxVisible: 0 });
+
+  assert.strictEqual(normalizeLabelLook({ maxVisible: 0 }).maxVisible, 0);
+  assert.strictEqual(normalizeLabelLook({ maxVisible: "" }).maxVisible, 0);
+  assert.strictEqual(normalizeLabelLook({ maxVisible: null }).maxVisible, 0);
+  assert.strictEqual(normalizeLabelLook({ maxVisible: NaN }).maxVisible, 0);
+  assert.strictEqual(normalizeLabelLook({ maxVisible: 3.9 }).maxVisible, 3);
+  assert.strictEqual(normalizeLabelLook({ maxVisible: 99 }).maxVisible, MAX_VISIBLE_LABELS_LIMIT);
+}
+
+function testPartitionCardLabels() {
+  const labels = [
+    { name: "One", color: "#111" },
+    { name: "Two", color: "#222" },
+    { name: "Three", color: "#333" },
+    { name: "Four", color: "#444" },
+  ];
+
+  assert.deepStrictEqual(partitionCardLabels(labels, 0), { visible: labels, hidden: [] });
+  assert.deepStrictEqual(partitionCardLabels(labels, 10), { visible: labels, hidden: [] });
+  assert.deepStrictEqual(partitionCardLabels(labels, 2), {
+    visible: [labels[0], labels[1]],
+    hidden: [labels[2], labels[3]],
+  });
+  assert.deepStrictEqual(partitionCardLabels(null, 2), { visible: [], hidden: [] });
+  assert.deepStrictEqual(partitionCardLabels([], 2), { visible: [], hidden: [] });
+}
+
 testLegacyChecklistMigration();
 testRegisteredIconAndGenericFallback();
 testChecklistItemNoteBody();
@@ -609,4 +650,6 @@ testSeparatorTravelsWithTheTemplate();
 testChecklistCollapseSurvivesTheMarkdownRoundTrip();
 testMoveArrayEntryPointsAtTheSlotTheDragSaw();
 testCardCodeSurvivesTheFrontmatterRoundTrip();
+testLabelLookNormalization();
+testPartitionCardLabels();
 console.log("helpers tests passed");

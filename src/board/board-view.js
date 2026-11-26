@@ -74,10 +74,6 @@ class BoardView extends ItemView {
   prepareBoardRoot() {
     this.contentEl.replaceChildren();
     this.contentEl.addClass("ot-board-root");
-    const labelDisplayMode = this.plugin.getAppearance().labels.displayMode;
-    this.contentEl.classList.toggle("is-compact-labels", labelDisplayMode === "compact");
-    this.contentEl.classList.toggle("is-hover-labels", labelDisplayMode === "hover");
-    this.contentEl.classList.toggle("is-card-hover-labels", labelDisplayMode === "card-hover");
     this.applyAppearance();
   }
 

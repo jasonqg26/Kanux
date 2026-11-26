@@ -2,10 +2,12 @@
 // presets, and the background image assets stored under the config dir.
 const {
   DEFAULT_APPEARANCE,
+  LABEL_DISPLAY_MODES,
   cleanColor,
   clone,
   isImagePath,
   normalizeCodeLook,
+  normalizeLabelLook,
   textLine,
   uid,
 } = require("../helpers");
@@ -74,7 +76,6 @@ const appearanceMethods = {
     const background = source.background && typeof source.background === "object" ? source.background : {};
     const cards = source.cards && typeof source.cards === "object" ? source.cards : {};
     const lists = source.lists && typeof source.lists === "object" ? source.lists : {};
-    const labels = source.labels && typeof source.labels === "object" ? source.labels : {};
     const motion = source.motion && typeof source.motion === "object" ? source.motion : {};
     const inferredSurfaceScheme = source.preset === "trello-light"
       ? "light"
@@ -93,9 +94,7 @@ const appearanceMethods = {
       surfaceScheme: choice(source.surfaceScheme, ["theme", "dark", "light"], inferredSurfaceScheme),
       density: choice(source.density, ["compact", "normal", "comfortable"], DEFAULT_APPEARANCE.density),
       fontScale: number(source.fontScale, DEFAULT_APPEARANCE.fontScale, 0.85, 1.4),
-      labels: {
-        displayMode: choice(labels.displayMode, ["compact", "expanded", "hover", "card-hover"], DEFAULT_APPEARANCE.labels.displayMode),
-      },
+      labels: normalizeLabelLook(source.labels),
       background: {
         type: choice(background.type, ["theme", "solid", "gradient", "image"], DEFAULT_APPEARANCE.background.type),
         color: cleanColor(background.color) || DEFAULT_APPEARANCE.background.color,
@@ -300,7 +299,7 @@ const appearanceMethods = {
   },
 
   async setLabelDisplayMode(mode) {
-    const next = ["compact", "expanded", "hover", "card-hover"].includes(mode) ? mode : "expanded";
+    const next = LABEL_DISPLAY_MODES.includes(mode) ? mode : "expanded";
     const board = this.getBoard();
     if (!board) return;
     await this.updateBoardAppearance(board.id, { labels: { displayMode: next } });
