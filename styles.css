@@ -576,7 +576,6 @@ button.ot-save-button:disabled {
 }
 
 .ot-cards.is-drop-zone {
-  background: transparent;
   background: color-mix(in srgb, var(--interactive-accent) 4%, transparent);
 }
 
@@ -632,9 +631,7 @@ button.ot-save-button:disabled {
   border: 1px dashed var(--interactive-accent);
   border-color: color-mix(in srgb, var(--interactive-accent) 78%, var(--background-modifier-border));
   border-radius: var(--ot-card-radius, 9px);
-  background: var(--background-secondary);
   background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
-  box-shadow: inset 0 0 0 1px rgb(139 92 246 / 8%), 0 4px 14px rgb(0 0 0 / 12%);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 8%, transparent), 0 4px 14px rgb(0 0 0 / 12%);
   pointer-events: none;
   transform: scale(0.985);
@@ -942,7 +939,7 @@ button.ot-save-button:disabled {
   padding: 0 5px;
   background: transparent;
   color: var(--ot-code-tint);
-  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-family: var(--font-monospace, monospace);
   font-size: 0.68em;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -1548,7 +1545,7 @@ button.ot-save-button:disabled {
    because here it is the heading's own eyebrow rather than a tag in a list. */
 .ot-card-modal-code {
   color: var(--ot-code-color, var(--interactive-accent));
-  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-family: var(--font-monospace, monospace);
   font-size: 11.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -1920,7 +1917,7 @@ button.ot-save-button:disabled {
 }
 
 .ot-template-numbering .ot-template-number-box input[name="prefix"] {
-  font-family: var(--font-monospace, ui-monospace, monospace);
+  font-family: var(--font-monospace, monospace);
   font-weight: 700;
 }
 
