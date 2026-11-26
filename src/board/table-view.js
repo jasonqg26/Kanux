@@ -12,10 +12,17 @@ const {
   createElement,
   dateRangeLabel,
   hasDragType,
+  memberKey,
   textButton,
   textLine,
 } = require("../helpers");
-const { CardDatesModal, CardModal, LabelPickerModal } = require("../modals");
+const {
+  CardDatesModal,
+  CardModal,
+  LabelPickerModal,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+} = require("../modals");
 
 // Drag payload type for reordering table columns (kept distinct from card/list drags).
 const TABLE_COL_DRAG_TYPE = "application/x-kanux-column";
@@ -25,13 +32,12 @@ const tableViewMethods = {
   // is always the fixed first field. Definitions live here; per-board layout
   // (order / hidden / widths) is a per-device preference in data.json.
   tableColumnDefs() {
-    const defs = [
+    return [
       { key: "status", label: "List" },
       { key: "assignee", label: "Assignee" },
       { key: "dates", label: "Dates" },
       { key: "labels", label: "Labels" },
     ];
-    return this.plugin.isSyncDeckEnabled() ? defs : defs.filter((def) => def.key !== "assignee");
   },
 
   defaultColWidth(key) {
@@ -480,31 +486,34 @@ const tableViewMethods = {
   },
 
   showAssigneeMenu(event, card) {
-    const members = this.plugin.getVaultMembers();
-    this.openTablePopover(event.currentTarget, (pop) => {
-      if (!members.length) {
-        pop.append(createElement("div", "ot-popover-empty", "No members — sign in to Sync Deck"));
-        return;
-      }
-      const paint = () => {
-        pop.replaceChildren();
-        const current = ((this.plugin.data.cards[card.id] || card).assignees) || [];
-        members.forEach((member) => {
-          const assigned = current.some((a) => a && a.email === member.email);
-          const row = this.popoverRow(this.buildAvatar(member), member.name || member.email, assigned);
-          row.addEventListener("click", async () => {
-            const now = ((this.plugin.data.cards[card.id] || card).assignees) || [];
-            const on = now.some((a) => a && a.email === member.email);
-            const next = on
-              ? now.filter((a) => a && a.email !== member.email)
-              : [...now, { email: member.email, name: member.name, color: member.color }];
-            await this.plugin.updateCard(card.id, { assignees: next });
-            paint(); // keep the picker open and refresh the checks for multi-select
+    this.closeTablePopover();
+    const currentAssignees = () => ((this.plugin.data.cards[card.id] || card).assignees) || [];
+    openMemberPickerPopover({
+      anchor: event.currentTarget,
+      plugin: this.plugin,
+      getSelected: currentAssignees,
+      multiSelect: true,
+      onToggle: async (member) => {
+        const now = currentAssignees();
+        const key = memberKey(member);
+        const assigned = now.some((a) => memberKey(a) === key);
+        const next = assigned
+          ? now.filter((a) => memberKey(a) !== key)
+          : [...now, { email: member.email, name: member.name, color: member.color }];
+        await this.plugin.updateCard(card.id, { assignees: next });
+      },
+      onCreateMember: async (name) => {
+        const created = await this.plugin.ensureLocalMember({ name });
+        if (!created) return;
+        const now = currentAssignees();
+        const key = memberKey(created);
+        if (!now.some((a) => memberKey(a) === key)) {
+          await this.plugin.updateCard(card.id, {
+            assignees: [...now, { email: created.email, name: created.name, color: created.color }],
           });
-          pop.append(row);
-        });
-      };
-      paint();
+        }
+      },
+      onManageMembers: () => openKanuxMembersSettings(this.app, this.plugin),
     });
   },
 

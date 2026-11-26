@@ -25,7 +25,17 @@ Module._load = function load(request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain);
 };
 
-const { BoardAppearanceModal, CardModal, detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch, splitDetailSegments } = require("../src/modals");
+const {
+  BoardAppearanceModal,
+  CardModal,
+  CardTemplateModal,
+  openMemberPickerPopover,
+  closeMemberPickerPopover,
+  detailsMdToHtml,
+  autoformatCommandForPrefix,
+  inlineAutoformatMatch,
+  splitDetailSegments,
+} = require("../src/modals");
 const { createEmbeddedMarkdownEditor } = require("../src/editor/embedded-editor");
 
 /**
@@ -338,6 +348,198 @@ async function testPendingDescriptionAttachmentsFollowSaveAndCancel() {
   assert.strictEqual(modal.pendingDetailAttachments.size, 0);
 }
 
+function makePopoverMockDom() {
+  const createNode = (tagName) => {
+    const classes = new Set();
+    const listeners = {};
+    const node = {
+      tagName: String(tagName || "div").toUpperCase(),
+      children: [],
+      textContent: "",
+      value: "",
+      type: "",
+      placeholder: "",
+      attributes: {},
+      style: { properties: {}, setProperty(k, v) { this.properties[k] = v; } },
+      classList: {
+        add(...names) { names.forEach((n) => classes.add(n)); },
+        remove(...names) { names.forEach((n) => classes.delete(n)); },
+        toggle(name, force) {
+          if (force === undefined) {
+            if (classes.has(name)) classes.delete(name);
+            else classes.add(name);
+            return classes.has(name);
+          }
+          if (force) classes.add(name);
+          else classes.delete(name);
+          return force;
+        },
+        contains(name) { return classes.has(name); },
+      },
+      set className(val) {
+        classes.clear();
+        String(val || "").split(/\s+/).filter(Boolean).forEach((n) => classes.add(n));
+      },
+      get className() { return Array.from(classes).join(" "); },
+      append(...items) { items.forEach((item) => { if (item) node.children.push(item); }); },
+      prepend(...items) { items.slice().reverse().forEach((item) => { if (item) node.children.unshift(item); }); },
+      replaceChildren(...items) { node.children = items.filter(Boolean); },
+      setAttribute(k, v) { node.attributes[k] = v; },
+      addEventListener(eventName, fn) {
+        listeners[eventName] = listeners[eventName] || [];
+        listeners[eventName].push(fn);
+      },
+      dispatch(eventName, event = {}) {
+        (listeners[eventName] || []).forEach((fn) => fn(Object.assign({ preventDefault() {}, stopPropagation() {} }, event)));
+      },
+      click() { node.dispatch("click"); },
+      focus() {},
+      remove() {
+        const idx = body.children.indexOf(node);
+        if (idx >= 0) body.children.splice(idx, 1);
+      },
+      contains(target) {
+        if (target === node) return true;
+        return node.children.some((child) => child && typeof child.contains === "function" && child.contains(target));
+      },
+      getBoundingClientRect() { return { top: 40, bottom: 60, left: 20, right: 120, width: 100, height: 120 }; },
+      querySelector(selector) {
+        return node.querySelectorAll(selector)[0] || null;
+      },
+      querySelectorAll(selector) {
+        const out = [];
+        const cls = selector.startsWith(".") ? selector.slice(1) : "";
+        const walk = (curr) => {
+          if (cls && curr.classList && curr.classList.contains(cls)) out.push(curr);
+          (curr.children || []).forEach(walk);
+        };
+        walk(node);
+        return out;
+      },
+    };
+    return node;
+  };
+  const body = createNode("body");
+  return {
+    body,
+    createElement: createNode,
+    addEventListener() {},
+    removeEventListener() {},
+  };
+}
+
+async function testMemberPickerFiltersAndCreatesInlineMembers() {
+  const prevDoc = global.document;
+  global.document = makePopoverMockDom();
+
+  const members = [{ email: "alice", name: "Alice", color: "#3b82f6", picture: "" }];
+  let selected = [];
+  const plugin = {
+    getVaultMembers: () => members,
+    resolveMember: (m) => m,
+    getMemberPicture: () => "",
+  };
+  const anchor = global.document.createElement("button");
+
+  const pop = openMemberPickerPopover({
+    anchor,
+    plugin,
+    getSelected: () => selected,
+    multiSelect: true,
+    onToggle: (member) => {
+      selected = selected.some((s) => s.email === member.email)
+        ? selected.filter((s) => s.email !== member.email)
+        : [...selected, member];
+    },
+    onCreateMember: async (name) => {
+      const created = { email: name, name, color: "#22c55e", picture: "" };
+      members.push(created);
+      selected.push(created);
+    },
+  });
+
+  const search = pop.querySelectorAll(".ot-member-picker-search")[0];
+  assert.ok(search);
+  assert.strictEqual(pop.querySelectorAll(".ot-member-picker-row").length, 1);
+
+  search.value = "Bob";
+  search.dispatch("input");
+  const createRows = pop.querySelectorAll(".ot-member-picker-create");
+  assert.strictEqual(createRows.length, 1);
+  assert.ok(createRows[0].children[1].textContent.includes("Bob"));
+
+  await createRows[0].click();
+  assert.strictEqual(members.length, 2);
+  assert.strictEqual(selected.length, 1);
+  assert.strictEqual(selected[0].name, "Bob");
+
+  closeMemberPickerPopover();
+  global.document = prevDoc;
+}
+
+function testCardAndTemplateModalsRenderMembersWithoutSyncDeck() {
+  const prevDoc = global.document;
+  global.document = makePopoverMockDom();
+
+  const modal = Object.create(CardModal.prototype);
+  modal.plugin = {
+    isSyncDeckEnabled: () => false,
+    getVaultMembers: () => [],
+    resolveMember: (m) => m,
+    getMemberPicture: () => "",
+    findBoardForCard: () => null,
+    cardDependencyGate: () => ({ entries: [], pending: [], total: 0, met: 0, mode: "none" }),
+  };
+  modal.card = { id: "c1", title: "Task", checklists: [], labels: [], assignees: [{ email: "Alice", name: "Alice", color: "#3b82f6" }] };
+  modal.localTitle = "Task";
+  modal.localLabels = [];
+  modal.localGlobalLabels = [];
+  modal.localAssignees = [{ email: "Alice", name: "Alice", color: "#3b82f6" }];
+  modal.localDetails = "";
+  modal.detailsDraft = "";
+  modal.editingDetails = false;
+  modal.localChecklists = [];
+  modal.localDependencies = [];
+  modal.notesOnly = false;
+  modal.embeddedEditors = [];
+  modal.destroyEmbeddedEditors = () => {};
+  modal.closeSideSheet = () => {};
+  modal.contentEl = global.document.createElement("div");
+  modal.contentEl.addClass = (c) => modal.contentEl.classList.add(c);
+  modal.modalEl = global.document.createElement("div");
+  modal.modalEl.addClass = (c) => modal.modalEl.classList.add(c);
+  modal.renderDetailsField = () => global.document.createElement("div");
+  modal.renderChecklistField = () => global.document.createElement("div");
+  modal.renderDependenciesField = () => global.document.createElement("div");
+
+  const prevRaf = global.requestAnimationFrame;
+  global.requestAnimationFrame = () => {};
+  modal.render();
+  assert.strictEqual(modal.contentEl.classList.contains("is-sync-disabled"), false);
+  assert.strictEqual(modal.contentEl.querySelectorAll(".ot-assignee-editor").length, 1);
+  assert.strictEqual(modal.contentEl.querySelectorAll(".ot-assignee-chip").length, 1);
+
+  const tpl = Object.create(CardTemplateModal.prototype);
+  tpl.plugin = modal.plugin;
+  tpl.board = { id: "b1", lists: [{ id: "l1", title: "Todo" }] };
+  tpl.template = { title: "Bug", listId: "l1", labels: [], assignees: [{ email: "Bob", name: "Bob", color: "#22c55e" }], details: "", checklists: [], numbering: null };
+  tpl.globalLabels = [];
+  tpl.numberingDraft = { prefix: "", separator: "dash", next: 1, pad: 3 };
+  tpl.contentEl = global.document.createElement("div");
+  tpl.contentEl.addClass = (c) => tpl.contentEl.classList.add(c);
+  tpl.modalEl = global.document.createElement("div");
+  tpl.modalEl.addClass = (c) => tpl.modalEl.classList.add(c);
+  tpl.buildHeader = () => global.document.createElement("div");
+  tpl.buildActions = () => global.document.createElement("div");
+  tpl.titleInput = { focus() {} };
+  tpl.onOpen();
+  global.requestAnimationFrame = prevRaf;
+
+  assert.strictEqual(tpl.contentEl.querySelectorAll(".ot-assignee-row").length, 1);
+  assert.strictEqual(tpl.contentEl.querySelectorAll(".ot-assignee-chip").length, 1);
+  global.document = prevDoc;
+}
+
 async function run() {
   testEmptyDescriptionCanStayClosed();
   testChecklistNoteDraftLifecycle();
@@ -353,6 +555,8 @@ async function run() {
   await testAutoSaveKeepsTheEditingSessionOpen();
   await testAutoSaveRecordsOneUndoPerEditingSession();
   await testPendingDescriptionAttachmentsFollowSaveAndCancel();
+  await testMemberPickerFiltersAndCreatesInlineMembers();
+  testCardAndTemplateModalsRenderMembersWithoutSyncDeck();
   console.log("modals tests passed");
 }
 

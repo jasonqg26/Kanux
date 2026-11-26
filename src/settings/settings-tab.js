@@ -1,7 +1,15 @@
 const { FuzzySuggestModal, Notice, PluginSettingTab, Setting } = require("obsidian");
 
-// Settings tab for board access, sync, preferences, and version info.
-const { isImagePath } = require("../helpers");
+// Settings tab for board access, members, sync, preferences, and version info.
+const {
+  cleanColor,
+  createElement,
+  isImagePath,
+  memberKey,
+  pickMemberColor,
+  textLine,
+} = require("../helpers");
+const { buildMemberAvatarElement } = require("../modals");
 
 class VaultImageSuggestModal extends FuzzySuggestModal {
   constructor(app, onChoose) {
@@ -72,8 +80,8 @@ class KanuxSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Kanux").setHeading();
     containerEl.createEl("p", {
       text: this.plugin.isSyncDeckEnabled()
-        ? "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, and optional collaboration."
-        : "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, and checklists.",
+        ? "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, members, and optional cloud collaboration."
+        : "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, and vault members.",
     });
 
     // ---- Board ----
@@ -116,9 +124,11 @@ class KanuxSettingTab extends PluginSettingTab {
           new Notice("Card notes re-imported.");
         }));
 
+    this.renderMembers(containerEl);
+
     new Setting(containerEl)
       .setName("Cloud sync and collaboration")
-      .setDesc("Show optional cloud sync, presence, edit locks, and member assignment features.")
+      .setDesc("Show optional Sync Deck cloud sync, live presence, and card edit locks.")
       .addToggle((toggle) => toggle
         .setValue(this.plugin.isSyncDeckEnabled())
         .onChange(async (value) => {
@@ -365,6 +375,232 @@ class KanuxSettingTab extends PluginSettingTab {
         await this.plugin.applyAppearancePreset("obsidian");
         this.redisplayPreservingScroll();
       }));
+  }
+
+  renderMembers(containerEl) {
+    new Setting(containerEl).setName("Members").setHeading();
+    this.renderMembersNoteSetting(containerEl);
+    this.renderAddMemberForm(containerEl);
+
+    const savedMembers = Array.isArray(this.plugin.data.members) ? this.plugin.data.members : [];
+    const savedKeys = new Set(savedMembers.map((member) => memberKey(member)));
+    const listEl = createElement("div", "ot-settings-members-list");
+    if (savedMembers.length) {
+      savedMembers.forEach((member) => listEl.append(this.buildSavedMemberRow(member)));
+    } else {
+      listEl.append(createElement("p", "ot-settings-members-empty", "No saved vault members yet. Add one above or inline from any card or table cell."));
+    }
+    containerEl.append(listEl);
+
+    this.renderDiscoveredMembers(containerEl, savedKeys);
+    this.renderSyncDeckMembers(containerEl);
+  }
+
+  renderMembersNoteSetting(containerEl) {
+    const filePath = this.plugin.getMembersFilePath();
+    let draftPath = filePath;
+    const noteSetting = new Setting(containerEl)
+      .setName("Members note")
+      .setDesc("Markdown note in your vault that keeps team members, colors, and avatars synced across devices.")
+      .addText((text) => text
+        .setPlaceholder("Kanux Members.md")
+        .setValue(filePath)
+        .onChange((value) => { draftPath = value; }))
+      .addButton((button) => button
+        .setButtonText("Save path")
+        .onClick(async () => {
+          const changed = await this.plugin.setMembersFilePath(draftPath);
+          if (changed) {
+            this.redisplayPreservingScroll();
+            new Notice(`Members note path set to ${this.plugin.getMembersFilePath()}.`);
+          }
+        }))
+      .addButton((button) => button
+        .setButtonText("Sync now")
+        .onClick(async () => {
+          const changed = await this.plugin.syncMembersFromVault();
+          if (changed) await this.plugin.saveData(this.plugin.data);
+          this.plugin.refreshViews();
+          this.redisplayPreservingScroll();
+          new Notice(changed ? "Members synced from vault note." : "Members note is up to date.");
+        }));
+
+    const existingFile = this.app.vault.getAbstractFileByPath(filePath);
+    if (existingFile) {
+      noteSetting.addButton((button) => button
+        .setButtonText("Open note")
+        .onClick(() => {
+          if (this.app.workspace && typeof this.app.workspace.openLinkText === "function") {
+            this.app.workspace.openLinkText(existingFile.path, "");
+          }
+        }));
+    }
+  }
+
+  renderAddMemberForm(containerEl) {
+    const form = createElement("div", "ot-settings-member-form");
+    const nameInput = createElement("input", "ot-settings-member-input");
+    nameInput.type = "text";
+    nameInput.placeholder = "Name (e.g. Alice)";
+    nameInput.setAttribute("aria-label", "Member name");
+
+    const idInput = createElement("input", "ot-settings-member-input");
+    idInput.type = "text";
+    idInput.placeholder = "ID or email (optional)";
+    idInput.setAttribute("aria-label", "Member ID or email");
+
+    const colorInput = createElement("input", "ot-settings-member-color");
+    colorInput.type = "color";
+    colorInput.value = pickMemberColor("member");
+    colorInput.setAttribute("aria-label", "Member color");
+    let colorEdited = false;
+    colorInput.addEventListener("input", () => { colorEdited = true; });
+    nameInput.addEventListener("input", () => {
+      if (!colorEdited) colorInput.value = pickMemberColor(idInput.value || nameInput.value || "member");
+    });
+
+    let avatarPath = "";
+    const avatarBtn = createElement("button", "ot-settings-member-avatar-btn", "Avatar");
+    avatarBtn.type = "button";
+    avatarBtn.addEventListener("click", () => {
+      new VaultImageSuggestModal(this.app, (file) => {
+        avatarPath = file.path;
+        avatarBtn.textContent = file.name;
+        avatarBtn.title = file.path;
+      }).open();
+    });
+
+    const addBtn = createElement("button", "mod-cta", "Add member");
+    addBtn.type = "button";
+    const submit = async () => {
+      const name = textLine(nameInput.value);
+      const email = textLine(idInput.value) || name;
+      if (!name) {
+        new Notice("Enter a member name first.");
+        nameInput.focus();
+        return;
+      }
+      await this.plugin.upsertVaultMember({
+        name,
+        email,
+        color: cleanColor(colorInput.value) || pickMemberColor(email),
+        picture: avatarPath,
+      });
+      this.redisplayPreservingScroll();
+    };
+    addBtn.addEventListener("click", submit);
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); submit(); }
+    });
+
+    form.append(nameInput, idInput, colorInput, avatarBtn, addBtn);
+    containerEl.append(form);
+  }
+
+  buildSavedMemberRow(member) {
+    const row = createElement("div", "ot-settings-member-row");
+    const preview = buildMemberAvatarElement(this.plugin, member);
+
+    const nameInput = createElement("input", "ot-settings-member-input");
+    nameInput.type = "text";
+    nameInput.value = member.name || member.email;
+    nameInput.setAttribute("aria-label", `Name for ${member.name || member.email}`);
+
+    const idInput = createElement("input", "ot-settings-member-input");
+    idInput.type = "text";
+    idInput.value = member.email || "";
+    idInput.placeholder = "ID or email";
+    idInput.setAttribute("aria-label", `ID for ${member.name || member.email}`);
+
+    const colorInput = createElement("input", "ot-settings-member-color");
+    colorInput.type = "color";
+    colorInput.value = cleanColor(member.color) || pickMemberColor(member.email);
+    colorInput.setAttribute("aria-label", `Color for ${member.name || member.email}`);
+
+    const previousKey = memberKey(member);
+    const saveChanges = async (nextPicture = member.picture || "") => {
+      const nextName = textLine(nameInput.value) || member.name || member.email;
+      const nextEmail = textLine(idInput.value) || nextName;
+      await this.plugin.upsertVaultMember({
+        name: nextName,
+        email: nextEmail,
+        color: cleanColor(colorInput.value) || pickMemberColor(nextEmail),
+        picture: nextPicture,
+      }, previousKey);
+      this.redisplayPreservingScroll();
+    };
+
+    nameInput.addEventListener("change", () => saveChanges());
+    idInput.addEventListener("change", () => saveChanges());
+    colorInput.addEventListener("change", () => saveChanges());
+
+    const avatarBtn = createElement("button", "ot-settings-member-avatar-btn", member.picture ? "Change avatar" : "Avatar");
+    avatarBtn.type = "button";
+    if (member.picture) avatarBtn.title = member.picture;
+    avatarBtn.addEventListener("click", () => {
+      new VaultImageSuggestModal(this.app, (file) => saveChanges(file.path)).open();
+    });
+
+    const actions = createElement("div", "ot-settings-member-actions");
+    actions.append(colorInput, avatarBtn);
+
+    if (member.picture) {
+      const clearBtn = createElement("button", "ot-settings-member-clear-btn", "Clear");
+      clearBtn.type = "button";
+      clearBtn.addEventListener("click", () => saveChanges(""));
+      actions.append(clearBtn);
+    }
+
+    const removeBtn = createElement("button", "mod-warning", "Remove");
+    removeBtn.type = "button";
+    removeBtn.addEventListener("click", async () => {
+      await this.plugin.removeVaultMember(previousKey);
+      this.redisplayPreservingScroll();
+    });
+    actions.append(removeBtn);
+
+    row.append(preview, nameInput, idInput, actions);
+    return row;
+  }
+
+  renderDiscoveredMembers(containerEl, savedKeys) {
+    const discovered = this.plugin.collectCardMembers()
+      .filter((member) => !savedKeys.has(memberKey(member)));
+    if (!discovered.length) return;
+
+    const section = createElement("div", "ot-settings-members-discovered");
+    section.append(createElement("p", "ot-settings-members-hint", "Found in existing cards and checklists (save to customize color or avatar):"));
+    discovered.forEach((member) => {
+      const row = createElement("div", "ot-settings-member-row is-discovered");
+      const info = createElement("span", "ot-settings-member-discovered-name", member.name || member.email);
+      const saveBtn = createElement("button", "", "Save to list");
+      saveBtn.type = "button";
+      saveBtn.addEventListener("click", async () => {
+        await this.plugin.upsertVaultMember(member);
+        this.redisplayPreservingScroll();
+      });
+      row.append(buildMemberAvatarElement(this.plugin, member), info, saveBtn);
+      section.append(row);
+    });
+    containerEl.append(section);
+  }
+
+  renderSyncDeckMembers(containerEl) {
+    const syncDeckMembers = typeof this.plugin.getSyncDeckMembers === "function"
+      ? this.plugin.getSyncDeckMembers()
+      : [];
+    if (!syncDeckMembers.length) return;
+
+    const section = createElement("div", "ot-settings-members-syncdeck");
+    section.append(createElement("p", "ot-settings-members-hint", "From Sync Deck:"));
+    syncDeckMembers.forEach((member) => {
+      const row = createElement("div", "ot-settings-member-row is-syncdeck");
+      const name = createElement("span", "ot-settings-member-discovered-name", `${member.name || member.email} (${member.email})`);
+      const badge = createElement("span", "ot-settings-member-badge", "Sync Deck");
+      row.append(buildMemberAvatarElement(this.plugin, member), name, badge);
+      section.append(row);
+    });
+    containerEl.append(section);
   }
 
   renderAbout(containerEl) {

@@ -92,22 +92,14 @@ const syncDeckMethods = {
     return syncDeck;
   },
 
-  // Assignable users = the SyncDeck vault members. Empty when SyncDeck is not
-  // installed/signed in (the assignee UI then just shows nothing to assign).
-  getVaultMembers() {
+  // Raw members exposed by Sync Deck when installed and signed in.
+  getSyncDeckMembers() {
     const syncDeck = this.getSyncDeckPlugin();
     const members = syncDeck && syncDeck.data && syncDeck.data.members;
     if (!Array.isArray(members)) return [];
     return members
       .filter((m) => m && m.email)
       .map((m) => ({ email: m.email, name: m.name || m.email, color: m.color || "#8b5cf6", picture: m.picture || "" }));
-  },
-
-  // The avatar picture for an assignee, resolved live from SyncDeck (not stored
-  // in the card frontmatter, since the URL can change/expire).
-  getMemberPicture(email) {
-    const member = this.getVaultMembers().find((m) => m.email === email);
-    return (member && member.picture) || "";
   },
 
   // Presence responses carry both the cursor roster (users) and the card-lock

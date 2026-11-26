@@ -45,6 +45,9 @@ const MAX_VISIBLE_LABELS_LIMIT = 12;
 const DEFAULT_LABEL_LOOK = { displayMode: "expanded", placement: "top", maxVisible: 0 };
 const DEFAULT_CHECKLIST_TITLE = "Checklist";
 const DEFAULT_CHECKLIST_COLOR = LIST_COLORS[1];
+const DEFAULT_MEMBER_COLOR = "#8b5cf6";
+const DEFAULT_MEMBERS_FILE_PATH = "Kanux Members.md";
+const MEMBERS_NOTE_MARKER = "kanux-members: true";
 const DEFAULT_APPEARANCE = {
   preset: "obsidian",
   colorScheme: "theme",
@@ -103,6 +106,8 @@ const DEFAULT_DATA = {
   appearance: DEFAULT_APPEARANCE,
   appearancePresets: [],
   layoutMigrated: false,
+  membersFilePath: DEFAULT_MEMBERS_FILE_PATH,
+  members: [],
   boards: [],
   cards: {},
   labels: [],
@@ -522,12 +527,10 @@ function extractChecklistAssignee(line) {
   if (!metadata) return { content: line, assignee: null };
 
   const [email = "", name = "", color = ""] = String(metadata[1] || "").split("|");
-  const cleanEmail = email.trim();
+  const normalized = normalizeMember({ email, name, color });
   return {
     content: line.slice(0, metadata.index).trim(),
-    assignee: cleanEmail
-      ? { email: cleanEmail, name: name.trim(), color: color.trim() }
-      : null,
+    assignee: normalized ? { email: normalized.email, name: normalized.name, color: normalized.color } : null,
   };
 }
 
@@ -667,11 +670,12 @@ function cleanKanuxId(value) {
 }
 
 function normalizeChecklistAssignee(assignee) {
-  if (!assignee || !assignee.email) return null;
+  const normalized = normalizeMember(assignee);
+  if (!normalized) return null;
   return {
-    email: textLine(assignee.email),
-    name: textLine(assignee.name),
-    color: textLine(assignee.color),
+    email: normalized.email,
+    name: normalized.name,
+    color: normalized.color,
   };
 }
 
@@ -1163,27 +1167,212 @@ function labelsToFrontmatter(labels) {
 }
 
 /**
- * Card assignees serialize to "email|Name|#color, email2|Name2|#color2". Only the
- * email is a stable key; name/color are cached so avatars render even without a
- * live SyncDeck member list. The avatar picture is resolved live from SyncDeck.
+ * Strips reserved wire delimiters (|, comma, >) from a member id or name.
+ */
+function cleanMemberId(value) {
+  return textLine(value).replace(/[|,>]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Comparable lowercase key for a member object or id/name string.
+ */
+function memberKey(value) {
+  const raw = typeof value === "string"
+    ? value
+    : (value && (value.email || value.name));
+  return cleanMemberId(raw).toLowerCase();
+}
+
+/**
+ * Deterministic palette color derived from a member key so local members
+ * created on different devices receive the same default color.
+ */
+function pickMemberColor(seed) {
+  const key = memberKey(seed);
+  if (!key || !LIST_COLORS.length) return DEFAULT_MEMBER_COLOR;
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = ((hash * 31) + key.charCodeAt(i)) >>> 0;
+  }
+  return LIST_COLORS[hash % LIST_COLORS.length] || DEFAULT_MEMBER_COLOR;
+}
+
+/**
+ * Normalizes a member record (local name-only or Sync Deck email-backed).
+ */
+function normalizeMember(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const email = cleanMemberId(raw.email || raw.name);
+  const name = cleanMemberId(raw.name || raw.email);
+  if (!email && !name) return null;
+  const id = email || name;
+  return {
+    email: id,
+    name: name || id,
+    color: cleanColor(raw.color) || pickMemberColor(id),
+    picture: textLine(raw.picture),
+  };
+}
+
+function cleanMemberAvatarCell(raw) {
+  const value = textLine(raw);
+  if (!value) return "";
+  if (/^(https?:|data:)/i.test(value)) return value;
+  const wiki = value.match(/^!?\[\[([^\]]+)\]\]$/);
+  if (wiki) return imageTarget(wiki[1]);
+  const md = value.match(/^!?\[[^\]]*\]\(([^)]+)\)$/);
+  if (md) return imageTarget(md[1]);
+  return value;
+}
+
+function escapeMarkdownTableCell(value) {
+  return textLine(value).replace(/\|/g, "\\|");
+}
+
+function splitMarkdownTableRow(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed.startsWith("|")) return null;
+  const body = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  const cells = [];
+  let current = "";
+  let inWiki = false;
+  for (let i = 0; i < body.length; i += 1) {
+    if (body[i] === "\\" && body[i + 1] === "|") {
+      current += "|";
+      i += 1;
+    } else if (body[i] === "[" && body[i + 1] === "[") {
+      inWiki = true;
+      current += "[[";
+      i += 1;
+    } else if (inWiki && body[i] === "]" && body[i + 1] === "]") {
+      inWiki = false;
+      current += "]]";
+      i += 1;
+    } else if (!inWiki && body[i] === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += body[i];
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+/**
+ * Parses a vault Kanux Members Markdown note (table or bullet list) into
+ * deduplicated, normalized member records.
+ */
+function parseMembersNote(markdown) {
+  const seen = new Set();
+  const members = [];
+  const pushMember = (raw) => {
+    const member = normalizeMember(raw);
+    if (!member) return;
+    const key = memberKey(member);
+    if (seen.has(key)) return;
+    seen.add(key);
+    members.push(member);
+  };
+
+  for (const line of String(markdown || "").split(/\r?\n/)) {
+    const cells = splitMarkdownTableRow(line);
+    if (cells) {
+      const isSeparator = cells.every((cell) => /^:?-{2,}:?$/.test(cell) || cell === "");
+      const isHeader = cells[0] && cells[0].toLowerCase() === "name"
+        && (!cells[1] || cells[1].toLowerCase() === "id" || cells[1].toLowerCase() === "email");
+      if (!isSeparator && !isHeader) {
+        pushMember({
+          name: cells[0] || "",
+          email: cells[1] || cells[0] || "",
+          color: cells[2] || "",
+          picture: cleanMemberAvatarCell(cells[3] || ""),
+        });
+      }
+      continue;
+    }
+    const bullet = line.match(/^\s*-\s+(.+)$/);
+    if (bullet && !bullet[1].startsWith("[")) {
+      const [name = "", email = "", color = "", picture = ""] = bullet[1].split("|");
+      pushMember({ name, email: email || name, color, picture: cleanMemberAvatarCell(picture) });
+    }
+  }
+  return members;
+}
+
+/**
+ * Serializes vault members into a deterministic, merge-friendly Markdown note.
+ */
+function serializeMembersNote(members) {
+  const seen = new Set();
+  const clean = [];
+  (Array.isArray(members) ? members : []).forEach((item) => {
+    const member = normalizeMember(item);
+    if (!member) return;
+    const key = memberKey(member);
+    if (seen.has(key)) return;
+    seen.add(key);
+    clean.push(member);
+  });
+  clean.sort((a, b) => memberKey(a).localeCompare(memberKey(b)));
+
+  const lines = [
+    "---",
+    MEMBERS_NOTE_MARKER,
+    "---",
+    "",
+    "# Kanux Members",
+    "",
+    "Managed by Kanux. Edit in Settings > Kanux > Members or directly in this table.",
+    "",
+    "| Name | ID | Color | Avatar |",
+    "| --- | --- | --- | --- |",
+  ];
+  clean.forEach((member) => {
+    lines.push(
+      `| ${escapeMarkdownTableCell(member.name)} | ${escapeMarkdownTableCell(member.email)} | ${escapeMarkdownTableCell(member.color)} | ${escapeMarkdownTableCell(member.picture)} |`
+    );
+  });
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Card assignees serialize to "id|Name|#color, id2|Name2|#color2". Both Sync Deck
+ * emails and local member names/ids work identically; name/color are cached so
+ * avatars render across devices even before loading the members note.
  */
 function parseAssignees(raw) {
+  const seen = new Set();
   return String(raw || "")
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean)
     .map((part) => {
-      const [email, name, color] = part.split("|").map((item) => (item || "").trim());
-      if (!email) return null;
-      return { email, name: name || email, color: color || "#8b5cf6" };
+      const [email = "", name = "", color = ""] = part.split("|").map((item) => (item || "").trim());
+      const member = normalizeMember({ email, name, color });
+      return member ? { email: member.email, name: member.name, color: member.color } : null;
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((member) => {
+      const key = memberKey(member);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function assigneesToFrontmatter(assignees) {
+  const seen = new Set();
   return (assignees || [])
-    .filter((a) => a && a.email)
-    .map((a) => `${textLine(a.email)}|${textLine(a.name || a.email).replace(/[|,]/g, " ")}|${textLine(a.color || "#8b5cf6")}`)
+    .map((a) => normalizeMember(a))
+    .filter(Boolean)
+    .filter((member) => {
+      const key = memberKey(member);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((a) => `${a.email}|${a.name}|${a.color}`)
     .join(", ");
 }
 
@@ -1319,6 +1508,9 @@ module.exports = {
   DEFAULT_LABEL_COLOR,
   LABEL_COLORS,
   LIST_COLORS,
+  DEFAULT_MEMBER_COLOR,
+  DEFAULT_MEMBERS_FILE_PATH,
+  MEMBERS_NOTE_MARKER,
   DEFAULT_APPEARANCE,
   DEFAULT_DATA,
   DEPENDENCY_BLOCK_MODES,
@@ -1401,6 +1593,12 @@ module.exports = {
   serializeDependencies,
   parseLabels,
   labelsToFrontmatter,
+  cleanMemberId,
+  memberKey,
+  pickMemberColor,
+  normalizeMember,
+  parseMembersNote,
+  serializeMembersNote,
   parseAssignees,
   assigneesToFrontmatter,
   initials,
@@ -5812,16 +6010,16 @@ async function exportCardToPdf(modal) {
     const labelsHtml = (modal.localLabels || [])
       .map((label) => `<span class="pill" style="background:${esc(label.color || DEFAULT_LABEL_COLOR)}">${esc(label.name)}</span>`)
       .join("");
-    const collaborationEnabled = modal.plugin.isSyncDeckEnabled();
-    const membersText = collaborationEnabled
-      ? (modal.localAssignees || []).map((a) => a.name || a.email).filter(Boolean).join(", ")
-      : "";
+    const membersText = (modal.localAssignees || [])
+      .map((a) => a.name || a.email)
+      .filter(Boolean)
+      .join(", ");
     const datesText = dateRangeLabel(card.startDate, card.dueDate) || "";
     const checklistHtml = (modal.localChecklists || [])
       .map((group) => {
         const stats = checklistStats(group.items);
         const items = (group.items || [])
-          .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${collaborationEnabled && item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
+          .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
           .join("");
         const color = cleanColor(group.color) || LIST_COLORS[1];
         const description = String(group.description || "").trim();
@@ -6636,39 +6834,34 @@ function buildChecklistsField(modal) {
           modal.saveNow().catch(console.error);
         });
 
-        let assigneeBtn = null;
-        if (modal.plugin.isSyncDeckEnabled()) {
-          assigneeBtn = createElement("button", "ot-checklist-assignee");
-          assigneeBtn.type = "button";
-          const paintAssignee = () => {
-            assigneeBtn.replaceChildren();
-            const a = item.assignee;
-            if (a && a.email) {
-              assigneeBtn.classList.add("is-assigned");
-              assigneeBtn.title = a.name || a.email;
-              assigneeBtn.append(modal.memberAvatar(a));
-            } else {
-              assigneeBtn.classList.remove("is-assigned");
-              assigneeBtn.title = "Assign member";
-              assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
-            }
-          };
-          paintAssignee();
-          assigneeBtn.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            modal.showChecklistMemberMenu(event, item, paintAssignee);
-          });
-        }
+        const assigneeBtn = createElement("button", "ot-checklist-assignee");
+        assigneeBtn.type = "button";
+        const paintAssignee = () => {
+          assigneeBtn.replaceChildren();
+          const a = item.assignee;
+          if (a && (a.email || a.name)) {
+            const resolved = modal.plugin && typeof modal.plugin.resolveMember === "function"
+              ? (modal.plugin.resolveMember(a) || a)
+              : a;
+            assigneeBtn.classList.add("is-assigned");
+            assigneeBtn.title = resolved.name || resolved.email;
+            assigneeBtn.append(modal.memberAvatar(resolved));
+          } else {
+            assigneeBtn.classList.remove("is-assigned");
+            assigneeBtn.title = "Assign member";
+            assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
+          }
+        };
+        paintAssignee();
+        assigneeBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          modal.showChecklistMemberMenu(event, item, paintAssignee);
+        });
 
         if (createNoteButton) actions.append(createNoteButton);
         actions.append(remove);
-        if (assigneeBtn) {
-          row.append(dragHandle, assigneeBtn, checkbox, input, actions);
-        } else {
-          row.style.setProperty("grid-template-columns", "18px 20px minmax(0, 1fr) auto", "important");
-          row.append(dragHandle, checkbox, input, actions);
-        }
+        row.append(dragHandle, assigneeBtn, checkbox, input, actions);
         itemWrap.append(row);
         if (notePanel) {
           itemWrap.append(notePanel);
@@ -6772,8 +6965,364 @@ module.exports = {
 };
 
   },
+  "src/modals/member-picker-popover.js": function(module, exports, __require) {
+const { Notice } = require("obsidian");
+const {
+  DEFAULT_MEMBER_COLOR,
+  cleanMemberId,
+  createElement,
+  initials,
+  memberKey,
+  pickMemberColor,
+  renderIcon,
+} = __require("src/helpers.js");
+
+let activeMemberPopover = null;
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase()
+    .trim();
+}
+
+/**
+ * Builds the circular avatar chip for a member, resolving vault or Sync Deck
+ * pictures live and falling back to deterministic colored initials.
+ */
+function buildMemberAvatarElement(plugin, member) {
+  const resolved = plugin && typeof plugin.resolveMember === "function"
+    ? (plugin.resolveMember(member) || member || {})
+    : (member || {});
+  const displayName = resolved.name || resolved.email || "";
+  const avatar = createElement("span", "ot-card-avatar");
+  avatar.style.setProperty("--ot-avatar-color", resolved.color || DEFAULT_MEMBER_COLOR);
+  avatar.title = displayName;
+
+  const picture = plugin && typeof plugin.getMemberPicture === "function"
+    ? plugin.getMemberPicture(resolved)
+    : "";
+  if (picture) {
+    const img = createElement("img", "");
+    img.src = picture;
+    img.alt = "";
+    avatar.append(img);
+  } else {
+    avatar.textContent = initials(displayName);
+    avatar.classList.add("is-initials");
+  }
+  return avatar;
+}
+
+function openKanuxMembersSettings(app, plugin) {
+  const setting = app && app.setting;
+  const pluginId = (plugin && plugin.manifest && plugin.manifest.id) || "kanux";
+  if (setting && typeof setting.open === "function") {
+    setting.open();
+    if (typeof setting.openTabById === "function") setting.openTabById(pluginId);
+    return;
+  }
+  new Notice("Open Settings > Kanux > Members to manage vault members.");
+}
+
+function closeMemberPickerPopover() {
+  if (!activeMemberPopover) return;
+  if (typeof activeMemberPopover._cleanup === "function") activeMemberPopover._cleanup();
+  if (typeof activeMemberPopover.remove === "function") activeMemberPopover.remove();
+  if (activeMemberPopover._anchor && typeof activeMemberPopover._anchor.setAttribute === "function") {
+    activeMemberPopover._anchor.setAttribute("aria-expanded", "false");
+  }
+  activeMemberPopover = null;
+}
+
+function positionPopover(pop, anchor) {
+  if (!anchor || typeof anchor.getBoundingClientRect !== "function") return;
+  const rect = anchor.getBoundingClientRect();
+  const minWidth = Math.max(240, Math.round(rect.width || 0));
+  pop.style.top = `${Math.round((rect.bottom || 0) + 4)}px`;
+  pop.style.left = `${Math.round(rect.left || 0)}px`;
+  pop.style.minWidth = `${minWidth}px`;
+
+  if (typeof pop.getBoundingClientRect !== "function") return;
+  const popRect = pop.getBoundingClientRect();
+  const vw = typeof window !== "undefined" && window.innerWidth ? window.innerWidth : 1024;
+  const vh = typeof window !== "undefined" && window.innerHeight ? window.innerHeight : 768;
+  const maxLeft = Math.max(8, vw - (popRect.width || minWidth) - 8);
+  pop.style.left = `${Math.min(Math.max(8, Math.round(rect.left || 0)), maxLeft)}px`;
+  if ((popRect.bottom || 0) > vh - 8) {
+    const maxTop = Math.max(8, vh - (popRect.height || 0) - 8);
+    pop.style.top = `${Math.max(8, Math.min(Math.round((rect.top || 0) - (popRect.height || 0) - 4), maxTop))}px`;
+  }
+}
+
+function buildMemberRow({ plugin, member, isSelected, onActivate }) {
+  const row = createElement("button", "ot-popover-row ot-member-picker-row");
+  row.type = "button";
+  const avatar = buildMemberAvatarElement(plugin, member);
+  const textWrap = createElement("span", "ot-member-picker-text");
+  textWrap.append(createElement("span", "ot-popover-label", member.name || member.email));
+  if (member.email && memberKey(member.email) !== memberKey(member.name)) {
+    textWrap.append(createElement("span", "ot-member-picker-sub", member.email));
+  }
+  row.append(avatar, textWrap);
+
+  if (isSelected) {
+    const check = createElement("span", "ot-popover-check");
+    renderIcon(check, "check");
+    row.append(check);
+  }
+  row.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onActivate();
+  });
+  return row;
+}
+
+function buildUnassignedRow({ isSelected, onActivate }) {
+  const row = createElement("button", "ot-popover-row ot-member-picker-row");
+  row.type = "button";
+  const glyph = createElement("span", "ot-member-picker-unassign-icon");
+  renderIcon(glyph, "user-x");
+  row.append(glyph, createElement("span", "ot-popover-label", "Unassigned"));
+  if (isSelected) {
+    const check = createElement("span", "ot-popover-check");
+    renderIcon(check, "check");
+    row.append(check);
+  }
+  row.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onActivate();
+  });
+  return row;
+}
+
+function buildCreateMemberRow(name, onActivate) {
+  const row = createElement("button", "ot-popover-row ot-member-picker-create");
+  row.type = "button";
+  const preview = createElement("span", "ot-card-avatar is-initials");
+  preview.style.setProperty("--ot-avatar-color", pickMemberColor(name));
+  preview.textContent = initials(name);
+  const label = createElement("span", "ot-popover-label", `Add "${name}"`);
+  const plus = createElement("span", "ot-member-picker-create-icon");
+  renderIcon(plus, "plus");
+  row.append(preview, label, plus);
+  row.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onActivate();
+  });
+  return row;
+}
+
+function hasExactMemberMatch(members, query) {
+  const target = memberKey(query);
+  if (!target) return false;
+  return members.some((member) => memberKey(member) === target || memberKey(member.name) === target);
+}
+
+/**
+ * Shared anchored popover for assigning existing members or creating local
+ * members inline across cards, checklists, templates, and the table view.
+ */
+function openMemberPickerPopover({
+  anchor,
+  plugin,
+  selected = [],
+  getSelected = null,
+  multiSelect = true,
+  allowUnassign = false,
+  onToggle,
+  onCreateMember,
+  onManageMembers = null,
+}) {
+  closeMemberPickerPopover();
+
+  const pop = createElement("div", "ot-popover ot-member-picker-popover");
+  const header = createElement("div", "ot-member-picker-header");
+  const search = createElement("input", "ot-member-picker-search");
+  search.type = "search";
+  search.placeholder = "Search or add member...";
+  search.setAttribute("aria-label", "Search or add member");
+  header.append(search);
+
+  const optionsEl = createElement("div", "ot-member-picker-options");
+  pop.append(header, optionsEl);
+
+  if (typeof onManageMembers === "function") {
+    const footer = createElement("div", "ot-member-picker-footer");
+    const manageBtn = createElement("button", "ot-member-picker-manage");
+    manageBtn.type = "button";
+    const iconEl = createElement("span", "ot-member-picker-manage-icon");
+    renderIcon(iconEl, "users");
+    manageBtn.append(iconEl, createElement("span", "", "Manage members"));
+    manageBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeMemberPickerPopover();
+      onManageMembers();
+    });
+    footer.append(manageBtn);
+    pop.append(footer);
+  }
+
+  let activeIndex = -1;
+  let interactiveRows = [];
+  let creating = false;
+
+  const currentSelectedKeys = () => {
+    const list = typeof getSelected === "function" ? getSelected() : selected;
+    return new Set((Array.isArray(list) ? list : []).map((item) => memberKey(item)).filter(Boolean));
+  };
+
+  const setActiveIndex = (nextIndex) => {
+    if (!interactiveRows.length) {
+      activeIndex = -1;
+      return;
+    }
+    const clamped = ((nextIndex % interactiveRows.length) + interactiveRows.length) % interactiveRows.length;
+    activeIndex = clamped;
+    interactiveRows.forEach((row, index) => row.classList.toggle("is-active", index === activeIndex));
+  };
+
+  const handleCreate = async (rawName) => {
+    const cleanName = cleanMemberId(rawName);
+    if (!cleanName || creating || typeof onCreateMember !== "function") return;
+    creating = true;
+    try {
+      await onCreateMember(cleanName);
+      search.value = "";
+      if (!multiSelect) {
+        closeMemberPickerPopover();
+      } else {
+        renderOptions();
+        search.focus();
+      }
+    } finally {
+      creating = false;
+    }
+  };
+
+  const handleToggle = async (memberOrNull) => {
+    if (typeof onToggle !== "function") return;
+    await onToggle(memberOrNull);
+    if (!multiSelect) {
+      closeMemberPickerPopover();
+    } else {
+      renderOptions();
+    }
+  };
+
+  const renderOptions = () => {
+    optionsEl.replaceChildren();
+    interactiveRows = [];
+    activeIndex = -1;
+
+    const allMembers = plugin && typeof plugin.getVaultMembers === "function"
+      ? plugin.getVaultMembers()
+      : [];
+    const selectedKeys = currentSelectedKeys();
+    const rawQuery = cleanMemberId(search.value);
+    const query = normalizeSearchText(rawQuery);
+    const matches = allMembers.filter((member) => {
+      if (!query) return true;
+      const haystack = normalizeSearchText(`${member.name || ""} ${member.email || ""}`);
+      return haystack.includes(query);
+    });
+
+    if (!multiSelect && allowUnassign && !query) {
+      const unassignRow = buildUnassignedRow({
+        isSelected: selectedKeys.size === 0,
+        onActivate: () => handleToggle(null),
+      });
+      optionsEl.append(unassignRow);
+      interactiveRows.push(unassignRow);
+    }
+
+    matches.forEach((member) => {
+      const row = buildMemberRow({
+        plugin,
+        member,
+        isSelected: selectedKeys.has(memberKey(member)),
+        onActivate: () => handleToggle(member),
+      });
+      optionsEl.append(row);
+      interactiveRows.push(row);
+    });
+
+    if (rawQuery && typeof onCreateMember === "function" && !hasExactMemberMatch(allMembers, rawQuery)) {
+      const createRow = buildCreateMemberRow(rawQuery, () => handleCreate(rawQuery));
+      optionsEl.append(createRow);
+      interactiveRows.push(createRow);
+    }
+
+    if (!interactiveRows.length) {
+      optionsEl.append(createElement("div", "ot-popover-empty", "Type a name above to add a member."));
+    }
+    positionPopover(pop, anchor);
+  };
+
+  search.addEventListener("input", renderOptions);
+  search.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex(activeIndex + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex(activeIndex < 0 ? interactiveRows.length - 1 : activeIndex - 1);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      if (activeIndex >= 0 && interactiveRows[activeIndex]) {
+        interactiveRows[activeIndex].click();
+      } else if (interactiveRows.length === 1) {
+        interactiveRows[0].click();
+      } else if (cleanMemberId(search.value) && typeof onCreateMember === "function") {
+        handleCreate(search.value);
+      }
+    }
+  });
+
+  if (document.body) document.body.append(pop);
+  if (anchor && typeof anchor.setAttribute === "function") anchor.setAttribute("aria-expanded", "true");
+  pop._anchor = anchor;
+
+  const onDown = (event) => {
+    if (typeof pop.contains === "function" && pop.contains(event.target)) return;
+    if (anchor && typeof anchor.contains === "function" && anchor.contains(event.target)) return;
+    closeMemberPickerPopover();
+  };
+  const onKey = (event) => {
+    if (event.key === "Escape") closeMemberPickerPopover();
+  };
+  if (typeof document.addEventListener === "function") {
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+  }
+  pop._cleanup = () => {
+    if (typeof document.removeEventListener === "function") {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    }
+  };
+
+  activeMemberPopover = pop;
+  renderOptions();
+  if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
+    window.setTimeout(() => {
+      if (typeof search.focus === "function") search.focus();
+    }, 0);
+  }
+  return pop;
+}
+
+module.exports = {
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+};
+
+  },
   "src/modals/card-modal.js": function(module, exports, __require) {
-const { Menu, Modal, Notice } = require("obsidian");
+const { Modal, Notice } = require("obsidian");
 const {
   LIST_COLORS,
   addButtonIcon,
@@ -6784,11 +7333,11 @@ const {
   createElement,
   iconButton,
   labelKey,
+  memberKey,
   normalizeChecklists,
   normalizeDependencies,
   renderIcon,
   textLine,
-  initials,
   uid,
 } = __require("src/helpers.js");
 const { splitDetailSegments } = __require("src/modals/details-markdown.js");
@@ -6799,6 +7348,12 @@ const { buildDependenciesField } = __require("src/modals/card-dependencies-field
 const { buildDetailsField } = __require("src/modals/card-details-field.js");
 const { exportCardToPdf } = __require("src/modals/card-pdf-export.js");
 const { buildChecklistsField } = __require("src/modals/card-checklist-field.js");
+const {
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+} = __require("src/modals/member-picker-popover.js");
 
 // Controls that only reveal content, so a read-only viewer keeps them: they
 // expand a panel or open a preview without ever writing to the card.
@@ -6984,19 +7539,7 @@ class CardModal extends Modal {
 
   // Avatar chip for a member: profile picture when available, else initials.
   memberAvatar(member) {
-    const avatar = createElement("span", "ot-card-avatar");
-    avatar.style.setProperty("--ot-avatar-color", member.color || "#8b5cf6");
-    const picture = this.plugin.getMemberPicture(member.email);
-    if (picture) {
-      const img = createElement("img", "");
-      img.src = picture;
-      img.alt = "";
-      avatar.append(img);
-    } else {
-      avatar.textContent = initials(member.name || member.email);
-      avatar.classList.add("is-initials");
-    }
-    return avatar;
+    return buildMemberAvatarElement(this.plugin, member);
   }
 
   renderAssigneesField() {
@@ -7007,15 +7550,19 @@ class CardModal extends Modal {
     const rebuild = () => {
       row.replaceChildren();
       (this.localAssignees || []).forEach((assignee) => {
+        const resolved = this.plugin && typeof this.plugin.resolveMember === "function"
+          ? (this.plugin.resolveMember(assignee) || assignee)
+          : assignee;
         const chip = createElement("span", "ot-assignee-chip");
-        const avatar = this.memberAvatar(assignee);
+        const avatar = this.memberAvatar(resolved);
+        const key = memberKey(resolved);
         const remove = iconButton("x", "Remove member", () => {
-          this.localAssignees = (this.localAssignees || []).filter((a) => a.email !== assignee.email);
+          this.localAssignees = (this.localAssignees || []).filter((a) => memberKey(a) !== key);
           rebuild();
           this.queueSave();
         });
         remove.classList.add("ot-assignee-remove");
-        chip.append(avatar, createElement("span", "ot-assignee-name", assignee.name || assignee.email), remove);
+        chip.append(avatar, createElement("span", "ot-assignee-name", resolved.name || resolved.email), remove);
         row.append(chip);
       });
       const addButton = iconButton("plus", "Assign a member", (event) => this.showMemberMenu(event, rebuild));
@@ -7029,57 +7576,64 @@ class CardModal extends Modal {
   }
 
   showMemberMenu(event, rebuild) {
-    const members = this.plugin.getVaultMembers();
-    const menu = new Menu();
-    if (!members.length) {
-      menu.addItem((item) => item.setTitle("No members — sign in to Sync Deck").setDisabled(true));
-    } else {
-      members.forEach((member) => {
-        const assigned = (this.localAssignees || []).some((a) => a.email === member.email);
-        menu.addItem((item) => {
-          item.setTitle(member.name || member.email).setChecked(assigned).onClick(() => {
-            if (assigned) {
-              this.localAssignees = (this.localAssignees || []).filter((a) => a.email !== member.email);
-            } else {
-              this.localAssignees = [...(this.localAssignees || []), { email: member.email, name: member.name, color: member.color }];
-            }
-            rebuild();
-            this.queueSave();
-          });
-        });
-      });
-    }
-    menu.showAtMouseEvent(event);
+    const toggleMember = (member) => {
+      const key = memberKey(member);
+      const assigned = (this.localAssignees || []).some((a) => memberKey(a) === key);
+      this.localAssignees = assigned
+        ? (this.localAssignees || []).filter((a) => memberKey(a) !== key)
+        : [...(this.localAssignees || []), { email: member.email, name: member.name, color: member.color }];
+      rebuild();
+      this.queueSave();
+    };
+
+    openMemberPickerPopover({
+      anchor: event.currentTarget,
+      plugin: this.plugin,
+      getSelected: () => this.localAssignees || [],
+      multiSelect: true,
+      onToggle: toggleMember,
+      onCreateMember: async (name) => {
+        const created = await this.plugin.ensureLocalMember({ name });
+        if (!created) return;
+        const key = memberKey(created);
+        if (!(this.localAssignees || []).some((a) => memberKey(a) === key)) {
+          this.localAssignees = [...(this.localAssignees || []), { email: created.email, name: created.name, color: created.color }];
+          rebuild();
+          this.queueSave();
+        }
+      },
+      onManageMembers: () => {
+        this.close();
+        openKanuxMembersSettings(this.app, this.plugin);
+      },
+    });
   }
 
   // Single-member picker for one checklist item (leftmost circle).
   showChecklistMemberMenu(event, item, rerender) {
-    const members = this.plugin.getVaultMembers();
-    const menu = new Menu();
-    menu.addItem((mi) => mi
-      .setTitle("Unassigned")
-      .setChecked(!(item.assignee && item.assignee.email))
-      .onClick(() => {
-        item.assignee = null;
+    openMemberPickerPopover({
+      anchor: event.currentTarget,
+      plugin: this.plugin,
+      getSelected: () => (item.assignee && (item.assignee.email || item.assignee.name) ? [item.assignee] : []),
+      multiSelect: false,
+      allowUnassign: true,
+      onToggle: (member) => {
+        item.assignee = member ? { email: member.email, name: member.name, color: member.color } : null;
         rerender();
         this.saveNow().catch(console.error);
-      }));
-    if (!members.length) {
-      menu.addItem((mi) => mi.setTitle("No members — sign in to Sync Deck").setDisabled(true));
-    } else {
-      members.forEach((member) => {
-        const current = !!(item.assignee && item.assignee.email === member.email);
-        menu.addItem((mi) => mi
-          .setTitle(member.name || member.email)
-          .setChecked(current)
-          .onClick(() => {
-            item.assignee = { email: member.email, name: member.name, color: member.color };
-            rerender();
-            this.saveNow().catch(console.error);
-          }));
-      });
-    }
-    menu.showAtMouseEvent(event);
+      },
+      onCreateMember: async (name) => {
+        const created = await this.plugin.ensureLocalMember({ name });
+        if (!created) return;
+        item.assignee = { email: created.email, name: created.name, color: created.color };
+        rerender();
+        this.saveNow().catch(console.error);
+      },
+      onManageMembers: () => {
+        this.close();
+        openKanuxMembersSettings(this.app, this.plugin);
+      },
+    });
   }
 
   /**
@@ -7106,8 +7660,6 @@ class CardModal extends Modal {
     this.contentEl.replaceChildren();
     this.modalEl.addClass("ot-card-modal-shell");
     this.contentEl.addClass("ot-card-modal");
-    const collaborationEnabled = this.plugin.isSyncDeckEnabled();
-    this.contentEl.classList.toggle("is-sync-disabled", !collaborationEnabled);
 
     const title = createElement("input", "ot-title-input");
     title.type = "text";
@@ -7132,7 +7684,7 @@ class CardModal extends Modal {
     header.append(title, location);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
-    const assigneesField = this.notesOnly || !collaborationEnabled ? null : this.renderAssigneesField();
+    const assigneesField = this.notesOnly ? null : this.renderAssigneesField();
     const dependenciesField = this.renderDependenciesField();
     const detailsField = this.renderDetailsField();
     // Read BEFORE building the checklist field: rendering it consumes this id
@@ -7239,6 +7791,7 @@ class CardModal extends Modal {
   }
 
   onClose() {
+    closeMemberPickerPopover();
     this.stopLockHeartbeat();
     this.destroyEmbeddedEditors();
     this.closeSideSheet();
@@ -7584,13 +8137,19 @@ const {
   createElement,
   formatCardCode,
   iconButton,
-  initials,
+  memberKey,
   textButton,
   textLine,
 } = __require("src/helpers.js");
 const { BoardAppearanceModal } = __require("src/modals/board-appearance-modal.js");
 const { LabelPickerModal } = __require("src/modals/label-picker-modal.js");
 const { ListColorModal } = __require("src/modals/list-color-modal.js");
+const {
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+} = __require("src/modals/member-picker-popover.js");
 const { confirmAction } = __require("src/modals/prompt-modals.js");
 
 const BLANK_HINT = "Write [ ] wherever the card should be filled in — “As a [ ] I want [ ] so that [ ]”. The editor opens on the first one.";
@@ -7628,9 +8187,7 @@ class CardTemplateModal extends Modal {
     main.append(this.buildDetailsField(), this.buildChecklistsField());
 
     const sidebar = createElement("aside", "ot-card-modal-sidebar");
-    sidebar.append(this.buildLabelsField());
-    if (this.plugin.isSyncDeckEnabled()) sidebar.append(this.buildMembersField());
-    sidebar.append(this.buildNumberingField());
+    sidebar.append(this.buildLabelsField(), this.buildMembersField(), this.buildNumberingField());
 
     const body = createElement("div", "ot-card-modal-body");
     body.append(main, sidebar);
@@ -7651,6 +8208,7 @@ class CardTemplateModal extends Modal {
   }
 
   onClose() {
+    closeMemberPickerPopover();
     this.contentEl.replaceChildren();
   }
 
@@ -7920,40 +8478,37 @@ class CardTemplateModal extends Modal {
   }
 
   memberAvatar(member) {
-    const avatar = createElement("span", "ot-card-avatar");
-    avatar.style.setProperty("--ot-avatar-color", member.color || "#8b5cf6");
-    const picture = this.plugin.getMemberPicture(member.email);
-    if (picture) {
-      const image = createElement("img", "");
-      image.src = picture;
-      image.alt = "";
-      avatar.append(image);
-      return avatar;
-    }
-    avatar.textContent = initials(member.name || member.email);
-    avatar.classList.add("is-initials");
-    return avatar;
+    return buildMemberAvatarElement(this.plugin, member);
   }
 
   showMemberMenu(event, paint) {
-    const members = this.plugin.getVaultMembers();
-    const menu = new Menu();
-    if (!members.length) {
-      menu.addItem((item) => item.setTitle("No members — sign in to Sync Deck").setDisabled(true));
-    }
-    members.forEach((member) => {
-      const chosen = this.template.assignees.some((assignee) => assignee.email === member.email);
-      menu.addItem((item) => item
-        .setTitle(member.name || member.email)
-        .setChecked(chosen)
-        .onClick(() => {
-          this.template.assignees = chosen
-            ? this.template.assignees.filter((assignee) => assignee.email !== member.email)
-            : [...this.template.assignees, { email: member.email, name: member.name, color: member.color }];
+    openMemberPickerPopover({
+      anchor: event.currentTarget,
+      plugin: this.plugin,
+      getSelected: () => this.template.assignees || [],
+      multiSelect: true,
+      onToggle: (member) => {
+        const key = memberKey(member);
+        const chosen = this.template.assignees.some((assignee) => memberKey(assignee) === key);
+        this.template.assignees = chosen
+          ? this.template.assignees.filter((assignee) => memberKey(assignee) !== key)
+          : [...this.template.assignees, { email: member.email, name: member.name, color: member.color }];
+        paint();
+      },
+      onCreateMember: async (name) => {
+        const created = await this.plugin.ensureLocalMember({ name });
+        if (!created) return;
+        const key = memberKey(created);
+        if (!this.template.assignees.some((assignee) => memberKey(assignee) === key)) {
+          this.template.assignees = [...this.template.assignees, { email: created.email, name: created.name, color: created.color }];
           paint();
-        }));
+        }
+      },
+      onManageMembers: () => {
+        this.close();
+        openKanuxMembersSettings(this.app, this.plugin);
+      },
     });
-    menu.showAtMouseEvent(event);
   }
 
   buildDetailsField() {
@@ -8284,6 +8839,12 @@ const { CardModal } = __require("src/modals/card-modal.js");
 const { CardPickerModal } = __require("src/modals/card-picker-modal.js");
 const { CardTemplateModal } = __require("src/modals/card-template-modal.js");
 const { CardTemplateLibraryModal } = __require("src/modals/card-template-library-modal.js");
+const {
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+} = __require("src/modals/member-picker-popover.js");
 const { detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch, splitDetailSegments } = __require("src/modals/details-markdown.js");
 
 module.exports = {
@@ -8298,6 +8859,10 @@ module.exports = {
   CardPickerModal,
   CardTemplateModal,
   CardTemplateLibraryModal,
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
   alertAction,
   confirmAction,
   detailsMdToHtml,
@@ -8553,12 +9118,20 @@ const {
   firstPlaceholderIndex,
   hasDragType,
   iconButton,
-  initials,
   renderIcon,
   textButton,
   textLine,
 } = __require("src/helpers.js");
-const { CardDatesModal, CardModal, CardTemplateLibraryModal, CardTemplateModal, ListColorModal, TextPromptModal, confirmAction } = __require("src/modals.js");
+const {
+  CardDatesModal,
+  CardModal,
+  CardTemplateLibraryModal,
+  CardTemplateModal,
+  ListColorModal,
+  TextPromptModal,
+  buildMemberAvatarElement,
+  confirmAction,
+} = __require("src/modals.js");
 
 const listCardMethods = {
   /**
@@ -8814,8 +9387,7 @@ const listCardMethods = {
 
   renderCardAssignees(card) {
     const wrap = createElement("div", "ot-card-assignees");
-    if (!this.plugin.isSyncDeckEnabled()) return wrap;
-    const assignees = (card.assignees || []).filter((a) => a && a.email);
+    const assignees = (card.assignees || []).filter((a) => a && (a.email || a.name));
     const max = 3;
     assignees.slice(0, max).forEach((assignee) => wrap.append(this.buildAvatar(assignee)));
     if (assignees.length > max) {
@@ -8826,20 +9398,7 @@ const listCardMethods = {
   },
 
   buildAvatar(assignee) {
-    const el = createElement("span", "ot-card-avatar");
-    el.style.setProperty("--ot-avatar-color", assignee.color || "#8b5cf6");
-    el.title = assignee.name || assignee.email;
-    const picture = this.plugin.getMemberPicture(assignee.email);
-    if (picture) {
-      const img = createElement("img", "");
-      img.src = picture;
-      img.alt = "";
-      el.append(img);
-    } else {
-      el.textContent = initials(assignee.name || assignee.email);
-      el.classList.add("is-initials");
-    }
-    return el;
+    return buildMemberAvatarElement(this.plugin, assignee);
   },
 
   buildLockBadge(holder) {
@@ -9433,6 +9992,7 @@ const { setIcon } = require("obsidian");
 // Table view filtering: per-board filter state, the controls row, the
 // search/sort predicates, and the shared anchored popover used by the pickers.
 const { addButtonIcon, checklistItems, createElement, labelKey } = __require("src/helpers.js");
+const { closeMemberPickerPopover } = __require("src/modals.js");
 
 const tableFilterMethods = {
   getTableState(board) {
@@ -9676,6 +10236,7 @@ const tableFilterMethods = {
   // fills the rows. It survives a board re-render (it lives on document.body), so
   // the assignee picker can stay open across multi-select toggles.
   openTablePopover(anchor, build) {
+    closeMemberPickerPopover();
     this.closeTablePopover();
     const pop = createElement("div", "ot-popover");
     const rect = anchor.getBoundingClientRect();
@@ -9749,10 +10310,17 @@ const {
   createElement,
   dateRangeLabel,
   hasDragType,
+  memberKey,
   textButton,
   textLine,
 } = __require("src/helpers.js");
-const { CardDatesModal, CardModal, LabelPickerModal } = __require("src/modals.js");
+const {
+  CardDatesModal,
+  CardModal,
+  LabelPickerModal,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+} = __require("src/modals.js");
 
 // Drag payload type for reordering table columns (kept distinct from card/list drags).
 const TABLE_COL_DRAG_TYPE = "application/x-kanux-column";
@@ -9762,13 +10330,12 @@ const tableViewMethods = {
   // is always the fixed first field. Definitions live here; per-board layout
   // (order / hidden / widths) is a per-device preference in data.json.
   tableColumnDefs() {
-    const defs = [
+    return [
       { key: "status", label: "List" },
       { key: "assignee", label: "Assignee" },
       { key: "dates", label: "Dates" },
       { key: "labels", label: "Labels" },
     ];
-    return this.plugin.isSyncDeckEnabled() ? defs : defs.filter((def) => def.key !== "assignee");
   },
 
   defaultColWidth(key) {
@@ -10217,31 +10784,34 @@ const tableViewMethods = {
   },
 
   showAssigneeMenu(event, card) {
-    const members = this.plugin.getVaultMembers();
-    this.openTablePopover(event.currentTarget, (pop) => {
-      if (!members.length) {
-        pop.append(createElement("div", "ot-popover-empty", "No members — sign in to Sync Deck"));
-        return;
-      }
-      const paint = () => {
-        pop.replaceChildren();
-        const current = ((this.plugin.data.cards[card.id] || card).assignees) || [];
-        members.forEach((member) => {
-          const assigned = current.some((a) => a && a.email === member.email);
-          const row = this.popoverRow(this.buildAvatar(member), member.name || member.email, assigned);
-          row.addEventListener("click", async () => {
-            const now = ((this.plugin.data.cards[card.id] || card).assignees) || [];
-            const on = now.some((a) => a && a.email === member.email);
-            const next = on
-              ? now.filter((a) => a && a.email !== member.email)
-              : [...now, { email: member.email, name: member.name, color: member.color }];
-            await this.plugin.updateCard(card.id, { assignees: next });
-            paint(); // keep the picker open and refresh the checks for multi-select
+    this.closeTablePopover();
+    const currentAssignees = () => ((this.plugin.data.cards[card.id] || card).assignees) || [];
+    openMemberPickerPopover({
+      anchor: event.currentTarget,
+      plugin: this.plugin,
+      getSelected: currentAssignees,
+      multiSelect: true,
+      onToggle: async (member) => {
+        const now = currentAssignees();
+        const key = memberKey(member);
+        const assigned = now.some((a) => memberKey(a) === key);
+        const next = assigned
+          ? now.filter((a) => memberKey(a) !== key)
+          : [...now, { email: member.email, name: member.name, color: member.color }];
+        await this.plugin.updateCard(card.id, { assignees: next });
+      },
+      onCreateMember: async (name) => {
+        const created = await this.plugin.ensureLocalMember({ name });
+        if (!created) return;
+        const now = currentAssignees();
+        const key = memberKey(created);
+        if (!now.some((a) => memberKey(a) === key)) {
+          await this.plugin.updateCard(card.id, {
+            assignees: [...now, { email: created.email, name: created.name, color: created.color }],
           });
-          pop.append(row);
-        });
-      };
-      paint();
+        }
+      },
+      onManageMembers: () => openKanuxMembersSettings(this.app, this.plugin),
     });
   },
 
@@ -10662,8 +11232,16 @@ module.exports = __require("src/board/board-view.js");
   "src/settings/settings-tab.js": function(module, exports, __require) {
 const { FuzzySuggestModal, Notice, PluginSettingTab, Setting } = require("obsidian");
 
-// Settings tab for board access, sync, preferences, and version info.
-const { isImagePath } = __require("src/helpers.js");
+// Settings tab for board access, members, sync, preferences, and version info.
+const {
+  cleanColor,
+  createElement,
+  isImagePath,
+  memberKey,
+  pickMemberColor,
+  textLine,
+} = __require("src/helpers.js");
+const { buildMemberAvatarElement } = __require("src/modals.js");
 
 class VaultImageSuggestModal extends FuzzySuggestModal {
   constructor(app, onChoose) {
@@ -10734,8 +11312,8 @@ class KanuxSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Kanux").setHeading();
     containerEl.createEl("p", {
       text: this.plugin.isSyncDeckEnabled()
-        ? "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, and optional collaboration."
-        : "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, and checklists.",
+        ? "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, members, and optional cloud collaboration."
+        : "Trello-style boards backed by Markdown card notes — with a table view, labels, dates, checklists, and vault members.",
     });
 
     // ---- Board ----
@@ -10778,9 +11356,11 @@ class KanuxSettingTab extends PluginSettingTab {
           new Notice("Card notes re-imported.");
         }));
 
+    this.renderMembers(containerEl);
+
     new Setting(containerEl)
       .setName("Cloud sync and collaboration")
-      .setDesc("Show optional cloud sync, presence, edit locks, and member assignment features.")
+      .setDesc("Show optional Sync Deck cloud sync, live presence, and card edit locks.")
       .addToggle((toggle) => toggle
         .setValue(this.plugin.isSyncDeckEnabled())
         .onChange(async (value) => {
@@ -11027,6 +11607,232 @@ class KanuxSettingTab extends PluginSettingTab {
         await this.plugin.applyAppearancePreset("obsidian");
         this.redisplayPreservingScroll();
       }));
+  }
+
+  renderMembers(containerEl) {
+    new Setting(containerEl).setName("Members").setHeading();
+    this.renderMembersNoteSetting(containerEl);
+    this.renderAddMemberForm(containerEl);
+
+    const savedMembers = Array.isArray(this.plugin.data.members) ? this.plugin.data.members : [];
+    const savedKeys = new Set(savedMembers.map((member) => memberKey(member)));
+    const listEl = createElement("div", "ot-settings-members-list");
+    if (savedMembers.length) {
+      savedMembers.forEach((member) => listEl.append(this.buildSavedMemberRow(member)));
+    } else {
+      listEl.append(createElement("p", "ot-settings-members-empty", "No saved vault members yet. Add one above or inline from any card or table cell."));
+    }
+    containerEl.append(listEl);
+
+    this.renderDiscoveredMembers(containerEl, savedKeys);
+    this.renderSyncDeckMembers(containerEl);
+  }
+
+  renderMembersNoteSetting(containerEl) {
+    const filePath = this.plugin.getMembersFilePath();
+    let draftPath = filePath;
+    const noteSetting = new Setting(containerEl)
+      .setName("Members note")
+      .setDesc("Markdown note in your vault that keeps team members, colors, and avatars synced across devices.")
+      .addText((text) => text
+        .setPlaceholder("Kanux Members.md")
+        .setValue(filePath)
+        .onChange((value) => { draftPath = value; }))
+      .addButton((button) => button
+        .setButtonText("Save path")
+        .onClick(async () => {
+          const changed = await this.plugin.setMembersFilePath(draftPath);
+          if (changed) {
+            this.redisplayPreservingScroll();
+            new Notice(`Members note path set to ${this.plugin.getMembersFilePath()}.`);
+          }
+        }))
+      .addButton((button) => button
+        .setButtonText("Sync now")
+        .onClick(async () => {
+          const changed = await this.plugin.syncMembersFromVault();
+          if (changed) await this.plugin.saveData(this.plugin.data);
+          this.plugin.refreshViews();
+          this.redisplayPreservingScroll();
+          new Notice(changed ? "Members synced from vault note." : "Members note is up to date.");
+        }));
+
+    const existingFile = this.app.vault.getAbstractFileByPath(filePath);
+    if (existingFile) {
+      noteSetting.addButton((button) => button
+        .setButtonText("Open note")
+        .onClick(() => {
+          if (this.app.workspace && typeof this.app.workspace.openLinkText === "function") {
+            this.app.workspace.openLinkText(existingFile.path, "");
+          }
+        }));
+    }
+  }
+
+  renderAddMemberForm(containerEl) {
+    const form = createElement("div", "ot-settings-member-form");
+    const nameInput = createElement("input", "ot-settings-member-input");
+    nameInput.type = "text";
+    nameInput.placeholder = "Name (e.g. Alice)";
+    nameInput.setAttribute("aria-label", "Member name");
+
+    const idInput = createElement("input", "ot-settings-member-input");
+    idInput.type = "text";
+    idInput.placeholder = "ID or email (optional)";
+    idInput.setAttribute("aria-label", "Member ID or email");
+
+    const colorInput = createElement("input", "ot-settings-member-color");
+    colorInput.type = "color";
+    colorInput.value = pickMemberColor("member");
+    colorInput.setAttribute("aria-label", "Member color");
+    let colorEdited = false;
+    colorInput.addEventListener("input", () => { colorEdited = true; });
+    nameInput.addEventListener("input", () => {
+      if (!colorEdited) colorInput.value = pickMemberColor(idInput.value || nameInput.value || "member");
+    });
+
+    let avatarPath = "";
+    const avatarBtn = createElement("button", "ot-settings-member-avatar-btn", "Avatar");
+    avatarBtn.type = "button";
+    avatarBtn.addEventListener("click", () => {
+      new VaultImageSuggestModal(this.app, (file) => {
+        avatarPath = file.path;
+        avatarBtn.textContent = file.name;
+        avatarBtn.title = file.path;
+      }).open();
+    });
+
+    const addBtn = createElement("button", "mod-cta", "Add member");
+    addBtn.type = "button";
+    const submit = async () => {
+      const name = textLine(nameInput.value);
+      const email = textLine(idInput.value) || name;
+      if (!name) {
+        new Notice("Enter a member name first.");
+        nameInput.focus();
+        return;
+      }
+      await this.plugin.upsertVaultMember({
+        name,
+        email,
+        color: cleanColor(colorInput.value) || pickMemberColor(email),
+        picture: avatarPath,
+      });
+      this.redisplayPreservingScroll();
+    };
+    addBtn.addEventListener("click", submit);
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); submit(); }
+    });
+
+    form.append(nameInput, idInput, colorInput, avatarBtn, addBtn);
+    containerEl.append(form);
+  }
+
+  buildSavedMemberRow(member) {
+    const row = createElement("div", "ot-settings-member-row");
+    const preview = buildMemberAvatarElement(this.plugin, member);
+
+    const nameInput = createElement("input", "ot-settings-member-input");
+    nameInput.type = "text";
+    nameInput.value = member.name || member.email;
+    nameInput.setAttribute("aria-label", `Name for ${member.name || member.email}`);
+
+    const idInput = createElement("input", "ot-settings-member-input");
+    idInput.type = "text";
+    idInput.value = member.email || "";
+    idInput.placeholder = "ID or email";
+    idInput.setAttribute("aria-label", `ID for ${member.name || member.email}`);
+
+    const colorInput = createElement("input", "ot-settings-member-color");
+    colorInput.type = "color";
+    colorInput.value = cleanColor(member.color) || pickMemberColor(member.email);
+    colorInput.setAttribute("aria-label", `Color for ${member.name || member.email}`);
+
+    const previousKey = memberKey(member);
+    const saveChanges = async (nextPicture = member.picture || "") => {
+      const nextName = textLine(nameInput.value) || member.name || member.email;
+      const nextEmail = textLine(idInput.value) || nextName;
+      await this.plugin.upsertVaultMember({
+        name: nextName,
+        email: nextEmail,
+        color: cleanColor(colorInput.value) || pickMemberColor(nextEmail),
+        picture: nextPicture,
+      }, previousKey);
+      this.redisplayPreservingScroll();
+    };
+
+    nameInput.addEventListener("change", () => saveChanges());
+    idInput.addEventListener("change", () => saveChanges());
+    colorInput.addEventListener("change", () => saveChanges());
+
+    const avatarBtn = createElement("button", "ot-settings-member-avatar-btn", member.picture ? "Change avatar" : "Avatar");
+    avatarBtn.type = "button";
+    if (member.picture) avatarBtn.title = member.picture;
+    avatarBtn.addEventListener("click", () => {
+      new VaultImageSuggestModal(this.app, (file) => saveChanges(file.path)).open();
+    });
+
+    const actions = createElement("div", "ot-settings-member-actions");
+    actions.append(colorInput, avatarBtn);
+
+    if (member.picture) {
+      const clearBtn = createElement("button", "ot-settings-member-clear-btn", "Clear");
+      clearBtn.type = "button";
+      clearBtn.addEventListener("click", () => saveChanges(""));
+      actions.append(clearBtn);
+    }
+
+    const removeBtn = createElement("button", "mod-warning", "Remove");
+    removeBtn.type = "button";
+    removeBtn.addEventListener("click", async () => {
+      await this.plugin.removeVaultMember(previousKey);
+      this.redisplayPreservingScroll();
+    });
+    actions.append(removeBtn);
+
+    row.append(preview, nameInput, idInput, actions);
+    return row;
+  }
+
+  renderDiscoveredMembers(containerEl, savedKeys) {
+    const discovered = this.plugin.collectCardMembers()
+      .filter((member) => !savedKeys.has(memberKey(member)));
+    if (!discovered.length) return;
+
+    const section = createElement("div", "ot-settings-members-discovered");
+    section.append(createElement("p", "ot-settings-members-hint", "Found in existing cards and checklists (save to customize color or avatar):"));
+    discovered.forEach((member) => {
+      const row = createElement("div", "ot-settings-member-row is-discovered");
+      const info = createElement("span", "ot-settings-member-discovered-name", member.name || member.email);
+      const saveBtn = createElement("button", "", "Save to list");
+      saveBtn.type = "button";
+      saveBtn.addEventListener("click", async () => {
+        await this.plugin.upsertVaultMember(member);
+        this.redisplayPreservingScroll();
+      });
+      row.append(buildMemberAvatarElement(this.plugin, member), info, saveBtn);
+      section.append(row);
+    });
+    containerEl.append(section);
+  }
+
+  renderSyncDeckMembers(containerEl) {
+    const syncDeckMembers = typeof this.plugin.getSyncDeckMembers === "function"
+      ? this.plugin.getSyncDeckMembers()
+      : [];
+    if (!syncDeckMembers.length) return;
+
+    const section = createElement("div", "ot-settings-members-syncdeck");
+    section.append(createElement("p", "ot-settings-members-hint", "From Sync Deck:"));
+    syncDeckMembers.forEach((member) => {
+      const row = createElement("div", "ot-settings-member-row is-syncdeck");
+      const name = createElement("span", "ot-settings-member-discovered-name", `${member.name || member.email} (${member.email})`);
+      const badge = createElement("span", "ot-settings-member-badge", "Sync Deck");
+      row.append(buildMemberAvatarElement(this.plugin, member), name, badge);
+      section.append(row);
+    });
+    containerEl.append(section);
   }
 
   renderAbout(containerEl) {
@@ -13044,12 +13850,369 @@ const cardTemplateMethods = {
 module.exports = { cardTemplateMethods };
 
   },
+  "src/core/members.js": function(module, exports, __require) {
+// Vault members: combines Sync Deck members, vault/settings members stored in
+// a syncable Markdown note, and members auto-discovered from cards/checklists.
+const {
+  DEFAULT_MEMBERS_FILE_PATH,
+  MEMBERS_NOTE_MARKER,
+  cleanColor,
+  imageTarget,
+  memberKey,
+  normalizeMember,
+  parseMembersNote,
+  serializeMembersNote,
+  textLine,
+} = __require("src/helpers.js");
+
+function normalizeMembersFilePath(value) {
+  const raw = textLine(value).replace(/^\/+|\/+$/g, "");
+  if (!raw) return DEFAULT_MEMBERS_FILE_PATH;
+  return /\.md$/i.test(raw) ? raw : `${raw}.md`;
+}
+
+function normalizeStoredMembers(members) {
+  const seen = new Set();
+  const result = [];
+  (Array.isArray(members) ? members : []).forEach((item) => {
+    const member = normalizeMember(item);
+    if (!member) return;
+    const key = memberKey(member);
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(member);
+  });
+  return result;
+}
+
+const memberMethods = {
+  getMembersFilePath() {
+    return normalizeMembersFilePath(this.data && this.data.membersFilePath);
+  },
+
+  isMembersFile(file) {
+    return !!(file && file.extension === "md" && file.path === this.getMembersFilePath());
+  },
+
+  hasMembersNoteFrontmatter(file) {
+    const cache = this.app && this.app.metadataCache && typeof this.app.metadataCache.getFileCache === "function"
+      ? this.app.metadataCache.getFileCache(file)
+      : null;
+    return !!(cache && cache.frontmatter && cache.frontmatter["kanux-members"] === true);
+  },
+
+  async findMembersFile() {
+    const vault = this.app && this.app.vault;
+    if (!vault) return null;
+    const preferred = typeof vault.getAbstractFileByPath === "function"
+      ? vault.getAbstractFileByPath(this.getMembersFilePath())
+      : null;
+    if (preferred && preferred.extension === "md") return preferred;
+    if (typeof vault.getMarkdownFiles !== "function") return null;
+
+    const markdownFiles = vault.getMarkdownFiles();
+    const cachedMatch = markdownFiles.find((file) => this.hasMembersNoteFrontmatter(file));
+    if (cachedMatch) return cachedMatch;
+
+    if (typeof vault.read !== "function") return null;
+    for (const file of markdownFiles) {
+      if (this.boardForFile && this.boardForFile(file)) continue;
+      if (file.stat && file.stat.size > 65536) continue;
+      try {
+        const text = await vault.read(file);
+        if (String(text || "").includes(MEMBERS_NOTE_MARKER)) return file;
+      } catch (error) {
+        // Skip unreadable files while scanning for an adopted members note.
+      }
+    }
+    return null;
+  },
+
+  collectCardMembers() {
+    const seen = new Set();
+    const collected = [];
+    const push = (raw) => {
+      const member = normalizeMember(raw);
+      if (!member) return;
+      const key = memberKey(member);
+      if (seen.has(key)) return;
+      seen.add(key);
+      collected.push({ ...member, source: "card" });
+    };
+
+    Object.values((this.data && this.data.cards) || {}).forEach((card) => {
+      if (!card) return;
+      (card.assignees || []).forEach(push);
+      (card.checklists || []).forEach((group) => {
+        (group && group.items ? group.items : []).forEach((item) => {
+          if (item && item.assignee) push(item.assignee);
+        });
+      });
+    });
+    return collected;
+  },
+
+  getVaultMembers() {
+    const merged = new Map();
+
+    this.collectCardMembers().forEach((member) => {
+      merged.set(memberKey(member), member);
+    });
+
+    normalizeStoredMembers(this.data && this.data.members).forEach((member) => {
+      merged.set(memberKey(member), { ...member, source: "vault" });
+    });
+
+    const syncDeckMembers = typeof this.getSyncDeckMembers === "function"
+      ? this.getSyncDeckMembers()
+      : [];
+    syncDeckMembers.forEach((raw) => {
+      const member = normalizeMember(raw);
+      if (!member) return;
+      const key = memberKey(member);
+      const existing = merged.get(key);
+      if (existing && existing.source === "vault") {
+        merged.set(key, {
+          ...existing,
+          picture: existing.picture || member.picture,
+          syncDeck: true,
+        });
+        return;
+      }
+      merged.set(key, { ...member, source: "sync-deck", syncDeck: true });
+    });
+
+    return Array.from(merged.values()).sort((a, b) =>
+      String(a.name || a.email).localeCompare(String(b.name || b.email), undefined, { sensitivity: "base" })
+    );
+  },
+
+  resolveMember(memberOrId) {
+    const key = memberKey(memberOrId);
+    if (!key) return null;
+    const known = this.getVaultMembers().find((member) => memberKey(member) === key);
+    if (known) return known;
+    return typeof memberOrId === "object"
+      ? normalizeMember(memberOrId)
+      : normalizeMember({ email: memberOrId, name: memberOrId });
+  },
+
+  resolveVaultImageUrl(rawPath) {
+    const raw = textLine(rawPath);
+    if (!raw) return "";
+    if (/^(https?:|data:)/i.test(raw)) return raw;
+
+    const vault = this.app && this.app.vault;
+    if (!vault || typeof vault.getResourcePath !== "function") return "";
+    const target = imageTarget(raw);
+    if (!target) return "";
+
+    let file = typeof vault.getAbstractFileByPath === "function"
+      ? vault.getAbstractFileByPath(target)
+      : null;
+    if (!file && this.app.metadataCache && typeof this.app.metadataCache.getFirstLinkpathDest === "function") {
+      try {
+        file = this.app.metadataCache.getFirstLinkpathDest(target, "");
+      } catch (error) {
+        file = null;
+      }
+    }
+    return file && file.path ? vault.getResourcePath(file) : "";
+  },
+
+  getMemberPicture(memberOrId) {
+    const resolved = this.resolveMember(memberOrId);
+    if (!resolved || !resolved.picture) return "";
+    return this.resolveVaultImageUrl(resolved.picture);
+  },
+
+  async ensureLocalMember(input) {
+    const candidate = normalizeMember(typeof input === "string" ? { name: input } : input);
+    if (!candidate) return null;
+
+    this.data.members = normalizeStoredMembers(this.data.members);
+    const key = memberKey(candidate);
+    const existing = this.data.members.find((member) => memberKey(member) === key);
+    if (existing) return existing;
+
+    this.data.members.push(candidate);
+    await this.writeMembersFile();
+    await this.saveData(this.data);
+    this.refreshViews();
+    return candidate;
+  },
+
+  async upsertVaultMember(input, previousKey = "") {
+    const candidate = normalizeMember(input);
+    if (!candidate) return null;
+
+    this.data.members = normalizeStoredMembers(this.data.members);
+    const targetKey = memberKey(previousKey) || memberKey(candidate);
+    const nextKey = memberKey(candidate);
+    const filtered = this.data.members.filter((member) => {
+      const key = memberKey(member);
+      return key !== targetKey && key !== nextKey;
+    });
+    filtered.push(candidate);
+    this.data.members = normalizeStoredMembers(filtered);
+
+    const deletedKeys = targetKey && targetKey !== nextKey ? [targetKey] : [];
+    await this.writeMembersFile({ force: true, deletedKeys });
+    await this.saveData(this.data);
+    this.refreshViews();
+    return candidate;
+  },
+
+  async removeVaultMember(keyOrMember) {
+    const targetKey = memberKey(keyOrMember);
+    if (!targetKey) return false;
+
+    this.data.members = normalizeStoredMembers(this.data.members);
+    const before = this.data.members.length;
+    this.data.members = this.data.members.filter((member) => memberKey(member) !== targetKey);
+    if (this.data.members.length === before) return false;
+
+    await this.writeMembersFile({ force: true, deletedKeys: [targetKey] });
+    await this.saveData(this.data);
+    this.refreshViews();
+    return true;
+  },
+
+  async setMembersFilePath(nextPath) {
+    const normalized = normalizeMembersFilePath(nextPath);
+    if (normalized === this.getMembersFilePath()) return false;
+
+    this.data.membersFilePath = normalized;
+    this.membersFileSignature = null;
+    const synced = await this.syncMembersFromVault();
+    if (!synced && this.data.members && this.data.members.length) {
+      await this.writeMembersFile({ force: true });
+    }
+    await this.saveData(this.data);
+    this.refreshViews();
+    return true;
+  },
+
+  async syncMembersFromVault() {
+    const file = await this.findMembersFile();
+    if (!file) return false;
+
+    let changed = false;
+    if (file.path !== this.getMembersFilePath()) {
+      this.data.membersFilePath = file.path;
+      changed = true;
+    }
+
+    let markdown = "";
+    try {
+      markdown = await this.app.vault.read(file);
+    } catch (error) {
+      return changed;
+    }
+
+    this.membersFileSignature = markdown;
+    const parsed = parseMembersNote(markdown);
+    const current = normalizeStoredMembers(this.data.members);
+    if (serializeMembersNote(parsed) !== serializeMembersNote(current)) {
+      this.data.members = parsed;
+      changed = true;
+    }
+    return changed;
+  },
+
+  async ensureMembersFolder(filePath) {
+    const parts = String(filePath || "").split("/").slice(0, -1);
+    if (!parts.length || !this.app || !this.app.vault) return;
+
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (!this.app.vault.getAbstractFileByPath(current)) {
+        await this.app.vault.createFolder(current).catch(() => {});
+      }
+    }
+  },
+
+  mergeDiskMembers(diskMembers, deletedKeys = []) {
+    const deleted = new Set(deletedKeys.map((key) => memberKey(key)).filter(Boolean));
+    const merged = new Map();
+    diskMembers.forEach((member) => {
+      const key = memberKey(member);
+      if (!deleted.has(key)) merged.set(key, member);
+    });
+    normalizeStoredMembers(this.data.members).forEach((member) => {
+      merged.set(memberKey(member), member);
+    });
+    return Array.from(merged.values());
+  },
+
+  async writeMembersFile(options = {}) {
+    const vault = this.app && this.app.vault;
+    if (!vault) return false;
+
+    const filePath = this.getMembersFilePath();
+    const existingFile = typeof vault.getAbstractFileByPath === "function"
+      ? vault.getAbstractFileByPath(filePath)
+      : null;
+    const members = normalizeStoredMembers(this.data && this.data.members);
+
+    if (!options.force && !members.length && !existingFile) return false;
+
+    let nextMembers = members;
+    let markdown = serializeMembersNote(nextMembers);
+
+    if (!existingFile) {
+      await this.ensureMembersFolder(filePath);
+      await vault.create(filePath, markdown);
+      this.membersFileSignature = markdown;
+      return true;
+    }
+
+    let current = null;
+    try {
+      current = await vault.read(existingFile);
+    } catch (error) {
+      current = null;
+    }
+    if (current === markdown) {
+      this.membersFileSignature = markdown;
+      return false;
+    }
+
+    // Preserve external edits delivered by Git/LiveSync when the note changed on disk.
+    const changedUnderUs = current !== null
+      && this.membersFileSignature !== null
+      && current !== this.membersFileSignature;
+    if (changedUnderUs) {
+      nextMembers = this.mergeDiskMembers(parseMembersNote(current), options.deletedKeys || []);
+      this.data.members = normalizeStoredMembers(nextMembers);
+      markdown = serializeMembersNote(this.data.members);
+      if (current === markdown) {
+        this.membersFileSignature = markdown;
+        return false;
+      }
+    }
+
+    await vault.modify(existingFile, markdown);
+    this.membersFileSignature = markdown;
+    return true;
+  },
+
+  normalizeMemberColor(value, seed) {
+    return cleanColor(value) || normalizeMember({ email: seed, name: seed }).color;
+  },
+};
+
+module.exports = { memberMethods, normalizeMembersFilePath, normalizeStoredMembers };
+
+  },
   "src/core/plugin-data.js": function(module, exports, __require) {
 // Loading and normalization of the persisted plugin data (data.json):
 // boards, cards, labels, assignees, and the migrations older saves need.
 const {
   DEFAULT_APPEARANCE,
   DEFAULT_DATA,
+  DEFAULT_MEMBERS_FILE_PATH,
   LEGACY_CARD_FOLDER,
   cardFileBaseName,
   cleanColor,
@@ -13057,11 +14220,14 @@ const {
   cleanLabelName,
   clone,
   labelKey,
+  memberKey,
   normalizeChecklists,
   normalizeDependencies,
+  normalizeMember,
   textLine,
   uid,
 } = __require("src/helpers.js");
+const { normalizeMembersFilePath, normalizeStoredMembers } = __require("src/core/members.js");
 
 const pluginDataMethods = {
   /**
@@ -13080,6 +14246,8 @@ const pluginDataMethods = {
     this.data.boards = Array.isArray(this.data.boards) ? this.data.boards : [];
     this.data.cards = this.data.cards || {};
     this.data.labels = this.data.labels || [];
+    this.data.membersFilePath = normalizeMembersFilePath(this.data.membersFilePath || DEFAULT_MEMBERS_FILE_PATH);
+    this.data.members = normalizeStoredMembers(this.data.members);
     this.data.syncDeckEnabled = this.data.syncDeckEnabled !== false;
     this.data.completionSound = this.data.completionSound !== false;
     this.data.labelDisplayMode = needsLabelDisplayMigration
@@ -13232,9 +14400,15 @@ const pluginDataMethods = {
   normalizeAssignees(assignees) {
     const seen = new Set();
     return (Array.isArray(assignees) ? assignees : [])
-      .filter((a) => a && a.email)
-      .filter((a) => (seen.has(a.email) ? false : seen.add(a.email)))
-      .map((a) => ({ email: String(a.email), name: a.name || a.email, color: a.color || "#8b5cf6" }));
+      .map((a) => normalizeMember(a))
+      .filter(Boolean)
+      .filter((a) => {
+        const key = memberKey(a);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((a) => ({ email: a.email, name: a.name, color: a.color }));
   },
 };
 
@@ -13336,22 +14510,14 @@ const syncDeckMethods = {
     return syncDeck;
   },
 
-  // Assignable users = the SyncDeck vault members. Empty when SyncDeck is not
-  // installed/signed in (the assignee UI then just shows nothing to assign).
-  getVaultMembers() {
+  // Raw members exposed by Sync Deck when installed and signed in.
+  getSyncDeckMembers() {
     const syncDeck = this.getSyncDeckPlugin();
     const members = syncDeck && syncDeck.data && syncDeck.data.members;
     if (!Array.isArray(members)) return [];
     return members
       .filter((m) => m && m.email)
       .map((m) => ({ email: m.email, name: m.name || m.email, color: m.color || "#8b5cf6", picture: m.picture || "" }));
-  },
-
-  // The avatar picture for an assignee, resolved live from SyncDeck (not stored
-  // in the card frontmatter, since the URL can change/expire).
-  getMemberPicture(email) {
-    const member = this.getVaultMembers().find((m) => m.email === email);
-    return (member && member.picture) || "";
   },
 
   // Presence responses carry both the cursor roster (users) and the card-lock
@@ -13579,6 +14745,9 @@ const vaultSyncMethods = {
     this.reconciling = true;
     try {
       const restored = await this.restoreBoardsFromIndexFiles();
+      const syncedMembers = typeof this.syncMembersFromVault === "function"
+        ? await this.syncMembersFromVault()
+        : false;
       // A Sync Deck vault switch trashes the PREVIOUS vault's board folders, but
       // our per-device data.json still lists those boards. Drop any whose folder
       // is gone from disk BEFORE the writes below — otherwise writeBoardIndexFiles
@@ -13610,7 +14779,7 @@ const vaultSyncMethods = {
       await this.writeBoardIndexFiles({ bulk: true });
       await this.syncGraphColorGroups();
       this.updateExplorerColors();
-      if (restored || prunedVanished || renamed || deduped || migratedLayout || this.loadNeedsSave || removedIndexCards) await this.saveData(this.data);
+      if (restored || syncedMembers || prunedVanished || renamed || deduped || migratedLayout || this.loadNeedsSave || removedIndexCards) await this.saveData(this.data);
     } finally {
       this.reconciling = false;
     }
@@ -13641,6 +14810,7 @@ const vaultSyncMethods = {
         && file.path.startsWith(`${board.folderPath}/`)
         && !this.isChecklistItemPath(file.path, board)
         && !this.isTemplatePath(file.path, board)
+        && !(this.isMembersFile && this.isMembersFile(file))
         && file.path !== this.boardIndexPath(board)
         && file.path !== this.legacyBoardIndexPath(board);
     }) || null;
@@ -13695,6 +14865,18 @@ const vaultSyncMethods = {
     if (this.editingCardId) {
       this.pendingResync = true;
       this.queueResync();
+      return;
+    }
+    const isMembersNote = (this.isMembersFile && this.isMembersFile(file))
+      || (this.hasMembersNoteFrontmatter && this.hasMembersNoteFrontmatter(file));
+    if (isMembersNote) {
+      window.clearTimeout(this.membersSyncTimer);
+      this.membersSyncTimer = window.setTimeout(async () => {
+        if (this.reconciling) return;
+        const changed = await this.syncMembersFromVault();
+        if (changed) await this.saveData(this.data);
+        this.refreshViews();
+      }, 200);
       return;
     }
     // Also re-sync when the board INDEX file changes, so a list add/rename/reorder
@@ -14191,6 +15373,7 @@ const { cardDependencyMethods } = __require("src/core/card-dependencies.js");
 const { cardFileMethods } = __require("src/core/card-files.js");
 const { cardOpsMethods } = __require("src/core/card-ops.js");
 const { cardTemplateMethods } = __require("src/core/card-templates.js");
+const { memberMethods } = __require("src/core/members.js");
 const { pluginDataMethods } = __require("src/core/plugin-data.js");
 const { syncDeckMethods } = __require("src/core/sync-deck.js");
 const { vaultDecorationMethods } = __require("src/core/vault-decorations.js");
@@ -14224,6 +15407,7 @@ class KanuxPlugin extends Plugin {
     this.indexSignatures = new Map();
     this.pendingResync = false;
     this.resyncTimer = null;
+    this.membersFileSignature = null;
 
     // Undo stack for board/table edits (Cmd/Ctrl+Z). Each user mutation records an
     // async inverse; undoLast() pops and runs it. applyingUndo suppresses
@@ -14367,6 +15551,7 @@ Object.assign(
   cardFileMethods,
   cardOpsMethods,
   cardTemplateMethods,
+  memberMethods,
   pluginDataMethods,
   syncDeckMethods,
   vaultDecorationMethods,

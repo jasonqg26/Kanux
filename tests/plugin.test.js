@@ -404,6 +404,91 @@ async function testARealValueInTheNoteStillWins() {
   assert.deepStrictEqual(updated.dependencies, [{ cardId: "card-9", blocking: "warn" }]);
 }
 
+function createMembersVaultPlugin(initialData = {}, initialFiles = {}) {
+  const files = Object.assign({}, initialFiles);
+  const plugin = createPlugin(Object.assign({
+    syncDeckEnabled: false,
+    membersFilePath: "Kanux Members.md",
+    members: [],
+    boards: [],
+    cards: {},
+  }, initialData), files);
+  plugin.membersFileSignature = null;
+  plugin.app.vault.getMarkdownFiles = () => Object.values(files).filter((file) => file && file.extension === "md");
+  plugin.app.vault.read = async (file) => files[file.path].content;
+  plugin.app.vault.create = async (filePath, content) => {
+    const file = { path: filePath, name: filePath.split("/").pop(), extension: "md", content };
+    files[filePath] = file;
+    return file;
+  };
+  plugin.app.vault.modify = async (file, content) => {
+    files[file.path].content = content;
+  };
+  plugin.app.vault.createFolder = async () => {};
+  plugin.app.vault.getResourcePath = (file) => `app://vault/${file.path}`;
+  return { plugin, files };
+}
+
+async function testMembersMergeSyncAndPicturesWithoutSyncDeck() {
+  const avatarFile = { path: "attachments/alice.png", name: "alice.png", extension: "png" };
+  const { plugin, files } = createMembersVaultPlugin({
+    members: [
+      { email: "alice@team.com", name: "Alice Local", color: "#3b82f6", picture: "attachments/alice.png" },
+    ],
+    cards: {
+      "card-1": {
+        id: "card-1",
+        assignees: [{ email: "Bob", name: "Bob", color: "#22c55e" }],
+        checklists: [{ items: [{ text: "Review", assignee: { email: "carol", name: "Carol", color: "#f59e0b" } }] }],
+      },
+    },
+  }, { [avatarFile.path]: avatarFile });
+
+  plugin.getSyncDeckMembers = () => [
+    { email: "alice@team.com", name: "Alice Cloud", color: "#000000", picture: "https://cdn.example/alice.jpg" },
+    { email: "dave@team.com", name: "Dave", color: "#ef4444", picture: "https://cdn.example/dave.jpg" },
+  ];
+
+  const merged = plugin.getVaultMembers();
+  assert.deepStrictEqual(merged.map((m) => m.name), ["Alice Local", "Bob", "Carol", "Dave"]);
+  assert.strictEqual(plugin.getMemberPicture("alice@team.com"), "app://vault/attachments/alice.png");
+  assert.strictEqual(plugin.getMemberPicture("dave@team.com"), "https://cdn.example/dave.jpg");
+
+  // Adding a local member inline persists to the vault members note.
+  const created = await plugin.ensureLocalMember({ name: "Elena" });
+  assert.strictEqual(created.name, "Elena");
+  assert.ok(files["Kanux Members.md"]);
+  assert.ok(files["Kanux Members.md"].content.includes("| Elena |"));
+
+  // Simulate an external edit from LiveSync/Git on disk before our next upsert:
+  // optimistic concurrency must merge disk additions instead of clobbering them.
+  files["Kanux Members.md"].content = [
+    "---",
+    "kanux-members: true",
+    "---",
+    "",
+    "| Name | ID | Color | Avatar |",
+    "| --- | --- | --- | --- |",
+    "| Alice Local | alice@team.com | #3b82f6 | attachments/alice.png |",
+    "| Elena | Elena | #8b5cf6 | |",
+    "| Frank | frank@team.com | #14b8a6 | |",
+    "",
+  ].join("\n");
+
+  await plugin.upsertVaultMember({ name: "Grace", email: "Grace", color: "#ec4899" });
+  assert.ok(files["Kanux Members.md"].content.includes("| Frank |"));
+  assert.ok(files["Kanux Members.md"].content.includes("| Grace |"));
+
+  // Syncing from disk adopts external note updates.
+  files["Kanux Members.md"].content += "| Hana | Hana | #ef4444 | |\n";
+  const synced = await plugin.syncMembersFromVault();
+  assert.strictEqual(synced, true);
+  assert.ok(plugin.data.members.some((m) => m.name === "Hana"));
+
+  await plugin.removeVaultMember("Hana");
+  assert.ok(!files["Kanux Members.md"].content.includes("| Hana |"));
+}
+
 async function run() {
   await testMoveCardIsRefusedByATotalBlock();
   await testBlockedCardStillReordersInsideItsList();
@@ -421,6 +506,7 @@ async function run() {
   await testAnEmptyKeyCannotEraseACodeOrADependency();
   await testARealValueInTheNoteStillWins();
   testRefreshViewsHonorsTemporaryViewGuard();
+  await testMembersMergeSyncAndPicturesWithoutSyncDeck();
   console.log("plugin tests passed");
 }
 

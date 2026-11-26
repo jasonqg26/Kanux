@@ -3,6 +3,7 @@ const { setIcon } = require("obsidian");
 // Table view filtering: per-board filter state, the controls row, the
 // search/sort predicates, and the shared anchored popover used by the pickers.
 const { addButtonIcon, checklistItems, createElement, labelKey } = require("../helpers");
+const { closeMemberPickerPopover } = require("../modals");
 
 const tableFilterMethods = {
   getTableState(board) {
@@ -246,6 +247,7 @@ const tableFilterMethods = {
   // fills the rows. It survives a board re-render (it lives on document.body), so
   // the assignee picker can stay open across multi-select toggles.
   openTablePopover(anchor, build) {
+    closeMemberPickerPopover();
     this.closeTablePopover();
     const pop = createElement("div", "ot-popover");
     const rect = anchor.getBoundingClientRect();

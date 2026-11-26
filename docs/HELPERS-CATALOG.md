@@ -20,6 +20,7 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 - `LIST_DRAG_TYPE`: tipo MIME usado al arrastrar listas.
 - `IMAGE_EXTENSIONS`: extensiones reconocidas como imágenes.
 - `DEFAULT_LABEL_COLOR`, `LABEL_COLORS` y `LIST_COLORS`: colores compartidos para etiquetas y listas.
+- `DEFAULT_MEMBER_COLOR`, `DEFAULT_MEMBERS_FILE_PATH` y `MEMBERS_NOTE_MARKER`: color por defecto, ruta inicial y marcador de frontmatter para la nota de miembros en la bóveda.
 - `DEFAULT_APPEARANCE`: configuración visual inicial.
 - `DEFAULT_DATA`: estructura mínima de datos persistidos del plugin.
 - `DEPENDENCY_BLOCK_NONE`, `DEPENDENCY_BLOCK_WARN` y `DEPENDENCY_BLOCK_TOTAL`: niveles de bloqueo de una dependencia, del más débil al más fuerte.
@@ -52,7 +53,10 @@ Este documento registra las utilidades públicas que ya existen en `src/helpers.
 - `labelKey(label)`: genera la clave comparable de una etiqueta.
 - `cleanLabelName(label)`: limpia un nombre y descarta líneas reservadas de metadatos.
 - `parseLabels(raw)` y `labelsToFrontmatter(labels)`: leen y escriben etiquetas en frontmatter.
-- `parseAssignees(raw)` y `assigneesToFrontmatter(assignees)`: leen y escriben miembros asignados.
+- `parseAssignees(raw)` y `assigneesToFrontmatter(assignees)`: leen y escriben miembros asignados (con email de Sync Deck o identificador/nombre local).
+- `cleanMemberId(value)` y `memberKey(value)`: limpian delimitadores reservados en identificadores o nombres de miembros y obtienen su clave comparable en minúsculas.
+- `pickMemberColor(seed)` y `normalizeMember(raw)`: asignan un color determinista desde `LIST_COLORS` y normalizan `{ email, name, color, picture }`.
+- `parseMembersNote(markdown)` y `serializeMembersNote(members)`: leen y escriben la nota Markdown sincronizable de miembros (`Kanux Members.md`).
 - `initials(nameOrEmail)`: obtiene hasta dos iniciales para el avatar de respaldo.
 
 ## Rutas, etiquetas de Obsidian e imágenes

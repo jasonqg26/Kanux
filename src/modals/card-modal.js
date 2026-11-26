@@ -1,4 +1,4 @@
-const { Menu, Modal, Notice } = require("obsidian");
+const { Modal, Notice } = require("obsidian");
 const {
   LIST_COLORS,
   addButtonIcon,
@@ -9,11 +9,11 @@ const {
   createElement,
   iconButton,
   labelKey,
+  memberKey,
   normalizeChecklists,
   normalizeDependencies,
   renderIcon,
   textLine,
-  initials,
   uid,
 } = require("../helpers");
 const { splitDetailSegments } = require("./details-markdown");
@@ -24,6 +24,12 @@ const { buildDependenciesField } = require("./card-dependencies-field");
 const { buildDetailsField } = require("./card-details-field");
 const { exportCardToPdf } = require("./card-pdf-export");
 const { buildChecklistsField } = require("./card-checklist-field");
+const {
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+} = require("./member-picker-popover");
 
 // Controls that only reveal content, so a read-only viewer keeps them: they
 // expand a panel or open a preview without ever writing to the card.
@@ -209,19 +215,7 @@ class CardModal extends Modal {
 
   // Avatar chip for a member: profile picture when available, else initials.
   memberAvatar(member) {
-    const avatar = createElement("span", "ot-card-avatar");
-    avatar.style.setProperty("--ot-avatar-color", member.color || "#8b5cf6");
-    const picture = this.plugin.getMemberPicture(member.email);
-    if (picture) {
-      const img = createElement("img", "");
-      img.src = picture;
-      img.alt = "";
-      avatar.append(img);
-    } else {
-      avatar.textContent = initials(member.name || member.email);
-      avatar.classList.add("is-initials");
-    }
-    return avatar;
+    return buildMemberAvatarElement(this.plugin, member);
   }
 
   renderAssigneesField() {
@@ -232,15 +226,19 @@ class CardModal extends Modal {
     const rebuild = () => {
       row.replaceChildren();
       (this.localAssignees || []).forEach((assignee) => {
+        const resolved = this.plugin && typeof this.plugin.resolveMember === "function"
+          ? (this.plugin.resolveMember(assignee) || assignee)
+          : assignee;
         const chip = createElement("span", "ot-assignee-chip");
-        const avatar = this.memberAvatar(assignee);
+        const avatar = this.memberAvatar(resolved);
+        const key = memberKey(resolved);
         const remove = iconButton("x", "Remove member", () => {
-          this.localAssignees = (this.localAssignees || []).filter((a) => a.email !== assignee.email);
+          this.localAssignees = (this.localAssignees || []).filter((a) => memberKey(a) !== key);
           rebuild();
           this.queueSave();
         });
         remove.classList.add("ot-assignee-remove");
-        chip.append(avatar, createElement("span", "ot-assignee-name", assignee.name || assignee.email), remove);
+        chip.append(avatar, createElement("span", "ot-assignee-name", resolved.name || resolved.email), remove);
         row.append(chip);
       });
       const addButton = iconButton("plus", "Assign a member", (event) => this.showMemberMenu(event, rebuild));
@@ -254,57 +252,64 @@ class CardModal extends Modal {
   }
 
   showMemberMenu(event, rebuild) {
-    const members = this.plugin.getVaultMembers();
-    const menu = new Menu();
-    if (!members.length) {
-      menu.addItem((item) => item.setTitle("No members — sign in to Sync Deck").setDisabled(true));
-    } else {
-      members.forEach((member) => {
-        const assigned = (this.localAssignees || []).some((a) => a.email === member.email);
-        menu.addItem((item) => {
-          item.setTitle(member.name || member.email).setChecked(assigned).onClick(() => {
-            if (assigned) {
-              this.localAssignees = (this.localAssignees || []).filter((a) => a.email !== member.email);
-            } else {
-              this.localAssignees = [...(this.localAssignees || []), { email: member.email, name: member.name, color: member.color }];
-            }
-            rebuild();
-            this.queueSave();
-          });
-        });
-      });
-    }
-    menu.showAtMouseEvent(event);
+    const toggleMember = (member) => {
+      const key = memberKey(member);
+      const assigned = (this.localAssignees || []).some((a) => memberKey(a) === key);
+      this.localAssignees = assigned
+        ? (this.localAssignees || []).filter((a) => memberKey(a) !== key)
+        : [...(this.localAssignees || []), { email: member.email, name: member.name, color: member.color }];
+      rebuild();
+      this.queueSave();
+    };
+
+    openMemberPickerPopover({
+      anchor: event.currentTarget,
+      plugin: this.plugin,
+      getSelected: () => this.localAssignees || [],
+      multiSelect: true,
+      onToggle: toggleMember,
+      onCreateMember: async (name) => {
+        const created = await this.plugin.ensureLocalMember({ name });
+        if (!created) return;
+        const key = memberKey(created);
+        if (!(this.localAssignees || []).some((a) => memberKey(a) === key)) {
+          this.localAssignees = [...(this.localAssignees || []), { email: created.email, name: created.name, color: created.color }];
+          rebuild();
+          this.queueSave();
+        }
+      },
+      onManageMembers: () => {
+        this.close();
+        openKanuxMembersSettings(this.app, this.plugin);
+      },
+    });
   }
 
   // Single-member picker for one checklist item (leftmost circle).
   showChecklistMemberMenu(event, item, rerender) {
-    const members = this.plugin.getVaultMembers();
-    const menu = new Menu();
-    menu.addItem((mi) => mi
-      .setTitle("Unassigned")
-      .setChecked(!(item.assignee && item.assignee.email))
-      .onClick(() => {
-        item.assignee = null;
+    openMemberPickerPopover({
+      anchor: event.currentTarget,
+      plugin: this.plugin,
+      getSelected: () => (item.assignee && (item.assignee.email || item.assignee.name) ? [item.assignee] : []),
+      multiSelect: false,
+      allowUnassign: true,
+      onToggle: (member) => {
+        item.assignee = member ? { email: member.email, name: member.name, color: member.color } : null;
         rerender();
         this.saveNow().catch(console.error);
-      }));
-    if (!members.length) {
-      menu.addItem((mi) => mi.setTitle("No members — sign in to Sync Deck").setDisabled(true));
-    } else {
-      members.forEach((member) => {
-        const current = !!(item.assignee && item.assignee.email === member.email);
-        menu.addItem((mi) => mi
-          .setTitle(member.name || member.email)
-          .setChecked(current)
-          .onClick(() => {
-            item.assignee = { email: member.email, name: member.name, color: member.color };
-            rerender();
-            this.saveNow().catch(console.error);
-          }));
-      });
-    }
-    menu.showAtMouseEvent(event);
+      },
+      onCreateMember: async (name) => {
+        const created = await this.plugin.ensureLocalMember({ name });
+        if (!created) return;
+        item.assignee = { email: created.email, name: created.name, color: created.color };
+        rerender();
+        this.saveNow().catch(console.error);
+      },
+      onManageMembers: () => {
+        this.close();
+        openKanuxMembersSettings(this.app, this.plugin);
+      },
+    });
   }
 
   /**
@@ -331,8 +336,6 @@ class CardModal extends Modal {
     this.contentEl.replaceChildren();
     this.modalEl.addClass("ot-card-modal-shell");
     this.contentEl.addClass("ot-card-modal");
-    const collaborationEnabled = this.plugin.isSyncDeckEnabled();
-    this.contentEl.classList.toggle("is-sync-disabled", !collaborationEnabled);
 
     const title = createElement("input", "ot-title-input");
     title.type = "text";
@@ -357,7 +360,7 @@ class CardModal extends Modal {
     header.append(title, location);
 
     const labelsField = this.notesOnly ? null : this.renderLabelsField();
-    const assigneesField = this.notesOnly || !collaborationEnabled ? null : this.renderAssigneesField();
+    const assigneesField = this.notesOnly ? null : this.renderAssigneesField();
     const dependenciesField = this.renderDependenciesField();
     const detailsField = this.renderDetailsField();
     // Read BEFORE building the checklist field: rendering it consumes this id
@@ -464,6 +467,7 @@ class CardModal extends Modal {
   }
 
   onClose() {
+    closeMemberPickerPopover();
     this.stopLockHeartbeat();
     this.destroyEmbeddedEditors();
     this.closeSideSheet();

@@ -4089,14 +4089,6 @@ button.ot-save-button:disabled {
   text-decoration: line-through;
 }
 
-.ot-card-modal.is-sync-disabled .ot-checklist-row {
-  grid-template-columns: 18px 20px minmax(0, 1fr) auto;
-}
-
-.ot-card-modal.is-sync-disabled .ot-checklist-assignee {
-  display: none;
-}
-
 .ot-checklist-item-actions {
   display: inline-flex;
   align-items: center;
@@ -4139,10 +4131,6 @@ button.ot-save-button:disabled {
   box-sizing: border-box;
   border-left: 2px solid color-mix(in srgb, var(--ot-checklist-color, var(--interactive-accent)) 70%, transparent);
   background: transparent;
-}
-
-.ot-card-modal.is-sync-disabled .ot-checklist-note-panel {
-  margin-left: 40px;
 }
 
 .ot-checklist-note-panel[hidden] {
@@ -4249,10 +4237,6 @@ button.ot-save-button:disabled {
    indent that lines items up under their checkbox does not apply to it. */
 .ot-checklist-group .ot-dependencies-field .ot-empty-text {
   padding: 0;
-}
-
-.ot-card-modal.is-sync-disabled .ot-checklist-group .ot-empty-text {
-  padding-left: 54px;
 }
 
 .ot-checklist-add-form {
@@ -5412,4 +5396,163 @@ body.ot-col-resizing * {
 .ot-block-image-remove svg {
   width: 15px;
   height: 15px;
+}
+
+/* ---- Inline Member Picker Popover ---- */
+.ot-member-picker-popover {
+  width: min(280px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 24px));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 1000;
+}
+
+.ot-member-picker-header {
+  padding: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ot-member-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ot-member-picker-options {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.ot-member-picker-row.is-active,
+.ot-member-picker-create.is-active {
+  background: var(--background-modifier-hover);
+}
+
+.ot-member-picker-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ot-member-picker-sub {
+  font-size: 0.78em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ot-member-picker-unassign-icon,
+.ot-member-picker-create-icon,
+.ot-member-picker-manage-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.ot-member-picker-unassign-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.ot-member-picker-unassign-icon svg,
+.ot-member-picker-create-icon svg,
+.ot-member-picker-manage-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ot-member-picker-create {
+  color: var(--interactive-accent);
+  font-weight: 500;
+}
+
+.ot-member-picker-footer {
+  padding: 4px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ot-member-picker-manage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.ot-member-picker-manage:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* ---- Settings: Members ---- */
+.ot-settings-member-form,
+.ot-settings-member-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.ot-settings-member-form {
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 8px;
+}
+
+.ot-settings-member-row {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ot-settings-member-input {
+  flex: 1 1 130px;
+  min-width: 110px;
+}
+
+.ot-settings-member-color {
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ot-settings-member-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ot-settings-members-empty,
+.ot-settings-members-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin: 8px 0;
+}
+
+.ot-settings-member-discovered-name {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.ot-settings-member-badge {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
 }

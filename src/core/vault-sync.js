@@ -24,6 +24,9 @@ const vaultSyncMethods = {
     this.reconciling = true;
     try {
       const restored = await this.restoreBoardsFromIndexFiles();
+      const syncedMembers = typeof this.syncMembersFromVault === "function"
+        ? await this.syncMembersFromVault()
+        : false;
       // A Sync Deck vault switch trashes the PREVIOUS vault's board folders, but
       // our per-device data.json still lists those boards. Drop any whose folder
       // is gone from disk BEFORE the writes below — otherwise writeBoardIndexFiles
@@ -55,7 +58,7 @@ const vaultSyncMethods = {
       await this.writeBoardIndexFiles({ bulk: true });
       await this.syncGraphColorGroups();
       this.updateExplorerColors();
-      if (restored || prunedVanished || renamed || deduped || migratedLayout || this.loadNeedsSave || removedIndexCards) await this.saveData(this.data);
+      if (restored || syncedMembers || prunedVanished || renamed || deduped || migratedLayout || this.loadNeedsSave || removedIndexCards) await this.saveData(this.data);
     } finally {
       this.reconciling = false;
     }
@@ -86,6 +89,7 @@ const vaultSyncMethods = {
         && file.path.startsWith(`${board.folderPath}/`)
         && !this.isChecklistItemPath(file.path, board)
         && !this.isTemplatePath(file.path, board)
+        && !(this.isMembersFile && this.isMembersFile(file))
         && file.path !== this.boardIndexPath(board)
         && file.path !== this.legacyBoardIndexPath(board);
     }) || null;
@@ -140,6 +144,18 @@ const vaultSyncMethods = {
     if (this.editingCardId) {
       this.pendingResync = true;
       this.queueResync();
+      return;
+    }
+    const isMembersNote = (this.isMembersFile && this.isMembersFile(file))
+      || (this.hasMembersNoteFrontmatter && this.hasMembersNoteFrontmatter(file));
+    if (isMembersNote) {
+      window.clearTimeout(this.membersSyncTimer);
+      this.membersSyncTimer = window.setTimeout(async () => {
+        if (this.reconciling) return;
+        const changed = await this.syncMembersFromVault();
+        if (changed) await this.saveData(this.data);
+        this.refreshViews();
+      }, 200);
       return;
     }
     // Also re-sync when the board INDEX file changes, so a list add/rename/reorder

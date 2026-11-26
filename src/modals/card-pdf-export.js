@@ -82,16 +82,16 @@ async function exportCardToPdf(modal) {
     const labelsHtml = (modal.localLabels || [])
       .map((label) => `<span class="pill" style="background:${esc(label.color || DEFAULT_LABEL_COLOR)}">${esc(label.name)}</span>`)
       .join("");
-    const collaborationEnabled = modal.plugin.isSyncDeckEnabled();
-    const membersText = collaborationEnabled
-      ? (modal.localAssignees || []).map((a) => a.name || a.email).filter(Boolean).join(", ")
-      : "";
+    const membersText = (modal.localAssignees || [])
+      .map((a) => a.name || a.email)
+      .filter(Boolean)
+      .join(", ");
     const datesText = dateRangeLabel(card.startDate, card.dueDate) || "";
     const checklistHtml = (modal.localChecklists || [])
       .map((group) => {
         const stats = checklistStats(group.items);
         const items = (group.items || [])
-          .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${collaborationEnabled && item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
+          .map((item) => `<div class="chk"><span class="box">${item.done ? "☑" : "☐"}</span><span class="${item.done ? "done" : ""}">${esc(item.text || "")}</span>${item.assignee && (item.assignee.name || item.assignee.email) ? `<span class="who"> — ${esc(item.assignee.name || item.assignee.email)}</span>` : ""}</div>`)
           .join("");
         const color = cleanColor(group.color) || LIST_COLORS[1];
         const description = String(group.description || "").trim();

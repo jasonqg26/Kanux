@@ -3,6 +3,7 @@
 const {
   DEFAULT_APPEARANCE,
   DEFAULT_DATA,
+  DEFAULT_MEMBERS_FILE_PATH,
   LEGACY_CARD_FOLDER,
   cardFileBaseName,
   cleanColor,
@@ -10,11 +11,14 @@ const {
   cleanLabelName,
   clone,
   labelKey,
+  memberKey,
   normalizeChecklists,
   normalizeDependencies,
+  normalizeMember,
   textLine,
   uid,
 } = require("../helpers");
+const { normalizeMembersFilePath, normalizeStoredMembers } = require("./members");
 
 const pluginDataMethods = {
   /**
@@ -33,6 +37,8 @@ const pluginDataMethods = {
     this.data.boards = Array.isArray(this.data.boards) ? this.data.boards : [];
     this.data.cards = this.data.cards || {};
     this.data.labels = this.data.labels || [];
+    this.data.membersFilePath = normalizeMembersFilePath(this.data.membersFilePath || DEFAULT_MEMBERS_FILE_PATH);
+    this.data.members = normalizeStoredMembers(this.data.members);
     this.data.syncDeckEnabled = this.data.syncDeckEnabled !== false;
     this.data.completionSound = this.data.completionSound !== false;
     this.data.labelDisplayMode = needsLabelDisplayMigration
@@ -185,9 +191,15 @@ const pluginDataMethods = {
   normalizeAssignees(assignees) {
     const seen = new Set();
     return (Array.isArray(assignees) ? assignees : [])
-      .filter((a) => a && a.email)
-      .filter((a) => (seen.has(a.email) ? false : seen.add(a.email)))
-      .map((a) => ({ email: String(a.email), name: a.name || a.email, color: a.color || "#8b5cf6" }));
+      .map((a) => normalizeMember(a))
+      .filter(Boolean)
+      .filter((a) => {
+        const key = memberKey(a);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((a) => ({ email: a.email, name: a.name, color: a.color }));
   },
 };
 

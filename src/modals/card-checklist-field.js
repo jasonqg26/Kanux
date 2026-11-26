@@ -731,39 +731,34 @@ function buildChecklistsField(modal) {
           modal.saveNow().catch(console.error);
         });
 
-        let assigneeBtn = null;
-        if (modal.plugin.isSyncDeckEnabled()) {
-          assigneeBtn = createElement("button", "ot-checklist-assignee");
-          assigneeBtn.type = "button";
-          const paintAssignee = () => {
-            assigneeBtn.replaceChildren();
-            const a = item.assignee;
-            if (a && a.email) {
-              assigneeBtn.classList.add("is-assigned");
-              assigneeBtn.title = a.name || a.email;
-              assigneeBtn.append(modal.memberAvatar(a));
-            } else {
-              assigneeBtn.classList.remove("is-assigned");
-              assigneeBtn.title = "Assign member";
-              assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
-            }
-          };
-          paintAssignee();
-          assigneeBtn.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            modal.showChecklistMemberMenu(event, item, paintAssignee);
-          });
-        }
+        const assigneeBtn = createElement("button", "ot-checklist-assignee");
+        assigneeBtn.type = "button";
+        const paintAssignee = () => {
+          assigneeBtn.replaceChildren();
+          const a = item.assignee;
+          if (a && (a.email || a.name)) {
+            const resolved = modal.plugin && typeof modal.plugin.resolveMember === "function"
+              ? (modal.plugin.resolveMember(a) || a)
+              : a;
+            assigneeBtn.classList.add("is-assigned");
+            assigneeBtn.title = resolved.name || resolved.email;
+            assigneeBtn.append(modal.memberAvatar(resolved));
+          } else {
+            assigneeBtn.classList.remove("is-assigned");
+            assigneeBtn.title = "Assign member";
+            assigneeBtn.append(createElement("span", "ot-checklist-assignee-empty"));
+          }
+        };
+        paintAssignee();
+        assigneeBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          modal.showChecklistMemberMenu(event, item, paintAssignee);
+        });
 
         if (createNoteButton) actions.append(createNoteButton);
         actions.append(remove);
-        if (assigneeBtn) {
-          row.append(dragHandle, assigneeBtn, checkbox, input, actions);
-        } else {
-          row.style.setProperty("grid-template-columns", "18px 20px minmax(0, 1fr) auto", "important");
-          row.append(dragHandle, checkbox, input, actions);
-        }
+        row.append(dragHandle, assigneeBtn, checkbox, input, actions);
         itemWrap.append(row);
         if (notePanel) {
           itemWrap.append(notePanel);

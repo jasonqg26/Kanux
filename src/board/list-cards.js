@@ -15,12 +15,20 @@ const {
   firstPlaceholderIndex,
   hasDragType,
   iconButton,
-  initials,
   renderIcon,
   textButton,
   textLine,
 } = require("../helpers");
-const { CardDatesModal, CardModal, CardTemplateLibraryModal, CardTemplateModal, ListColorModal, TextPromptModal, confirmAction } = require("../modals");
+const {
+  CardDatesModal,
+  CardModal,
+  CardTemplateLibraryModal,
+  CardTemplateModal,
+  ListColorModal,
+  TextPromptModal,
+  buildMemberAvatarElement,
+  confirmAction,
+} = require("../modals");
 
 const listCardMethods = {
   /**
@@ -276,8 +284,7 @@ const listCardMethods = {
 
   renderCardAssignees(card) {
     const wrap = createElement("div", "ot-card-assignees");
-    if (!this.plugin.isSyncDeckEnabled()) return wrap;
-    const assignees = (card.assignees || []).filter((a) => a && a.email);
+    const assignees = (card.assignees || []).filter((a) => a && (a.email || a.name));
     const max = 3;
     assignees.slice(0, max).forEach((assignee) => wrap.append(this.buildAvatar(assignee)));
     if (assignees.length > max) {
@@ -288,20 +295,7 @@ const listCardMethods = {
   },
 
   buildAvatar(assignee) {
-    const el = createElement("span", "ot-card-avatar");
-    el.style.setProperty("--ot-avatar-color", assignee.color || "#8b5cf6");
-    el.title = assignee.name || assignee.email;
-    const picture = this.plugin.getMemberPicture(assignee.email);
-    if (picture) {
-      const img = createElement("img", "");
-      img.src = picture;
-      img.alt = "";
-      el.append(img);
-    } else {
-      el.textContent = initials(assignee.name || assignee.email);
-      el.classList.add("is-initials");
-    }
-    return el;
+    return buildMemberAvatarElement(this.plugin, assignee);
   },
 
   buildLockBadge(holder) {

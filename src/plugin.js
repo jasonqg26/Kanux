@@ -13,6 +13,7 @@ const { cardDependencyMethods } = require("./core/card-dependencies");
 const { cardFileMethods } = require("./core/card-files");
 const { cardOpsMethods } = require("./core/card-ops");
 const { cardTemplateMethods } = require("./core/card-templates");
+const { memberMethods } = require("./core/members");
 const { pluginDataMethods } = require("./core/plugin-data");
 const { syncDeckMethods } = require("./core/sync-deck");
 const { vaultDecorationMethods } = require("./core/vault-decorations");
@@ -46,6 +47,7 @@ class KanuxPlugin extends Plugin {
     this.indexSignatures = new Map();
     this.pendingResync = false;
     this.resyncTimer = null;
+    this.membersFileSignature = null;
 
     // Undo stack for board/table edits (Cmd/Ctrl+Z). Each user mutation records an
     // async inverse; undoLast() pops and runs it. applyingUndo suppresses
@@ -189,6 +191,7 @@ Object.assign(
   cardFileMethods,
   cardOpsMethods,
   cardTemplateMethods,
+  memberMethods,
   pluginDataMethods,
   syncDeckMethods,
   vaultDecorationMethods,

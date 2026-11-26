@@ -9,6 +9,12 @@ const { CardModal } = require("./modals/card-modal");
 const { CardPickerModal } = require("./modals/card-picker-modal");
 const { CardTemplateModal } = require("./modals/card-template-modal");
 const { CardTemplateLibraryModal } = require("./modals/card-template-library-modal");
+const {
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+} = require("./modals/member-picker-popover");
 const { detailsMdToHtml, autoformatCommandForPrefix, inlineAutoformatMatch, splitDetailSegments } = require("./modals/details-markdown");
 
 module.exports = {
@@ -23,6 +29,10 @@ module.exports = {
   CardPickerModal,
   CardTemplateModal,
   CardTemplateLibraryModal,
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
   alertAction,
   confirmAction,
   detailsMdToHtml,

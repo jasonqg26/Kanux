@@ -307,6 +307,34 @@ function testApplyAppearanceClassesTogglesLabelModes() {
   assert.strictEqual(root.classList.contains("is-card-hover-labels"), true);
 }
 
+function testMembersAndAssigneeColumnWorkWithoutSyncDeck() {
+  const oldDoc = global.document;
+  global.document = makeMockDocument();
+
+  const view = Object.create(BoardView.prototype);
+  view.plugin = {
+    isSyncDeckEnabled: () => false,
+    resolveMember: (member) => member,
+    getMemberPicture: (member) => (member && member.email === "alice" ? "app://vault/alice.png" : ""),
+  };
+
+  assert.ok(view.tableColumnDefs().some((def) => def.key === "assignee"));
+
+  const wrap = view.renderCardAssignees({
+    assignees: [
+      { email: "alice", name: "Alice", color: "#3b82f6" },
+      { email: "Bob", name: "Bob", color: "#22c55e" },
+    ],
+  });
+  assert.strictEqual(wrap.children.length, 2);
+  assert.strictEqual(String(wrap.children[0].children[0].tagName).toLowerCase(), "img");
+  assert.strictEqual(wrap.children[0].children[0].src, "app://vault/alice.png");
+  assert.strictEqual(wrap.children[1].textContent, "BO");
+
+  global.document = oldDoc;
+}
+
 testCardLabelsPlacementAndOverflow();
 testApplyAppearanceClassesTogglesLabelModes();
+testMembersAndAssigneeColumnWorkWithoutSyncDeck();
 console.log("board view tests passed");

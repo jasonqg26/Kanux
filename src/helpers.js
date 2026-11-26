@@ -42,6 +42,9 @@ const MAX_VISIBLE_LABELS_LIMIT = 12;
 const DEFAULT_LABEL_LOOK = { displayMode: "expanded", placement: "top", maxVisible: 0 };
 const DEFAULT_CHECKLIST_TITLE = "Checklist";
 const DEFAULT_CHECKLIST_COLOR = LIST_COLORS[1];
+const DEFAULT_MEMBER_COLOR = "#8b5cf6";
+const DEFAULT_MEMBERS_FILE_PATH = "Kanux Members.md";
+const MEMBERS_NOTE_MARKER = "kanux-members: true";
 const DEFAULT_APPEARANCE = {
   preset: "obsidian",
   colorScheme: "theme",
@@ -100,6 +103,8 @@ const DEFAULT_DATA = {
   appearance: DEFAULT_APPEARANCE,
   appearancePresets: [],
   layoutMigrated: false,
+  membersFilePath: DEFAULT_MEMBERS_FILE_PATH,
+  members: [],
   boards: [],
   cards: {},
   labels: [],
@@ -519,12 +524,10 @@ function extractChecklistAssignee(line) {
   if (!metadata) return { content: line, assignee: null };
 
   const [email = "", name = "", color = ""] = String(metadata[1] || "").split("|");
-  const cleanEmail = email.trim();
+  const normalized = normalizeMember({ email, name, color });
   return {
     content: line.slice(0, metadata.index).trim(),
-    assignee: cleanEmail
-      ? { email: cleanEmail, name: name.trim(), color: color.trim() }
-      : null,
+    assignee: normalized ? { email: normalized.email, name: normalized.name, color: normalized.color } : null,
   };
 }
 
@@ -664,11 +667,12 @@ function cleanKanuxId(value) {
 }
 
 function normalizeChecklistAssignee(assignee) {
-  if (!assignee || !assignee.email) return null;
+  const normalized = normalizeMember(assignee);
+  if (!normalized) return null;
   return {
-    email: textLine(assignee.email),
-    name: textLine(assignee.name),
-    color: textLine(assignee.color),
+    email: normalized.email,
+    name: normalized.name,
+    color: normalized.color,
   };
 }
 
@@ -1160,27 +1164,212 @@ function labelsToFrontmatter(labels) {
 }
 
 /**
- * Card assignees serialize to "email|Name|#color, email2|Name2|#color2". Only the
- * email is a stable key; name/color are cached so avatars render even without a
- * live SyncDeck member list. The avatar picture is resolved live from SyncDeck.
+ * Strips reserved wire delimiters (|, comma, >) from a member id or name.
+ */
+function cleanMemberId(value) {
+  return textLine(value).replace(/[|,>]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Comparable lowercase key for a member object or id/name string.
+ */
+function memberKey(value) {
+  const raw = typeof value === "string"
+    ? value
+    : (value && (value.email || value.name));
+  return cleanMemberId(raw).toLowerCase();
+}
+
+/**
+ * Deterministic palette color derived from a member key so local members
+ * created on different devices receive the same default color.
+ */
+function pickMemberColor(seed) {
+  const key = memberKey(seed);
+  if (!key || !LIST_COLORS.length) return DEFAULT_MEMBER_COLOR;
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = ((hash * 31) + key.charCodeAt(i)) >>> 0;
+  }
+  return LIST_COLORS[hash % LIST_COLORS.length] || DEFAULT_MEMBER_COLOR;
+}
+
+/**
+ * Normalizes a member record (local name-only or Sync Deck email-backed).
+ */
+function normalizeMember(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const email = cleanMemberId(raw.email || raw.name);
+  const name = cleanMemberId(raw.name || raw.email);
+  if (!email && !name) return null;
+  const id = email || name;
+  return {
+    email: id,
+    name: name || id,
+    color: cleanColor(raw.color) || pickMemberColor(id),
+    picture: textLine(raw.picture),
+  };
+}
+
+function cleanMemberAvatarCell(raw) {
+  const value = textLine(raw);
+  if (!value) return "";
+  if (/^(https?:|data:)/i.test(value)) return value;
+  const wiki = value.match(/^!?\[\[([^\]]+)\]\]$/);
+  if (wiki) return imageTarget(wiki[1]);
+  const md = value.match(/^!?\[[^\]]*\]\(([^)]+)\)$/);
+  if (md) return imageTarget(md[1]);
+  return value;
+}
+
+function escapeMarkdownTableCell(value) {
+  return textLine(value).replace(/\|/g, "\\|");
+}
+
+function splitMarkdownTableRow(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed.startsWith("|")) return null;
+  const body = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  const cells = [];
+  let current = "";
+  let inWiki = false;
+  for (let i = 0; i < body.length; i += 1) {
+    if (body[i] === "\\" && body[i + 1] === "|") {
+      current += "|";
+      i += 1;
+    } else if (body[i] === "[" && body[i + 1] === "[") {
+      inWiki = true;
+      current += "[[";
+      i += 1;
+    } else if (inWiki && body[i] === "]" && body[i + 1] === "]") {
+      inWiki = false;
+      current += "]]";
+      i += 1;
+    } else if (!inWiki && body[i] === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += body[i];
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+/**
+ * Parses a vault Kanux Members Markdown note (table or bullet list) into
+ * deduplicated, normalized member records.
+ */
+function parseMembersNote(markdown) {
+  const seen = new Set();
+  const members = [];
+  const pushMember = (raw) => {
+    const member = normalizeMember(raw);
+    if (!member) return;
+    const key = memberKey(member);
+    if (seen.has(key)) return;
+    seen.add(key);
+    members.push(member);
+  };
+
+  for (const line of String(markdown || "").split(/\r?\n/)) {
+    const cells = splitMarkdownTableRow(line);
+    if (cells) {
+      const isSeparator = cells.every((cell) => /^:?-{2,}:?$/.test(cell) || cell === "");
+      const isHeader = cells[0] && cells[0].toLowerCase() === "name"
+        && (!cells[1] || cells[1].toLowerCase() === "id" || cells[1].toLowerCase() === "email");
+      if (!isSeparator && !isHeader) {
+        pushMember({
+          name: cells[0] || "",
+          email: cells[1] || cells[0] || "",
+          color: cells[2] || "",
+          picture: cleanMemberAvatarCell(cells[3] || ""),
+        });
+      }
+      continue;
+    }
+    const bullet = line.match(/^\s*-\s+(.+)$/);
+    if (bullet && !bullet[1].startsWith("[")) {
+      const [name = "", email = "", color = "", picture = ""] = bullet[1].split("|");
+      pushMember({ name, email: email || name, color, picture: cleanMemberAvatarCell(picture) });
+    }
+  }
+  return members;
+}
+
+/**
+ * Serializes vault members into a deterministic, merge-friendly Markdown note.
+ */
+function serializeMembersNote(members) {
+  const seen = new Set();
+  const clean = [];
+  (Array.isArray(members) ? members : []).forEach((item) => {
+    const member = normalizeMember(item);
+    if (!member) return;
+    const key = memberKey(member);
+    if (seen.has(key)) return;
+    seen.add(key);
+    clean.push(member);
+  });
+  clean.sort((a, b) => memberKey(a).localeCompare(memberKey(b)));
+
+  const lines = [
+    "---",
+    MEMBERS_NOTE_MARKER,
+    "---",
+    "",
+    "# Kanux Members",
+    "",
+    "Managed by Kanux. Edit in Settings > Kanux > Members or directly in this table.",
+    "",
+    "| Name | ID | Color | Avatar |",
+    "| --- | --- | --- | --- |",
+  ];
+  clean.forEach((member) => {
+    lines.push(
+      `| ${escapeMarkdownTableCell(member.name)} | ${escapeMarkdownTableCell(member.email)} | ${escapeMarkdownTableCell(member.color)} | ${escapeMarkdownTableCell(member.picture)} |`
+    );
+  });
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Card assignees serialize to "id|Name|#color, id2|Name2|#color2". Both Sync Deck
+ * emails and local member names/ids work identically; name/color are cached so
+ * avatars render across devices even before loading the members note.
  */
 function parseAssignees(raw) {
+  const seen = new Set();
   return String(raw || "")
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean)
     .map((part) => {
-      const [email, name, color] = part.split("|").map((item) => (item || "").trim());
-      if (!email) return null;
-      return { email, name: name || email, color: color || "#8b5cf6" };
+      const [email = "", name = "", color = ""] = part.split("|").map((item) => (item || "").trim());
+      const member = normalizeMember({ email, name, color });
+      return member ? { email: member.email, name: member.name, color: member.color } : null;
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((member) => {
+      const key = memberKey(member);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function assigneesToFrontmatter(assignees) {
+  const seen = new Set();
   return (assignees || [])
-    .filter((a) => a && a.email)
-    .map((a) => `${textLine(a.email)}|${textLine(a.name || a.email).replace(/[|,]/g, " ")}|${textLine(a.color || "#8b5cf6")}`)
+    .map((a) => normalizeMember(a))
+    .filter(Boolean)
+    .filter((member) => {
+      const key = memberKey(member);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((a) => `${a.email}|${a.name}|${a.color}`)
     .join(", ");
 }
 
@@ -1316,6 +1505,9 @@ module.exports = {
   DEFAULT_LABEL_COLOR,
   LABEL_COLORS,
   LIST_COLORS,
+  DEFAULT_MEMBER_COLOR,
+  DEFAULT_MEMBERS_FILE_PATH,
+  MEMBERS_NOTE_MARKER,
   DEFAULT_APPEARANCE,
   DEFAULT_DATA,
   DEPENDENCY_BLOCK_MODES,
@@ -1398,6 +1590,12 @@ module.exports = {
   serializeDependencies,
   parseLabels,
   labelsToFrontmatter,
+  cleanMemberId,
+  memberKey,
+  pickMemberColor,
+  normalizeMember,
+  parseMembersNote,
+  serializeMembersNote,
   parseAssignees,
   assigneesToFrontmatter,
   initials,

@@ -36,6 +36,14 @@ const {
   MAX_VISIBLE_LABELS_LIMIT,
   normalizeLabelLook,
   partitionCardLabels,
+  assigneesToFrontmatter,
+  cleanMemberId,
+  memberKey,
+  normalizeMember,
+  parseAssignees,
+  parseMembersNote,
+  pickMemberColor,
+  serializeMembersNote,
   iconButton,
   moveArrayEntry,
   normalizeChecklists,
@@ -625,6 +633,72 @@ function testPartitionCardLabels() {
   assert.deepStrictEqual(partitionCardLabels([], 2), { visible: [], hidden: [] });
 }
 
+function testMemberNormalizationAndLocalAssigneesRoundTrip() {
+  assert.strictEqual(cleanMemberId(" Alice | Team, > "), "Alice Team");
+  assert.strictEqual(memberKey(" Alice "), "alice");
+  assert.strictEqual(memberKey({ email: "Bob@Team.COM", name: "Bob" }), "bob@team.com");
+  assert.strictEqual(pickMemberColor("Alice"), pickMemberColor("alice"));
+
+  const localOnly = normalizeMember({ name: "Alice" });
+  assert.deepStrictEqual(localOnly, {
+    email: "Alice",
+    name: "Alice",
+    color: pickMemberColor("Alice"),
+    picture: "",
+  });
+
+  const wire = assigneesToFrontmatter([
+    { name: "Alice", color: "#3b82f6" },
+    { email: "alice", name: "Duplicate Alice" },
+    { email: "bob@team.com", name: "Bob", color: "#22c55e" },
+  ]);
+  assert.strictEqual(wire, "Alice|Alice|#3b82f6, bob@team.com|Bob|#22c55e");
+
+  assert.deepStrictEqual(parseAssignees(wire), [
+    { email: "Alice", name: "Alice", color: "#3b82f6" },
+    { email: "bob@team.com", name: "Bob", color: "#22c55e" },
+  ]);
+
+  const checklistMd = checklistsToMarkdown([
+    {
+      title: "Tasks",
+      items: [{ text: "Write docs", done: false, assignee: { name: "Alice", color: "#3b82f6" } }],
+    },
+  ]);
+  assert.ok(checklistMd.includes("<!--@Alice|Alice|#3b82f6-->"));
+  const parsedChecklist = parseChecklists(checklistMd);
+  assert.deepStrictEqual(parsedChecklist[0].items[0].assignee, {
+    email: "Alice",
+    name: "Alice",
+    color: "#3b82f6",
+  });
+}
+
+function testMembersNoteRoundTrip() {
+  const note = serializeMembersNote([
+    { name: "Zoe", email: "zoe@team.com", color: "#22c55e", picture: "attachments/zoe.png" },
+    { name: "Alice", color: "#3b82f6", picture: "" },
+    { name: "alice", email: "alice", color: "#ef4444" },
+  ]);
+  assert.ok(note.includes("kanux-members: true"));
+  assert.ok(note.indexOf("| Alice |") < note.indexOf("| Zoe |"));
+
+  const parsed = parseMembersNote(note);
+  assert.deepStrictEqual(parsed, [
+    { email: "Alice", name: "Alice", color: "#3b82f6", picture: "" },
+    { email: "zoe@team.com", name: "Zoe", color: "#22c55e", picture: "attachments/zoe.png" },
+  ]);
+
+  const handEdited = [
+    "| Name | ID | Color | Avatar |",
+    "| --- | --- | --- | --- |",
+    "| Carlos | | #f59e0b | ![[Avatars/carlos.jpg|128]] |",
+  ].join("\n");
+  assert.deepStrictEqual(parseMembersNote(handEdited), [
+    { email: "Carlos", name: "Carlos", color: "#f59e0b", picture: "Avatars/carlos.jpg" },
+  ]);
+}
+
 testLegacyChecklistMigration();
 testRegisteredIconAndGenericFallback();
 testChecklistItemNoteBody();
@@ -652,4 +726,6 @@ testMoveArrayEntryPointsAtTheSlotTheDragSaw();
 testCardCodeSurvivesTheFrontmatterRoundTrip();
 testLabelLookNormalization();
 testPartitionCardLabels();
+testMemberNormalizationAndLocalAssigneesRoundTrip();
+testMembersNoteRoundTrip();
 console.log("helpers tests passed");

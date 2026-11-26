@@ -15,13 +15,19 @@ const {
   createElement,
   formatCardCode,
   iconButton,
-  initials,
+  memberKey,
   textButton,
   textLine,
 } = require("../helpers");
 const { BoardAppearanceModal } = require("./board-appearance-modal");
 const { LabelPickerModal } = require("./label-picker-modal");
 const { ListColorModal } = require("./list-color-modal");
+const {
+  buildMemberAvatarElement,
+  closeMemberPickerPopover,
+  openKanuxMembersSettings,
+  openMemberPickerPopover,
+} = require("./member-picker-popover");
 const { confirmAction } = require("./prompt-modals");
 
 const BLANK_HINT = "Write [ ] wherever the card should be filled in — “As a [ ] I want [ ] so that [ ]”. The editor opens on the first one.";
@@ -59,9 +65,7 @@ class CardTemplateModal extends Modal {
     main.append(this.buildDetailsField(), this.buildChecklistsField());
 
     const sidebar = createElement("aside", "ot-card-modal-sidebar");
-    sidebar.append(this.buildLabelsField());
-    if (this.plugin.isSyncDeckEnabled()) sidebar.append(this.buildMembersField());
-    sidebar.append(this.buildNumberingField());
+    sidebar.append(this.buildLabelsField(), this.buildMembersField(), this.buildNumberingField());
 
     const body = createElement("div", "ot-card-modal-body");
     body.append(main, sidebar);
@@ -82,6 +86,7 @@ class CardTemplateModal extends Modal {
   }
 
   onClose() {
+    closeMemberPickerPopover();
     this.contentEl.replaceChildren();
   }
 
@@ -351,40 +356,37 @@ class CardTemplateModal extends Modal {
   }
 
   memberAvatar(member) {
-    const avatar = createElement("span", "ot-card-avatar");
-    avatar.style.setProperty("--ot-avatar-color", member.color || "#8b5cf6");
-    const picture = this.plugin.getMemberPicture(member.email);
-    if (picture) {
-      const image = createElement("img", "");
-      image.src = picture;
-      image.alt = "";
-      avatar.append(image);
-      return avatar;
-    }
-    avatar.textContent = initials(member.name || member.email);
-    avatar.classList.add("is-initials");
-    return avatar;
+    return buildMemberAvatarElement(this.plugin, member);
   }
 
   showMemberMenu(event, paint) {
-    const members = this.plugin.getVaultMembers();
-    const menu = new Menu();
-    if (!members.length) {
-      menu.addItem((item) => item.setTitle("No members — sign in to Sync Deck").setDisabled(true));
-    }
-    members.forEach((member) => {
-      const chosen = this.template.assignees.some((assignee) => assignee.email === member.email);
-      menu.addItem((item) => item
-        .setTitle(member.name || member.email)
-        .setChecked(chosen)
-        .onClick(() => {
-          this.template.assignees = chosen
-            ? this.template.assignees.filter((assignee) => assignee.email !== member.email)
-            : [...this.template.assignees, { email: member.email, name: member.name, color: member.color }];
+    openMemberPickerPopover({
+      anchor: event.currentTarget,
+      plugin: this.plugin,
+      getSelected: () => this.template.assignees || [],
+      multiSelect: true,
+      onToggle: (member) => {
+        const key = memberKey(member);
+        const chosen = this.template.assignees.some((assignee) => memberKey(assignee) === key);
+        this.template.assignees = chosen
+          ? this.template.assignees.filter((assignee) => memberKey(assignee) !== key)
+          : [...this.template.assignees, { email: member.email, name: member.name, color: member.color }];
+        paint();
+      },
+      onCreateMember: async (name) => {
+        const created = await this.plugin.ensureLocalMember({ name });
+        if (!created) return;
+        const key = memberKey(created);
+        if (!this.template.assignees.some((assignee) => memberKey(assignee) === key)) {
+          this.template.assignees = [...this.template.assignees, { email: created.email, name: created.name, color: created.color }];
           paint();
-        }));
+        }
+      },
+      onManageMembers: () => {
+        this.close();
+        openKanuxMembersSettings(this.app, this.plugin);
+      },
     });
-    menu.showAtMouseEvent(event);
   }
 
   buildDetailsField() {
